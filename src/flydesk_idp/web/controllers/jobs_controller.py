@@ -6,7 +6,10 @@ from __future__ import annotations
 import logging
 
 from pyfly.container import rest_controller
-from pyfly.cqrs import CommandBus, QueryBus
+# Depend on the concrete bus classes -- pyfly's container resolves by
+# exact type and the CQRS auto-config registers DefaultCommandBus /
+# DefaultQueryBus (the Protocols are not registered as bean types).
+from pyfly.cqrs import DefaultCommandBus, DefaultQueryBus
 from pyfly.kernel import ResourceNotFoundException
 from pyfly.web import (
     Body,
@@ -40,7 +43,15 @@ logger = logging.getLogger(__name__)
 @rest_controller
 @request_mapping("/api/v1/jobs")
 class JobsController:
-    def __init__(self, commands: CommandBus, queries: QueryBus) -> None:
+    """REST adapter for the asynchronous, queue-backed extraction API.
+
+    The four endpoints cover the full job lifecycle: submit (returns
+    a job id and 202), poll status, fetch the final result, cancel.
+    Submit honours an ``Idempotency-Key`` header so a retried submission
+    returns the original response instead of a duplicate job.
+    """
+
+    def __init__(self, commands: DefaultCommandBus, queries: DefaultQueryBus) -> None:
         self._commands = commands
         self._queries = queries
 
@@ -50,12 +61,31 @@ class JobsController:
         request: Valid[Body[SubmitJobRequest]],
         idempotency_key: Header[str] = "",
     ) -> SubmitJobResponse:
+        """Submit a queued extraction job.
+
+        The request body is the same as ``POST /api/v1/extract`` plus
+        the optional ``callback_url`` and ``metadata`` fields. The
+        endpoint persists the job, publishes it to the queue, and
+        returns ``202 Accepted`` with the new ``job_id`` and the
+        initial ``QUEUED`` status. The worker drives the same pipeline
+        as the sync endpoint behind the scenes.
+
+        Send the same ``Idempotency-Key`` header to replay an existing
+        submission instead of creating a duplicate job.
+        """
         return await self._commands.send(
             SubmitJobCommand(request=request, idempotency_key=idempotency_key or None)
         )
 
     @get_mapping("/{job_id}")
     async def get_status(self, job_id: PathVar[str]) -> JobStatusResponse:
+        """Read the current status of a job.
+
+        Returns the job's lifecycle metadata (``QUEUED`` / ``RUNNING``
+        / ``SUCCEEDED`` / ``FAILED`` / ``CANCELLED``), the attempt
+        counter, and the timestamps for submission / start / finish.
+        Returns ``404`` for an unknown ``job_id``.
+        """
         status = await self._queries.query(GetJobQuery(job_id=job_id))
         if status is None:
             raise ResourceNotFoundException(
@@ -65,6 +95,12 @@ class JobsController:
 
     @get_mapping("/{job_id}/result")
     async def get_result(self, job_id: PathVar[str]) -> JobResult:
+        """Fetch the final ``ExtractionResult`` of a finished job.
+
+        Valid only once the job is ``SUCCEEDED`` -- while it's still
+        running or queued the endpoint returns ``409 job_not_ready``.
+        Unknown ``job_id`` returns ``404``.
+        """
         try:
             result = await self._queries.query(GetJobResultQuery(job_id=job_id))
         except JobNotReady as exc:
@@ -77,6 +113,13 @@ class JobsController:
 
     @delete_mapping("/{job_id}")
     async def cancel(self, job_id: PathVar[str]) -> JobStatusResponse:
+        """Cancel a job that hasn't started yet.
+
+        Only valid while ``status == QUEUED``. After the worker has
+        started on a job there is no mid-flight cancellation hook --
+        the endpoint returns ``409 job_not_cancellable``. Unknown
+        ``job_id`` returns ``404``.
+        """
         try:
             cancelled = await self._commands.send(CancelJobCommand(job_id=job_id))
         except JobNotCancellable as exc:
