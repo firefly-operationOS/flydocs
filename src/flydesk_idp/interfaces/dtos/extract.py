@@ -90,6 +90,17 @@ class StageToggles(BaseModel):
     content_authenticity: bool = False
     judge: bool = False
     rule_engine: bool = False
+    judge_escalation: bool = Field(
+        default=False,
+        description=(
+            "When the judge marks too many fields as FAIL / flag_for_review, "
+            "re-run extract + judge with the escalation_model and keep the "
+            "result that has the lower failure rate. Requires ``judge`` to "
+            "be enabled. Threshold + model come from ``options`` or env "
+            "defaults (``FLYDESK_IDP_ESCALATION_THRESHOLD`` / "
+            "``FLYDESK_IDP_ESCALATION_MODEL``)."
+        ),
+    )
 
 
 class ExtractionOptions(BaseModel):
@@ -100,6 +111,24 @@ class ExtractionOptions(BaseModel):
     model: str | None = None
     declared_media_type: str | None = None
     stages: StageToggles = Field(default_factory=StageToggles)
+    escalation_threshold: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Failure-rate threshold (0.0–1.0) above which the judge "
+            "escalation re-run fires. Overrides "
+            "``FLYDESK_IDP_ESCALATION_THRESHOLD`` for this request."
+        ),
+    )
+    escalation_model: str | None = Field(
+        default=None,
+        description=(
+            "Model id used for the escalation re-run "
+            "(e.g. ``anthropic:claude-opus-4-7``). Overrides "
+            "``FLYDESK_IDP_ESCALATION_MODEL`` for this request."
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -152,6 +181,27 @@ class ExtractedDocument(BaseModel):
     notes: str | None = None
 
 
+class EscalationInfo(BaseModel):
+    """Audit block for the judge-driven escalation re-run.
+
+    Populated only when ``stages.judge_escalation`` is enabled and the
+    judge's first pass exceeded the configured failure threshold.
+    """
+
+    triggered: bool = False
+    primary_model: str | None = None
+    escalation_model: str | None = None
+    primary_fail_rate: float = Field(default=0.0, ge=0.0, le=1.0)
+    escalation_fail_rate: float = Field(default=0.0, ge=0.0, le=1.0)
+    accepted: bool = Field(
+        default=False,
+        description=(
+            "True when the escalation re-run produced fewer judge "
+            "failures than the primary and was kept as the response."
+        ),
+    )
+
+
 class ExtractionResult(BaseModel):
     """Top-level response."""
 
@@ -170,4 +220,11 @@ class ExtractionResult(BaseModel):
     pipeline_errors: list[dict[str, Any]] = Field(
         default_factory=list,
         description="Non-fatal per-node failures: ``[{code, message, node}]``.",
+    )
+    escalation: EscalationInfo | None = Field(
+        default=None,
+        description=(
+            "Audit block populated when judge_escalation runs. ``null`` "
+            "when escalation is disabled or didn't fire."
+        ),
     )

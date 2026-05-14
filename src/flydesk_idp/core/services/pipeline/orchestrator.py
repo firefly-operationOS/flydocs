@@ -31,6 +31,7 @@ from flydesk_idp.core.services.authenticity import (
     ContentAuthenticityChecker,
     VisualAuthenticityChecker,
 )
+from flydesk_idp.core.services.escalation import JudgeEscalator
 from flydesk_idp.core.services.extraction.extractor import MultimodalExtractor
 from flydesk_idp.core.services.extraction.loader import load_document
 from flydesk_idp.core.services.extraction.pdf_slicer import PageRange, slice_pdf
@@ -46,6 +47,7 @@ from flydesk_idp.interfaces.dtos.authenticity import (
 from flydesk_idp.interfaces.dtos.doc import DocSpec
 from flydesk_idp.interfaces.dtos.extract import (
     DocumentInfo,
+    EscalationInfo,
     ExtractedDocument,
     ExtractionRequest,
     ExtractionResult,
@@ -124,6 +126,7 @@ class PipelineOrchestrator:
         content_checker: ContentAuthenticityChecker,
         judge: Judge,
         rule_engine: RuleEngine,
+        judge_escalator: JudgeEscalator,
         default_model: str,
     ) -> None:
         self._extractor = extractor
@@ -133,6 +136,7 @@ class PipelineOrchestrator:
         self._content_checker = content_checker
         self._judge = judge
         self._rule_engine = rule_engine
+        self._judge_escalator = judge_escalator
         self._default_model = default_model
 
     async def execute(self, request: ExtractionRequest) -> ExtractionResult:
@@ -182,6 +186,16 @@ class PipelineOrchestrator:
         if stages.judge:
             builder.add_node("judge", CallableStep(self._step_judge), timeout_seconds=180)
             chain.append("judge")
+
+        # judge_escalation requires judge to have produced the verdicts
+        # we want to re-evaluate. Skip silently if judge is off.
+        if stages.judge and stages.judge_escalation:
+            builder.add_node(
+                "judge_escalation",
+                CallableStep(self._step_judge_escalation),
+                timeout_seconds=300,
+            )
+            chain.append("judge_escalation")
 
         if stages.rule_engine and request.rules:
             builder.add_node("rules", CallableStep(self._step_rules), timeout_seconds=180)
@@ -417,6 +431,20 @@ class PipelineOrchestrator:
         await asyncio.gather(*(_judge_one(dt) for dt in per_doc_inputs))
         return {"judged": True}
 
+    async def _step_judge_escalation(
+        self, ctx: PipelineContext, _inputs: dict[str, Any]
+    ) -> Any:
+        request: ExtractionRequest = ctx.metadata["request"]
+        try:
+            info = await self._judge_escalator.maybe_escalate(ctx, request)
+            if info is not None:
+                ctx.metadata["escalation"] = info
+                return {"escalation_triggered": True, "accepted": info.accepted}
+            return {"escalation_triggered": False}
+        except Exception as exc:  # noqa: BLE001
+            self._record_error(ctx, "judge_escalation", "ESCALATION_ERROR", exc)
+            return {"failed": True}
+
     async def _step_rules(self, ctx: PipelineContext, _inputs: dict[str, Any]) -> Any:
         request: ExtractionRequest = ctx.metadata["request"]
         per_doc_extracted = ctx.metadata["per_doc_extracted"]
@@ -514,6 +542,7 @@ class PipelineOrchestrator:
             for s in ctx.metadata.get("additional_splits", [])
         ]
 
+        escalation: EscalationInfo | None = ctx.metadata.get("escalation")
         return ExtractionResult(
             request_id=request.request_id,
             document=DocumentInfo(
@@ -528,6 +557,7 @@ class PipelineOrchestrator:
             model=model_id,
             latency_ms=latency_ms,
             pipeline_errors=ctx.metadata.get("pipeline_errors", []),
+            escalation=escalation,
         )
 
 

@@ -30,6 +30,7 @@ from flydesk_idp.core.services.authenticity import (
     ContentAuthenticityChecker,
     VisualAuthenticityChecker,
 )
+from flydesk_idp.core.services.escalation import JudgeEscalator
 from flydesk_idp.core.services.extraction.extractor import MultimodalExtractor
 from flydesk_idp.core.services.extraction.prompts import PromptCatalog
 from flydesk_idp.core.services.judge import Judge
@@ -133,6 +134,21 @@ class IDPCoreConfiguration:
     def rule_engine(self, settings: IDPSettings, prompts: PromptCatalog) -> RuleEngine:
         return RuleEngine(template=prompts.rule_engine, model=settings.model)
 
+    @bean
+    def judge_escalator(
+        self,
+        extractor: MultimodalExtractor,
+        judge: Judge,
+        settings: IDPSettings,
+    ) -> JudgeEscalator:
+        """Stronger-model re-run when the judge's failure rate exceeds threshold."""
+        return JudgeEscalator(
+            extractor=extractor,
+            judge=judge,
+            default_threshold=settings.escalation_threshold,
+            default_model=settings.escalation_model,
+        )
+
     # ------------------------------------------------------------------
     # Orchestrator + async worker
     # ------------------------------------------------------------------
@@ -147,6 +163,7 @@ class IDPCoreConfiguration:
         content_checker: ContentAuthenticityChecker,
         judge: Judge,
         rule_engine: RuleEngine,
+        judge_escalator: JudgeEscalator,
         settings: IDPSettings,
     ) -> PipelineOrchestrator:
         return PipelineOrchestrator(
@@ -157,6 +174,7 @@ class IDPCoreConfiguration:
             content_checker=content_checker,
             judge=judge,
             rule_engine=rule_engine,
+            judge_escalator=judge_escalator,
             default_model=settings.model,
         )
 
