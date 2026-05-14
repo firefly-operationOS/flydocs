@@ -136,6 +136,52 @@ class IDPSettings(BaseSettings):
         description=("Per-call subprocess timeout when ``office_converter == 'libreoffice'``."),
     )
 
+    # -- Bbox refinement ------------------------------------------------
+    # The bbox refiner (``core/services/bbox/bbox_refiner.py``) replaces
+    # LLM-estimated coordinates with grounded ones by fuzzy-matching
+    # each extracted value against the document's real text layer. PDFs
+    # with embedded text use PyMuPDF (sub-pixel accurate); image-PDFs
+    # and raster inputs use the configured OCR engine.
+    bbox_refine_threshold: float = Field(
+        default=0.85,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Minimum fuzz score (0.0-1.0) the value matcher requires to "
+            "treat a candidate word-span as a hit. Below this the LLM "
+            "bbox is kept tagged ``source=llm, refinement_confidence=null``."
+        ),
+    )
+    bbox_refine_min_text_words: int = Field(
+        default=5,
+        ge=0,
+        description=(
+            "Per-page threshold below which the page is treated as image-only "
+            "and routed to the OCR engine instead of the PDF text layer. "
+            "Pages with < N words from PyMuPDF fall back to OCR; everything "
+            "else uses the text layer."
+        ),
+    )
+    bbox_refine_ocr_engine: str = Field(
+        default="none",
+        description=(
+            "OCR engine used for image-PDFs and raster inputs. ``none`` "
+            "(default) skips OCR -- LLM bboxes are kept for image pages. "
+            "``paddle`` / ``mistral`` adapters land in a follow-up; selecting "
+            "them here when the adapter ships will route image pages through "
+            "the engine."
+        ),
+    )
+    bbox_refine_max_text_pages: int = Field(
+        default=200,
+        ge=1,
+        description=(
+            "Hard cap on pages the text-layer extractor will scan per request. "
+            "Protects against exotic 10k-page PDFs that would otherwise hold "
+            "the request for minutes."
+        ),
+    )
+
     # -- Security -------------------------------------------------------
     api_keys: str | None = Field(
         default=None,

@@ -6,24 +6,25 @@ rendered page; ``(1, 1)`` is the bottom-right. The contract is enforced
 both by the prompt sent to the LLM and by post-processing in
 :mod:`flydesk_idp.core.services.extraction.postprocess`.
 
-.. warning::
+The :class:`BboxSource` discriminator tells callers how each coordinate
+set was produced:
 
-   **LLM-estimated bboxes are NOT precise.** Today the coordinates come
-   straight from the multimodal model's visual estimate, with no
-   grounding against the document's real text layer. Empirically the
-   boxes land in the right region of the page but are routinely off by
-   one or more lines and frequently miss the actual value entirely. The
-   geometric :class:`BboxValidator` only verifies that the shape is
-   plausible (area, aspect ratio, edge sanity) -- it cannot detect
-   whether the box actually fences any real text.
+* ``llm``       -- the multimodal model's visual estimate (default for
+                   every extraction). Imprecise: the box lands in the
+                   right region of the page but is routinely off by a
+                   line or more.
+* ``pdf_text``  -- grounded against the PDF's text layer via PyMuPDF.
+                   Sub-pixel accurate.
+* ``ocr``       -- grounded against an OCR word stream (PaddleOCR /
+                   Mistral OCR / etc.) for image-PDFs and raster
+                   inputs. Accuracy depends on the engine.
+* ``none``      -- no bbox was produced (placeholder field).
 
-   **Near-future improvement** (tracked, not yet implemented): anchor
-   every bbox to the document text by extracting word-level coordinates
-   with ``pdfplumber`` for born-digital PDFs and Tesseract OCR for
-   scanned PDFs / images, then replacing the LLM box with the union of
-   the matching word boxes. Callers will be able to distinguish the
-   two via a ``source: "llm" | "ocr"`` discriminator. Until that ships,
-   treat bboxes as a "where to look" hint, not a precise locator.
+The refinement runs as the optional ``bbox_refine`` pipeline stage --
+opt-in via ``ExtractionOptions.stages.bbox_refine`` -- and replaces the
+LLM coordinates with the tight word-union when a fuzzy match is found
+above the configured threshold; otherwise the LLM bbox is kept,
+tagged ``source=llm, refinement_confidence=null``.
 """
 
 from __future__ import annotations
@@ -46,6 +47,20 @@ class BboxQuality(StrEnum):
     SUSPICIOUS = "suspicious"
     INVALID = "invalid"
     EMPTY = "empty"
+
+
+class BboxSource(StrEnum):
+    """How the coordinates on this bbox were produced.
+
+    See the module docstring for the full lifecycle. The discriminator
+    lets strict callers filter to grounded-only boxes (``pdf_text`` /
+    ``ocr``) and treat ``llm`` boxes as approximate region hints.
+    """
+
+    LLM = "llm"
+    PDF_TEXT = "pdf_text"
+    OCR = "ocr"
+    NONE = "none"
 
 
 class BoundingBox(BaseModel):
@@ -77,6 +92,29 @@ class BoundingBox(BaseModel):
             "plausible. See the module docstring on LLM bbox imprecision."
         ),
     )
+    source: BboxSource | None = Field(
+        default=None,
+        description=(
+            "Origin of the coordinates: ``llm`` (multimodal model "
+            "estimate, imprecise), ``pdf_text`` (grounded via PyMuPDF "
+            "against the PDF text layer, sub-pixel accurate), ``ocr`` "
+            "(grounded via an OCR engine for image-PDFs and rasters), "
+            "or ``none`` (no bbox produced). ``null`` means the bbox "
+            "refiner has not run for this field yet."
+        ),
+    )
+    refinement_confidence: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Fuzzy-match score from the bbox refiner in ``[0, 1]``. "
+            "Populated when ``source in {pdf_text, ocr}`` and the "
+            "matcher located the value above its threshold. ``null`` "
+            "for ``source in {llm, none}`` (the LLM doesn't expose "
+            "a comparable score)."
+        ),
+    )
 
     @model_validator(mode="after")
     def _validate_corners(self) -> BoundingBox:
@@ -95,4 +133,12 @@ class BoundingBox(BaseModel):
         was located in the document.
         """
         # Use 0..eps so the post-validator does not reject it.
-        return cls(xmin=0.0, ymin=0.0, xmax=1e-9, ymax=1e-9, quality=BboxQuality.EMPTY, quality_score=0.0)
+        return cls(
+            xmin=0.0,
+            ymin=0.0,
+            xmax=1e-9,
+            ymax=1e-9,
+            quality=BboxQuality.EMPTY,
+            quality_score=0.0,
+            source=BboxSource.NONE,
+        )
