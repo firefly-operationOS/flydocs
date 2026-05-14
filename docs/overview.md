@@ -23,6 +23,10 @@ normally have to glue together themselves:
    fan out into multiple per-attachment requests.
 2. **Extract** the fields you asked for — each one with a value, a
    page number, a normalised bounding box, and a confidence score.
+   The bbox can optionally be **grounded** against the document's real
+   text layer (PyMuPDF for born-digital PDFs, OCR for image-only pages)
+   by enabling ``stages.bbox_refine`` — sub-pixel accurate, multilingual,
+   keeps the LLM bbox tagged ``source=llm`` when no fuzzy match lands.
 3. **Validate** every field with deterministic checkers (IBAN
    checksum, NIF/NIE, Luhn, phone E.164, country-aware postal codes,
    and a few dozen others).

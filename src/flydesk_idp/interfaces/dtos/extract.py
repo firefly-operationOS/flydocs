@@ -123,6 +123,20 @@ class StageToggles(BaseModel):
             "``FLYDESK_IDP_ESCALATION_MODEL``)."
         ),
     )
+    bbox_refine: bool = Field(
+        default=False,
+        description=(
+            "Replace LLM-estimated bounding boxes with grounded ones by "
+            "fuzzy-matching every extracted value against the document's "
+            "real text layer (PyMuPDF for PDFs with embedded text; OCR "
+            "for image-only pages and raster inputs). Sub-pixel accurate "
+            "for born-digital PDFs. Multilingual: script-aware tokenisation "
+            "handles Latin / CJK / Arabic / etc. Adds ~50-200ms for a "
+            "30-page text PDF; image-PDFs depend on the OCR engine. The "
+            "bbox ``source`` discriminator distinguishes refined "
+            "(``pdf_text`` / ``ocr``) from LLM-only fallbacks."
+        ),
+    )
 
 
 class ExtractionOptions(BaseModel):

@@ -51,7 +51,7 @@ from flydesk_idp.core.services.authenticity import (
     ContentAuthenticityChecker,
     VisualAuthenticityChecker,
 )
-from flydesk_idp.core.services.bbox import BboxValidator
+from flydesk_idp.core.services.bbox import BboxRefiner, BboxValidator
 from flydesk_idp.core.services.binary import BinaryNormalizer
 from flydesk_idp.core.services.classification import (
     UNMATCHED,
@@ -204,6 +204,7 @@ class PipelineOrchestrator:
         classifier: DocumentClassifier,
         field_validator: FieldValidator,
         bbox_validator: BboxValidator,
+        bbox_refiner: BboxRefiner,
         binary_normalizer: BinaryNormalizer,
         visual_checker: VisualAuthenticityChecker,
         content_checker: ContentAuthenticityChecker,
@@ -217,6 +218,7 @@ class PipelineOrchestrator:
         self._classifier = classifier
         self._field_validator = field_validator
         self._bbox_validator = bbox_validator
+        self._bbox_refiner = bbox_refiner
         self._binary_normalizer = binary_normalizer
         self._visual_checker = visual_checker
         self._content_checker = content_checker
@@ -271,6 +273,10 @@ class PipelineOrchestrator:
 
         builder.add_node("bbox_validation", CallableStep(self._step_bbox_validation), timeout_seconds=5)
         chain.append("bbox_validation")
+
+        if stages.bbox_refine:
+            builder.add_node("bbox_refine", CallableStep(self._step_bbox_refine), timeout_seconds=120)
+            chain.append("bbox_refine")
 
         if stages.field_validation:
             builder.add_node(
@@ -574,6 +580,40 @@ class PipelineOrchestrator:
             if task.extracted_groups:
                 self._bbox_validator.validate_groups(task.extracted_groups)
         return {"validated": True}
+
+    async def _step_bbox_refine(self, ctx: PipelineContext, _inputs: dict[str, Any]) -> Any:
+        """Replace LLM-estimated bboxes with grounded ones (PDF text / OCR).
+
+        Runs per task (one per resolved (segment, DocSpec) pair) so a
+        single request that fans out across multiple files / DocSpecs
+        gets refined per source. Tasks with no extracted groups or no
+        bytes are skipped. Failures degrade gracefully -- the LLM bbox
+        stays in place and the pipeline continues.
+        """
+        request: ExtractionRequest = ctx.metadata["request"]
+        tasks: list[_ExtractionTask] = ctx.metadata["tasks"]
+        totals = {"fields": 0, "grounded_pdf_text": 0, "grounded_ocr": 0, "kept_llm": 0}
+
+        async def _refine_one(task: _ExtractionTask) -> None:
+            if not task.extracted_groups or not task.slice_bytes:
+                return
+            try:
+                summary = await self._bbox_refiner.refine(
+                    document_bytes=task.slice_bytes,
+                    media_type=task.segment.media_type,
+                    page_count=task.slice_pages,
+                    groups=task.extracted_groups,
+                    language_hint=request.options.language_hint,
+                )
+                totals["fields"] += summary.fields_seen
+                totals["grounded_pdf_text"] += summary.grounded_pdf_text
+                totals["grounded_ocr"] += summary.grounded_ocr
+                totals["kept_llm"] += summary.kept_llm
+            except Exception as exc:  # noqa: BLE001 -- non-fatal degrade
+                self._record_error(ctx, "bbox_refine", "BBOX_REFINE_ERROR", exc, doc_type=task.task_id)
+
+        await asyncio.gather(*(_refine_one(t) for t in tasks))
+        return totals
 
     async def _step_field_validation(self, ctx: PipelineContext, _inputs: dict[str, Any]) -> Any:
         tasks: list[_ExtractionTask] = ctx.metadata["tasks"]

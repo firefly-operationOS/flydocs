@@ -36,7 +36,12 @@ from flydesk_idp.core.services.authenticity import (
     ContentAuthenticityChecker,
     VisualAuthenticityChecker,
 )
-from flydesk_idp.core.services.bbox import BboxValidator
+from flydesk_idp.core.services.bbox import (
+    BboxRefiner,
+    BboxValidator,
+    NoneOcrEngine,
+    OcrEngine,
+)
 from flydesk_idp.core.services.binary import (
     ArchiveUnpacker,
     BinaryNormalizer,
@@ -137,6 +142,26 @@ class IDPCoreConfiguration:
         """Geometric bbox hallucination check -- runs after extraction."""
         return BboxValidator()
 
+    # ------------------------------------------------------------------
+    # Bbox refinement -- grounded coordinates from PDF text layer + OCR.
+    #
+    # The OCR engine is pluggable behind ``OcrEngine``. The default
+    # ``none`` adapter is a no-op (image pages keep the LLM bbox); real
+    # engines (Paddle / Mistral / Tesseract) land in follow-up adapters
+    # that swap in here without touching the BboxRefiner contract.
+    # ------------------------------------------------------------------
+
+    @bean
+    def ocr_engine(self, settings: IDPSettings) -> OcrEngine:
+        kind = (settings.bbox_refine_ocr_engine or "none").lower()
+        if kind == "none":
+            return NoneOcrEngine()
+        # Future: paddle / mistral / tesseract adapters route here.
+        raise ValueError(
+            f"unknown FLYDESK_IDP_BBOX_REFINE_OCR_ENGINE={settings.bbox_refine_ocr_engine!r}; "
+            "expected 'none' (paddle / mistral adapters not yet bundled)"
+        )
+
     @bean
     def request_validator(self) -> RequestValidator:
         """Pre-flight semantic checker on the public ExtractionRequest."""
@@ -231,6 +256,7 @@ class IDPCoreConfiguration:
         classifier: DocumentClassifier,
         field_validator: FieldValidator,
         bbox_validator: BboxValidator,
+        bbox_refiner: BboxRefiner,
         binary_normalizer: BinaryNormalizer,
         visual_checker: VisualAuthenticityChecker,
         content_checker: ContentAuthenticityChecker,
@@ -245,6 +271,7 @@ class IDPCoreConfiguration:
             classifier=classifier,
             field_validator=field_validator,
             bbox_validator=bbox_validator,
+            bbox_refiner=bbox_refiner,
             binary_normalizer=binary_normalizer,
             visual_checker=visual_checker,
             content_checker=content_checker,
