@@ -1,0 +1,173 @@
+# Copyright 2026 Firefly Software Solutions Inc
+"""``@configuration`` class -- exposes every cross-cutting service as a pyfly bean.
+
+Pyfly's container scans this module, sees the ``@configuration`` class,
+instantiates it once, then calls each ``@bean`` method to produce the
+beans. The return-type annotations determine the bean's interface, so
+constructor-injection works on every consumer (controller, command /
+query handler, worker).
+
+The configuration is the **single** declaration point for everything
+that is not picked up by a stereotype decorator
+(``@service``/``@rest_controller``/``@command_handler``/``@query_handler``):
+
+* Configuration: :class:`IDPSettings`
+* Infrastructure: :class:`ExtractionJobRepository`, :class:`JobQueue`,
+  :class:`WebhookPublisher`
+* Prompt management: :class:`PromptCatalog`
+* LLM stages: extractor, splitter, field validator, visual / content
+  authenticity, judge, rule engine
+* Pipeline orchestrator
+* Async worker: :class:`JobWorker`
+"""
+
+from __future__ import annotations
+
+from pyfly.container import bean, configuration
+
+from flydesk_idp.config import IDPSettings, get_settings
+from flydesk_idp.core.services.authenticity import (
+    ContentAuthenticityChecker,
+    VisualAuthenticityChecker,
+)
+from flydesk_idp.core.services.extraction.extractor import MultimodalExtractor
+from flydesk_idp.core.services.extraction.prompts import PromptCatalog
+from flydesk_idp.core.services.judge import Judge
+from flydesk_idp.core.services.pipeline import PipelineOrchestrator
+from flydesk_idp.core.services.queue import JobQueue, create_job_queue
+from flydesk_idp.core.services.rules import RuleEngine
+from flydesk_idp.core.services.splitting import DocumentSplitter
+from flydesk_idp.core.services.validation import FieldValidator
+from flydesk_idp.core.services.webhook import WebhookPublisher
+from flydesk_idp.core.services.workers.job_worker import JobWorker
+from flydesk_idp.models.repositories import ExtractionJobRepository
+
+
+@configuration
+class IDPCoreConfiguration:
+    """Wiring for everything outside the pyfly stereotype decorators."""
+
+    # ------------------------------------------------------------------
+    # Configuration + infrastructure
+    # ------------------------------------------------------------------
+
+    @bean
+    def settings(self) -> IDPSettings:
+        return get_settings()
+
+    @bean
+    def repository(self, settings: IDPSettings) -> ExtractionJobRepository:
+        return ExtractionJobRepository.from_url(settings.database_url)
+
+    @bean
+    def queue(self, settings: IDPSettings) -> JobQueue:
+        return create_job_queue(
+            settings.eda_adapter,
+            redis_url=settings.redis_url,
+            stream_key=settings.jobs_topic.replace(".", ":"),
+        )
+
+    @bean
+    def webhook(self, settings: IDPSettings) -> WebhookPublisher:
+        return WebhookPublisher(
+            timeout_s=settings.webhook_timeout_s,
+            max_attempts=settings.webhook_max_attempts,
+            hmac_secret=settings.webhook_hmac_secret,
+        )
+
+    # ------------------------------------------------------------------
+    # Prompt management -- one catalog, every LLM stage takes a template
+    # from it. This keeps prompt text out of Python code paths.
+    # ------------------------------------------------------------------
+
+    @bean
+    def prompt_catalog(self) -> PromptCatalog:
+        return PromptCatalog.from_resources()
+
+    # ------------------------------------------------------------------
+    # LLM stages -- each receives its prompt template through DI.
+    # ------------------------------------------------------------------
+
+    @bean
+    def extractor(self, settings: IDPSettings, prompts: PromptCatalog) -> MultimodalExtractor:
+        return MultimodalExtractor(
+            template=prompts.extract,
+            model=settings.model,
+            fallback_model=settings.fallback_model,
+        )
+
+    @bean
+    def splitter(self, settings: IDPSettings, prompts: PromptCatalog) -> DocumentSplitter:
+        return DocumentSplitter(template=prompts.splitter, model=settings.model)
+
+    @bean
+    def field_validator(self) -> FieldValidator:
+        return FieldValidator()
+
+    @bean
+    def visual_checker(
+        self, settings: IDPSettings, prompts: PromptCatalog
+    ) -> VisualAuthenticityChecker:
+        return VisualAuthenticityChecker(
+            template=prompts.visual_authenticity, model=settings.model
+        )
+
+    @bean
+    def content_checker(
+        self, settings: IDPSettings, prompts: PromptCatalog
+    ) -> ContentAuthenticityChecker:
+        return ContentAuthenticityChecker(
+            template=prompts.content_authenticity, model=settings.model
+        )
+
+    @bean
+    def judge(self, settings: IDPSettings, prompts: PromptCatalog) -> Judge:
+        return Judge(template=prompts.judge, model=settings.model)
+
+    @bean
+    def rule_engine(self, settings: IDPSettings, prompts: PromptCatalog) -> RuleEngine:
+        return RuleEngine(template=prompts.rule_engine, model=settings.model)
+
+    # ------------------------------------------------------------------
+    # Orchestrator + async worker
+    # ------------------------------------------------------------------
+
+    @bean
+    def orchestrator(
+        self,
+        extractor: MultimodalExtractor,
+        splitter: DocumentSplitter,
+        field_validator: FieldValidator,
+        visual_checker: VisualAuthenticityChecker,
+        content_checker: ContentAuthenticityChecker,
+        judge: Judge,
+        rule_engine: RuleEngine,
+        settings: IDPSettings,
+    ) -> PipelineOrchestrator:
+        return PipelineOrchestrator(
+            extractor=extractor,
+            splitter=splitter,
+            field_validator=field_validator,
+            visual_checker=visual_checker,
+            content_checker=content_checker,
+            judge=judge,
+            rule_engine=rule_engine,
+            default_model=settings.model,
+        )
+
+    @bean
+    def job_worker(
+        self,
+        orchestrator: PipelineOrchestrator,
+        repository: ExtractionJobRepository,
+        queue: JobQueue,
+        webhook: WebhookPublisher,
+        settings: IDPSettings,
+    ) -> JobWorker:
+        return JobWorker(
+            orchestrator=orchestrator,
+            repository=repository,
+            queue=queue,
+            webhook=webhook,
+            settings=settings,
+        )
