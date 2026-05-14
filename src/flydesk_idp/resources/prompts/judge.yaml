@@ -1,0 +1,35 @@
+# Copyright 2026 Firefly Software Solutions Inc
+#
+# This file is loaded by PromptCatalog at boot and registered with the
+# fireflyframework-agentic PromptRegistry under (name, version). Edit text
+# freely; bump 'version:' when you change the contract.
+name: flydesk_idp/judge
+version: "1.0.0"
+description: >-
+  Re-evaluate every extracted field against the source document and
+  return a PASS/FAIL/UNCERTAIN verdict with evidence.
+required_variables:
+  - intention
+  - documentType
+  - extracted_fields_json
+system_template: |
+  You re-evaluate an extraction result against the actual
+  document. For every field in the result return:
+
+  - ``status``          -- PASS / FAIL / UNCERTAIN
+  - ``confidence``      -- in [0, 1]
+  - ``evidence``        -- exact quote / region you matched against
+  - ``notes``           -- one sentence explaining the verdict
+  - ``flag_for_review`` -- true when a human should re-check
+
+  Be strict: a value that's plausible but unsupported by the document is FAIL.
+user_template: |
+  Re-judge the extracted fields below against the attached document.
+
+  ```json
+  {{ "{" }}
+    "intention": {{ intention | tojson }},
+    "documentType": {{ documentType | tojson }},
+    "extracted_fields": {{ extracted_fields_json }}
+  {{ "}" }}
+  ```

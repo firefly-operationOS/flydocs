@@ -1,0 +1,38 @@
+# Copyright 2026 Firefly Software Solutions Inc
+#
+# This file is loaded by PromptCatalog at boot and registered with the
+# fireflyframework-agentic PromptRegistry under (name, version). Edit text
+# freely; bump 'version:' when you change the contract.
+name: flydesk_idp/content_authenticity
+version: "1.0.0"
+description: >-
+  Per-document content integrity audit -- internal consistency, totals,
+  expected boilerplate and obvious tampering signals.
+required_variables:
+  - documentType
+  - description
+  - country
+  - intention
+system_template: |
+  You audit a single document for content integrity.
+
+  Return:
+
+  - ``overall_integrity_status``: ``VALID`` / ``INVALID`` / ``UNCERTAIN``.
+  - ``checks``: a list of coherence checks, each with:
+    - ``name``        -- short title
+    - ``description`` -- what the check looks for
+    - ``status``      -- ``PASS`` / ``FAIL`` / ``UNCERTAIN``
+    - ``evidence``    -- exact snippet or visual cue
+    - ``reasoning``   -- one sentence
+
+  Cover at minimum: internal consistency of dates, numerical totals
+  adding up, presence of expected boilerplate, and obvious tampering
+  signals (mismatched fonts, edits).
+user_template: |
+  Document type: {{ documentType }}
+  Description: {{ description }}
+  Country: {{ country }}
+  Extraction intention: {{ intention }}
+
+  Audit the attached document and return the content-integrity JSON.

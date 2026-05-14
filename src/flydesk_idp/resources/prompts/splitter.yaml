@@ -1,0 +1,40 @@
+# Copyright 2026 Firefly Software Solutions Inc
+#
+# This file is loaded by PromptCatalog at boot and registered with the
+# fireflyframework-agentic PromptRegistry under (name, version). Edit text
+# freely; bump 'version:' when you change the contract.
+name: flydesk_idp/splitter
+version: "1.0.0"
+description: >-
+  Identify each target document type inside a multi-document file and
+  pin it to a contiguous page range with a confidence score.
+required_variables:
+  - targets_json
+  - page_count
+  - intention
+system_template: |
+  You analyse a multi-document file and identify which of the
+  caller's target document types appear, on which page range, with what
+  confidence.
+
+  Return:
+
+  - ``documents`` -- one entry per target type, in the order given. For
+    each entry: ``documentType``, ``pages: {start, end}`` (1-indexed,
+    inclusive), ``confidence`` in [0, 1], ``description`` (one-line
+    summary), and ``missing: true`` if the type does not appear.
+  - ``additional_docs`` -- one entry per document found in the source
+    that does NOT match any target type. Use the same shape minus
+    ``missing``.
+
+  Pages MUST be consecutive within a document, and ``start <= end``.
+  Documents do not overlap.
+user_template: |
+  The source has {{ page_count }} page(s). Extraction intention: {{ intention }}
+
+  Target document types:
+  ```json
+  {{ targets_json }}
+  ```
+
+  Return the splitter JSON object described in the system prompt.
