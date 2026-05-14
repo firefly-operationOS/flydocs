@@ -1,0 +1,25 @@
+{
+  "invoice": {
+    "invoice_number": {
+      "value": "INV-2026-0001",
+      "confidence": 0.95,
+      "page": 1,
+      "bbox": {"xmin": 0.71, "ymin": 0.08, "xmax": 0.96, "ymax": 0.11},
+      "notes": "Top-right header (mock)"
+    },
+    "total_amount": {
+      "value": 1234.56,
+      "confidence": 0.93,
+      "page": 1,
+      "bbox": {"xmin": 0.55, "ymin": 0.81, "xmax": 0.74, "ymax": 0.85},
+      "notes": "Footer total (mock)"
+    },
+    "currency": {
+      "value": "EUR",
+      "confidence": 0.91,
+      "page": 1,
+      "bbox": {"xmin": 0.62, "ymin": 0.81, "xmax": 0.67, "ymax": 0.84},
+      "notes": "Currency symbol next to total (mock)"
+    }
+  }
+}
