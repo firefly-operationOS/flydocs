@@ -179,18 +179,25 @@ def _extract_usage_fields(result: Any, model: str) -> dict[str, Any]:
     if cache_read:
         fields["cache_read"] = cache_read
     try:
-        # ImportError-tolerant: the cost resolver is an optional surface
-        # in fireflyframework-agentic. Older / unreleased refs export it
-        # under a different module path; we keep the call lazy and
-        # swallow every failure mode so missing pricing data degrades
-        # to a zero-cost log line instead of a hard error.
+        # ImportError-tolerant: the cost resolver lives in
+        # fireflyframework-agentic and is optional. ``genai_prices_cost``
+        # consults the bundled ``genai-prices`` database and returns the
+        # USD estimate, or ``None`` when the model is unknown.
         from fireflyframework_agentic.observability.cost import (  # pyright: ignore[reportMissingImports]
-            get_cost_calculator,  # pyright: ignore[reportAttributeAccessIssue]
+            CostContext,
+            genai_prices_cost,
         )
 
-        calc = get_cost_calculator("auto")
-        cost = calc.estimate(model, input_tokens, output_tokens)
-        if cost > 0:
+        cost = genai_prices_cost(
+            CostContext(
+                model=model,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cache_creation_tokens=cache_write,
+                cache_read_tokens=cache_read,
+            )
+        )
+        if cost is not None and cost > 0:
             fields["cost_usd"] = f"{cost:.6f}"
     except Exception:  # noqa: BLE001
         pass
