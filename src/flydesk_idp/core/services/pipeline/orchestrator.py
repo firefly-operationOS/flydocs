@@ -43,6 +43,10 @@ from fireflyframework_agentic.pipeline import (
     PipelineContext,
 )
 
+from flydesk_idp.core.observability import (
+    reset_correlation_id,
+    set_correlation_id,
+)
 from flydesk_idp.core.services.authenticity import (
     ContentAuthenticityChecker,
     VisualAuthenticityChecker,
@@ -75,6 +79,8 @@ from flydesk_idp.interfaces.dtos.extract import (
     ExtractedDocument,
     ExtractionRequest,
     ExtractionResult,
+    TraceEntry,
+    UsageBreakdown,
 )
 from flydesk_idp.interfaces.dtos.field import ExtractedFieldGroup
 
@@ -213,6 +219,19 @@ class PipelineOrchestrator:
 
     async def execute(self, request: ExtractionRequest) -> ExtractionResult:
         started = time.monotonic()
+        # Bind the request id to the active asyncio context so every
+        # downstream ``timed_agent_run`` tags its UsageRecord with this
+        # correlation id. The reset happens in ``finally`` further down
+        # so the var is always cleared even when the pipeline raises.
+        correlation_token = set_correlation_id(str(request.request_id))
+        try:
+            return await self._execute_inner(request, started)
+        finally:
+            reset_correlation_id(correlation_token)
+
+    async def _execute_inner(
+        self, request: ExtractionRequest, started: float
+    ) -> ExtractionResult:
         stages = request.options.stages
         model_id = request.options.model or self._default_model
         files = request.files
@@ -314,10 +333,12 @@ class PipelineOrchestrator:
             correlation_id=str(request.request_id),
         )
 
-        await engine.run(context=ctx)
+        pipeline_result = await engine.run(context=ctx)
 
         latency_ms = int((time.monotonic() - started) * 1000)
-        return self._build_result(request, ctx, model_id, latency_ms)
+        return self._build_result(
+            request, ctx, model_id, latency_ms, pipeline_result=pipeline_result
+        )
 
     # ------------------------------------------------------------------
     # Pipeline steps
@@ -740,6 +761,8 @@ class PipelineOrchestrator:
         ctx: PipelineContext,
         model_id: str,
         latency_ms: int,
+        *,
+        pipeline_result: Any = None,
     ) -> ExtractionResult:
         files_data: list[_FileSlot] = ctx.metadata.get("files_data", [])
         tasks: list[_ExtractionTask] = ctx.metadata.get("tasks", [])
@@ -794,6 +817,11 @@ class PipelineOrchestrator:
         ]
 
         escalation: EscalationInfo | None = ctx.metadata.get("escalation")
+        usage_breakdown = _usage_breakdown(
+            request_id=str(request.request_id),
+            pipeline_result=pipeline_result,
+        )
+        trace = _trace_entries(pipeline_result)
         return ExtractionResult(
             request_id=request.request_id,
             document=document_info,
@@ -805,6 +833,8 @@ class PipelineOrchestrator:
             latency_ms=latency_ms,
             pipeline_errors=ctx.metadata.get("pipeline_errors", []),
             escalation=escalation,
+            usage=usage_breakdown,
+            trace=trace,
         )
 
 
@@ -833,6 +863,77 @@ def _segment_confidence(seg: _Segment) -> float:
     if seg.pinned:
         return 1.0
     return seg.segmentation_confidence
+
+
+def _usage_breakdown(*, request_id: str, pipeline_result: Any) -> UsageBreakdown | None:
+    """Map the framework's UsageSummary into our public DTO.
+
+    Prefers ``pipeline_result.usage`` (already aggregated by the engine
+    for this correlation id). Falls back to a fresh
+    ``default_usage_tracker.get_summary_for_correlation`` query so we
+    still report something useful even if the engine result is missing
+    or partial. Returns ``None`` when no records exist for the request.
+    """
+    summary = None
+    if pipeline_result is not None and getattr(pipeline_result, "usage", None) is not None:
+        summary = pipeline_result.usage
+    if summary is None:
+        try:
+            from fireflyframework_agentic.observability.usage import (
+                default_usage_tracker,
+            )
+
+            summary = default_usage_tracker.get_summary_for_correlation(request_id)
+        except Exception:  # noqa: BLE001
+            return None
+    if summary is None or getattr(summary, "record_count", 0) == 0:
+        return None
+    # Cache totals are not exposed on UsageSummary -- recompute from the
+    # raw records when available so we don't lose cache hits in the
+    # response.
+    cache_creation, cache_read = 0, 0
+    try:
+        from fireflyframework_agentic.observability.usage import default_usage_tracker
+
+        for r in default_usage_tracker.records:
+            if r.correlation_id == request_id:
+                cache_creation += r.cache_creation_tokens
+                cache_read += r.cache_read_tokens
+    except Exception:  # noqa: BLE001
+        pass
+    return UsageBreakdown(
+        total_input_tokens=summary.total_input_tokens,
+        total_output_tokens=summary.total_output_tokens,
+        total_tokens=summary.total_tokens,
+        total_cost_usd=summary.total_cost_usd,
+        total_requests=summary.total_requests,
+        total_latency_ms=summary.total_latency_ms,
+        record_count=summary.record_count,
+        cache_creation_tokens=cache_creation,
+        cache_read_tokens=cache_read,
+        by_agent=dict(summary.by_agent),
+        by_model=dict(summary.by_model),
+    )
+
+
+def _trace_entries(pipeline_result: Any) -> list[TraceEntry]:
+    """Convert the engine's ExecutionTraceEntry list into our DTO."""
+    if pipeline_result is None or not getattr(pipeline_result, "execution_trace", None):
+        return []
+    entries: list[TraceEntry] = []
+    for entry in pipeline_result.execution_trace:
+        try:
+            delta_ms = (entry.completed_at - entry.started_at).total_seconds() * 1000
+        except Exception:  # noqa: BLE001
+            delta_ms = 0.0
+        entries.append(TraceEntry(
+            node=entry.node_id,
+            started_at=entry.started_at,
+            completed_at=entry.completed_at,
+            latency_ms=round(delta_ms, 2),
+            status=entry.status,
+        ))
+    return entries
 
 
 def _classification_info(result: ClassificationResult | None) -> ClassificationInfo | None:

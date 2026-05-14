@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import base64
 import uuid
+from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -322,6 +323,44 @@ class EscalationInfo(BaseModel):
     )
 
 
+class UsageBreakdown(BaseModel):
+    """Aggregated token usage and cost across every LLM call of one request.
+
+    Populated by the orchestrator from the framework's per-call
+    :class:`UsageRecord`s, scoped to the request via ``correlation_id``.
+    Mirrors :class:`fireflyframework_agentic.observability.UsageSummary`.
+
+    ``by_agent`` keys are the internal agent names (e.g.
+    ``flydesk-idp-extractor``, ``flydesk-idp-classifier``,
+    ``flydesk-idp-splitter``). ``by_model`` keys are the fully-qualified
+    model ids (e.g. ``anthropic:claude-opus-4-7``).
+    """
+
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
+    total_tokens: int = 0
+    total_cost_usd: float = 0.0
+    total_requests: int = 0
+    total_latency_ms: float = 0.0
+    record_count: int = 0
+    cache_creation_tokens: int = 0
+    cache_read_tokens: int = 0
+    by_agent: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    by_model: dict[str, dict[str, Any]] = Field(default_factory=dict)
+
+
+class TraceEntry(BaseModel):
+    """One node's execution in the pipeline DAG."""
+
+    node: str
+    started_at: datetime
+    completed_at: datetime
+    latency_ms: float
+    status: str = Field(
+        description="``success`` | ``failed`` | ``skipped``."
+    )
+
+
 class ExtractionResult(BaseModel):
     """Top-level response."""
 
@@ -360,5 +399,22 @@ class ExtractionResult(BaseModel):
         description=(
             "Audit block populated when judge_escalation runs. ``null`` "
             "when escalation is disabled or didn't fire."
+        ),
+    )
+    usage: UsageBreakdown | None = Field(
+        default=None,
+        description=(
+            "Aggregated token usage and estimated USD cost across every "
+            "LLM call this request made (extract, classifier, splitter, "
+            "judge, visual, content, rules). ``null`` when cost tracking "
+            "is disabled or no LLM calls fired."
+        ),
+    )
+    trace: list[TraceEntry] = Field(
+        default_factory=list,
+        description=(
+            "Per-stage execution trace as the orchestrator's DAG ran it. "
+            "One entry per executed node with start/end timestamps, "
+            "latency, and status."
         ),
     )
