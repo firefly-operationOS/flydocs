@@ -51,6 +51,20 @@ class IDPSettings(BaseSettings):
     sync_timeout_s: int = 60
     async_timeout_s: int = 300
     job_max_attempts: int = 3
+    # Exponential backoff bounds between async job retries. The worker
+    # schedules the next attempt at ``min(retry_max_delay_s,
+    # retry_base_delay_s * 2^(attempt - 1))`` plus a small jitter.
+    retry_base_delay_s: float = 5.0
+    retry_max_delay_s: float = 300.0
+
+    # -- Judge-driven escalation ----------------------------------------
+    # When the judge marks more than ``escalation_threshold`` of the
+    # extracted fields as FAIL or flag_for_review, the orchestrator
+    # re-runs the extractor + judge with ``escalation_model`` and keeps
+    # the result that has the lower failure rate. The stage is opt-in:
+    # threshold <= 0 disables it and the orchestrator skips the re-run.
+    escalation_threshold: float = 0.0
+    escalation_model: str | None = None
 
     # -- Webhook --------------------------------------------------------
     webhook_timeout_s: int = 15

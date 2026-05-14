@@ -6,17 +6,34 @@ container (orchestrator, queue, repository, webhook, settings). It is
 NOT a stereotyped bean because we want the CLI to start it explicitly:
 ``flydesk-idp worker`` boots a minimal pyfly application and pulls the
 worker out of the context.
+
+Retry policy
+============
+
+A failed attempt is classified into one of two buckets:
+
+* ``permanent`` -- a malformed payload, an unrecoverable provider error
+  (content policy, unsupported model). The job goes straight to
+  ``FAILED`` so the caller can fix the input.
+* ``retryable`` -- a timeout, a 5xx from the LLM provider, a transient
+  network glitch. The worker schedules the next attempt at
+  ``min(retry_max_delay_s, retry_base_delay_s * 2^(attempt-1))`` plus
+  jitter and lets the queue redeliver. The ``attempts`` counter is
+  persisted in Postgres so the budget survives worker restarts.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import random
 import socket
+import time
 from datetime import datetime, timezone
 from typing import Any
 
 from flydesk_idp.config import IDPSettings
+from flydesk_idp.core.observability import log_outbound
 from flydesk_idp.core.services.pipeline import PipelineOrchestrator
 from flydesk_idp.core.services.queue import JobQueue, JobQueueMessage
 from flydesk_idp.core.services.webhook import WebhookPublisher
@@ -33,6 +50,32 @@ from flydesk_idp.interfaces.enums.job_status import JobStatus
 from flydesk_idp.models.repositories import ExtractionJobRepository
 
 logger = logging.getLogger(__name__)
+
+
+# Substrings that flag a provider response as non-retryable. They cover
+# the common content-policy / quota / invalid-model classes across the
+# Anthropic and OpenAI SDKs without trying to be exhaustive.
+_PERMANENT_ERROR_HINTS: tuple[str, ...] = (
+    "content policy",
+    "content_filter",
+    "moderation",
+    "invalid api key",
+    "incorrect api key",
+    "unsupported model",
+    "model_not_found",
+    "input_validation_error",
+    "invalid_request_error",
+)
+
+
+def _is_permanent(exc: Exception) -> bool:
+    """Return True when *exc* should NOT be retried."""
+    # ValueError covers our RequestValidator failures and most pydantic
+    # validation errors that bubble up through the orchestrator.
+    if isinstance(exc, (ValueError, TypeError)):
+        return True
+    message = str(exc).lower()
+    return any(hint in message for hint in _PERMANENT_ERROR_HINTS)
 
 
 class JobWorker:
@@ -85,14 +128,26 @@ class JobWorker:
             await self._queue.ack(message)
             return
 
-        await self._repository.mark_running(job.id)
+        # mark_running increments attempts atomically in Postgres.
+        job = await self._repository.mark_running(job.id) or job
+        attempts = job.attempts or 1
+        log_outbound(
+            "worker", op="job.run", status="started",
+            latency_ms=0.0, job_id=job.id, attempt=attempts,
+        )
         request = self._build_request(job)
+        started = time.monotonic()
         try:
             result = await asyncio.wait_for(
                 self._orchestrator.execute(request), timeout=self._settings.async_timeout_s
             )
             await self._repository.mark_succeeded(
                 job.id, result=result.model_dump(mode="json", by_alias=True)
+            )
+            log_outbound(
+                "worker", op="job.run", status="ok",
+                latency_ms=(time.monotonic() - started) * 1000,
+                job_id=job.id, attempt=attempts,
             )
             await self._fire_webhook(
                 job_id=job.id,
@@ -103,29 +158,63 @@ class JobWorker:
                 correlation=_extract_correlation(job.metadata_json),
             )
         except Exception as exc:  # noqa: BLE001
-            attempts = (job.attempts or 0) + 1
-            if attempts >= self._settings.job_max_attempts:
-                await self._repository.mark_failed(
-                    job.id, code="EXTRACTION_FAILED", message=str(exc)
-                )
+            permanent = _is_permanent(exc)
+            exhausted = attempts >= self._settings.job_max_attempts
+            terminal = permanent or exhausted
+            error_code = "PERMANENT_ERROR" if permanent else "EXTRACTION_FAILED"
+            log_outbound(
+                "worker", op="job.run", status="error",
+                latency_ms=(time.monotonic() - started) * 1000,
+                job_id=job.id, attempt=attempts,
+                permanent=permanent, exhausted=exhausted,
+                error=type(exc).__name__,
+            )
+
+            if terminal:
+                await self._repository.mark_failed(job.id, code=error_code, message=str(exc))
                 await self._fire_webhook(
                     job_id=job.id,
                     status=JobStatus.FAILED,
                     result=None,
                     metadata=job.metadata_json or {},
                     callback_url=job.callback_url,
-                    error_code="EXTRACTION_FAILED",
+                    error_code=error_code,
                     error_message=str(exc),
                     correlation=_extract_correlation(job.metadata_json),
                 )
             else:
+                delay = self._backoff_delay(attempts)
                 logger.warning(
-                    "Job %s failed attempt %d: %s -- re-queueing", job.id, attempts, exc
+                    "Job %s failed attempt %d (%s); re-queueing in %.1fs",
+                    job.id, attempts, exc, delay,
                 )
+                # Mark QUEUED again so the API surface reflects the retry,
+                # then schedule the re-publish without blocking the worker
+                # (the consumer keeps draining the stream meanwhile).
                 await self._repository.update(job.id, status=JobStatus.QUEUED.value)
-                await self._queue.publish(job.id)
+                asyncio.create_task(self._delayed_publish(job.id, delay))
         finally:
             await self._queue.ack(message)
+
+    def _backoff_delay(self, attempts: int) -> float:
+        """Capped exponential backoff with a 20% jitter."""
+        base = self._settings.retry_base_delay_s
+        ceiling = self._settings.retry_max_delay_s
+        raw = base * (2 ** max(0, attempts - 1))
+        capped = min(ceiling, raw)
+        jitter = capped * 0.2 * random.random()
+        return capped + jitter
+
+    async def _delayed_publish(self, job_id: str, delay_s: float) -> None:
+        try:
+            await asyncio.sleep(delay_s)
+            await self._queue.publish(job_id)
+            log_outbound(
+                "queue", op="republish", status="ok",
+                latency_ms=delay_s * 1000, job_id=job_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Failed to re-publish job %s after backoff: %s", job_id, exc)
 
     def _build_request(self, job: Any) -> ExtractionRequest:
         schema = job.schema_json or {}
@@ -155,8 +244,6 @@ class JobWorker:
     ) -> None:
         if not callback_url:
             return
-        # Strip internal-only entries from metadata before serialising to the
-        # webhook -- _correlation is propagated as headers, not as body fields.
         clean_metadata = {k: v for k, v in (metadata or {}).items() if not k.startswith("_")}
         payload = JobWebhookPayload(
             job_id=job_id,

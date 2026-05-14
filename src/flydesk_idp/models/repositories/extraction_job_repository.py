@@ -76,12 +76,20 @@ class ExtractionJobRepository:
             return job
 
     async def mark_running(self, job_id: str) -> ExtractionJob | None:
-        return await self.update(
-            job_id,
-            status="RUNNING",
-            started_at=_utcnow(),
-            attempts=ExtractionJob.attempts + 1,  # type: ignore[arg-type]
-        )
+        """Transition to RUNNING and increment the attempts counter atomically."""
+        async with self._session_factory() as session:
+            job = await session.get(ExtractionJob, job_id)
+            if job is None:
+                return None
+            job.status = "RUNNING"
+            job.started_at = _utcnow()
+            # Increment in Python: the SQLAlchemy ORM session writes back the
+            # new scalar on commit. A bare ``Column + 1`` expression doesn't
+            # work with setattr on a managed instance.
+            job.attempts = (job.attempts or 0) + 1
+            await session.commit()
+            await session.refresh(job)
+            return job
 
     async def mark_succeeded(self, job_id: str, *, result: dict[str, Any]) -> ExtractionJob | None:
         return await self.update(
