@@ -86,9 +86,7 @@ class IDPCoreConfiguration:
     # ------------------------------------------------------------------
 
     @bean(name="database_health")
-    def database_health(
-        self, repository: ExtractionJobRepository
-    ) -> SqlAlchemyHealthIndicator:
+    def database_health(self, repository: ExtractionJobRepository) -> SqlAlchemyHealthIndicator:
         return SqlAlchemyHealthIndicator(repository.engine)
 
     # ------------------------------------------------------------------
@@ -135,20 +133,12 @@ class IDPCoreConfiguration:
         return RequestValidator()
 
     @bean
-    def visual_checker(
-        self, settings: IDPSettings, prompts: PromptCatalog
-    ) -> VisualAuthenticityChecker:
-        return VisualAuthenticityChecker(
-            template=prompts.visual_authenticity, model=settings.model
-        )
+    def visual_checker(self, settings: IDPSettings, prompts: PromptCatalog) -> VisualAuthenticityChecker:
+        return VisualAuthenticityChecker(template=prompts.visual_authenticity, model=settings.model)
 
     @bean
-    def content_checker(
-        self, settings: IDPSettings, prompts: PromptCatalog
-    ) -> ContentAuthenticityChecker:
-        return ContentAuthenticityChecker(
-            template=prompts.content_authenticity, model=settings.model
-        )
+    def content_checker(self, settings: IDPSettings, prompts: PromptCatalog) -> ContentAuthenticityChecker:
+        return ContentAuthenticityChecker(template=prompts.content_authenticity, model=settings.model)
 
     @bean
     def judge(self, settings: IDPSettings, prompts: PromptCatalog) -> Judge:

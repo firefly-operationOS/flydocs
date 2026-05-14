@@ -84,11 +84,11 @@ class MultimodalExtractor:
                 raise
             logger.warning(
                 "Primary model %s failed (%s); retrying on fallback %s",
-                model_id, exc, self._fallback_model,
+                model_id,
+                exc,
+                self._fallback_model,
             )
-            fallback_agent = self._build_agent(
-                self._fallback_model, output_model, instructions=prompt.system
-            )
+            fallback_agent = self._build_agent(self._fallback_model, output_model, instructions=prompt.system)
             result = await timed_agent_run(
                 fallback_agent, content, op="extract.fallback", model=self._fallback_model
             )
@@ -96,9 +96,7 @@ class MultimodalExtractor:
 
     # ------------------------------------------------------------------
 
-    def _build_agent(
-        self, model_id: str, output_model: type, *, instructions: str
-    ) -> FireflyAgent[Any, Any]:
+    def _build_agent(self, model_id: str, output_model: type, *, instructions: str) -> FireflyAgent[Any, Any]:
         return FireflyAgent(
             name=self._agent_name,
             model=model_id,

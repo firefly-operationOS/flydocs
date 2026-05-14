@@ -28,12 +28,12 @@ both by the prompt sent to the LLM and by post-processing in
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 from pydantic import BaseModel, Field, model_validator
 
 
-class BboxQuality(str, Enum):
+class BboxQuality(StrEnum):
     """Coarse-grained verdict on whether a bbox is trustworthy.
 
     Stamped by :class:`BboxValidator` after extraction. ``invalid``

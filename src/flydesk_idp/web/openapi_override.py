@@ -23,7 +23,6 @@ import logging
 from typing import Any
 
 from fastapi import FastAPI
-
 from pyfly.context.application_context import ApplicationContext
 from pyfly.web.adapters.starlette.controller import ControllerRegistrar
 from pyfly.web.openapi import OpenAPIGenerator
@@ -84,7 +83,9 @@ def install_openapi(
 
         # Surface the deployment's primary endpoints in the info block.
         info = spec.setdefault("info", {})
-        info.setdefault("contact", {"name": "Firefly OperationOS", "url": "https://github.com/firefly-operationOS"})
+        info.setdefault(
+            "contact", {"name": "Firefly OperationOS", "url": "https://github.com/firefly-operationOS"}
+        )
 
         app.openapi_schema = spec
         logger.info(

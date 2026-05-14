@@ -85,16 +85,16 @@ class VisualAuthenticityChecker:
             prompt.user,
             BinaryContent(data=document_bytes, media_type=media_type),
         ]
-        run_result = await timed_agent_run(
-            agent, content, op="visual_auth", model=model or self._model
-        )
+        run_result = await timed_agent_run(agent, content, op="visual_auth", model=model or self._model)
         raw_by_name = {v.name: v for v in run_result.output.validations}
         outcomes: list[VisualValidationOutcome] = []
         for spec in doc.validators.visual:
             raw = raw_by_name.get(spec.name)
             if raw is None:
                 outcomes.append(
-                    VisualValidationOutcome(name=spec.name, passed=False, confidence=0.0, notes="Not evaluated")
+                    VisualValidationOutcome(
+                        name=spec.name, passed=False, confidence=0.0, notes="Not evaluated"
+                    )
                 )
                 continue
             outcomes.append(

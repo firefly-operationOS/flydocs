@@ -81,9 +81,7 @@ class ContentAuthenticityChecker:
             prompt.user,
             BinaryContent(data=document_bytes, media_type=media_type),
         ]
-        run_result = await timed_agent_run(
-            agent, content, op="content_auth", model=model or self._model
-        )
+        run_result = await timed_agent_run(agent, content, op="content_auth", model=model or self._model)
         raw = run_result.output
         return ContentAuthenticity(
             overall_integrity_status=raw.overall_integrity_status,

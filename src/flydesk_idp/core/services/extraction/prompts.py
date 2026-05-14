@@ -33,13 +33,13 @@ logger = logging.getLogger(__name__)
 
 
 _PROMPT_FILES: dict[str, str] = {
-    "extract":              "extract.yaml",
-    "splitter":             "splitter.yaml",
-    "classifier":           "classifier.yaml",
+    "extract": "extract.yaml",
+    "splitter": "splitter.yaml",
+    "classifier": "classifier.yaml",
     "content_authenticity": "content_authenticity.yaml",
-    "visual_authenticity":  "visual_authenticity.yaml",
-    "judge":                "judge.yaml",
-    "rule_engine":          "rule_engine.yaml",
+    "visual_authenticity": "visual_authenticity.yaml",
+    "judge": "judge.yaml",
+    "rule_engine": "rule_engine.yaml",
 }
 
 
@@ -119,7 +119,9 @@ class PromptCatalog:
             template = PromptLoader.from_file(prompts_dir / filename)
             registry.register(template)
             templates[stage] = template
-            logger.debug("Registered prompt %s (stage=%s, version=%s)", template.name, stage, template.version)
+            logger.debug(
+                "Registered prompt %s (stage=%s, version=%s)", template.name, stage, template.version
+            )
         return cls(templates, registry=registry)
 
 

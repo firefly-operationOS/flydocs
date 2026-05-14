@@ -93,9 +93,36 @@ addopts = "-v --tb=short -m 'not llm'"
 [tool.ruff]
 target-version = "py313"
 line-length = 110
+# CI clones the sibling firefly framework repos into ``./vendor/`` so
+# the Dockerfile's BuildKit contexts resolve identically in local
+# checkouts and in GitHub Actions. We don't lint third-party code on
+# its way through our pipeline -- they have their own ruff config.
+extend-exclude = ["vendor"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "UP", "B", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+# Public DTOs / interface enums map directly onto the JSON wire
+# contract we ship to callers (``parentType``, ``fieldGroupName``,
+# ``ruleId``, …). The mixedCase fields and Exception-suffix-less
+# identifiers are intentional — renaming them would break the API.
+"src/flydesk_idp/interfaces/**" = ["N801", "N811", "N815", "N818"]
+# Domain exceptions on the jobs CQRS handlers + the webhook publisher
+# follow the framework's exception-naming convention (no ``Error``
+# suffix); renaming them would ripple through every controller advice
+# mapping.
+"src/flydesk_idp/core/services/jobs/**" = ["N818"]
+"src/flydesk_idp/core/services/webhook/**" = ["N818"]
+# Judge re-binds the public wire-contract field names locally; same
+# justification as the interfaces package.
+"src/flydesk_idp/core/services/judge/**" = ["N815"]
+# field_validator imports stdlib ``UUID`` as ``PyUUID`` to disambiguate
+# from the project's own UUID column type without renaming the column.
+"src/flydesk_idp/core/services/validation/**" = ["N811"]
+# Tests routinely build long inline DTOs; the line-length cap is a
+# code-smell signal we don't enforce on test fixtures.
+"tests/**" = ["E501"]
 
 [tool.pyright]
 pythonVersion = "3.13"

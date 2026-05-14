@@ -19,7 +19,6 @@ from uuid import UUID
 
 from flydesk_idp.interfaces.enums.standard_validator import StandardValidatorType
 
-
 # ---------------------------------------------------------------------------
 # Low-level helpers
 # ---------------------------------------------------------------------------
@@ -62,7 +61,10 @@ def _check_domain(value: Any, _: dict) -> str | None:
     v = _need_str(value)
     if isinstance(v, tuple):
         return v[1]
-    if not re.fullmatch(r"(?=.{1,253}\Z)([A-Za-z0-9]([A-Za-z0-9\-]{0,61}[A-Za-z0-9])?)(\.[A-Za-z0-9]([A-Za-z0-9\-]{0,61}[A-Za-z0-9])?)+", v):
+    if not re.fullmatch(
+        r"(?=.{1,253}\Z)([A-Za-z0-9]([A-Za-z0-9\-]{0,61}[A-Za-z0-9])?)(\.[A-Za-z0-9]([A-Za-z0-9\-]{0,61}[A-Za-z0-9])?)+",
+        v,
+    ):
         return f"{value!r} is not a valid domain name"
     return None
 
@@ -211,11 +213,52 @@ def _check_credit_card(value: Any, _: dict) -> str | None:
 
 
 _ISO_4217 = {
-    "USD", "EUR", "GBP", "JPY", "CHF", "AUD", "CAD", "CNY", "SEK", "NZD",
-    "MXN", "SGD", "HKD", "NOK", "KRW", "TRY", "RUB", "INR", "BRL", "ZAR",
-    "AED", "ARS", "BGN", "CLP", "COP", "CZK", "DKK", "EGP", "HRK", "HUF",
-    "IDR", "ILS", "ISK", "MAD", "MYR", "NGN", "PEN", "PHP", "PLN", "QAR",
-    "RON", "SAR", "THB", "TWD", "UAH", "VND",
+    "USD",
+    "EUR",
+    "GBP",
+    "JPY",
+    "CHF",
+    "AUD",
+    "CAD",
+    "CNY",
+    "SEK",
+    "NZD",
+    "MXN",
+    "SGD",
+    "HKD",
+    "NOK",
+    "KRW",
+    "TRY",
+    "RUB",
+    "INR",
+    "BRL",
+    "ZAR",
+    "AED",
+    "ARS",
+    "BGN",
+    "CLP",
+    "COP",
+    "CZK",
+    "DKK",
+    "EGP",
+    "HRK",
+    "HUF",
+    "IDR",
+    "ILS",
+    "ISK",
+    "MAD",
+    "MYR",
+    "NGN",
+    "PEN",
+    "PHP",
+    "PLN",
+    "QAR",
+    "RON",
+    "SAR",
+    "THB",
+    "TWD",
+    "UAH",
+    "VND",
 }
 
 
@@ -464,9 +507,7 @@ CHECKERS = {
 }
 
 
-def run_standard_validator(
-    validator_type: StandardValidatorType, value: Any, params: dict
-) -> str | None:
+def run_standard_validator(validator_type: StandardValidatorType, value: Any, params: dict) -> str | None:
     """Look the checker up and run it. Returns ``None`` on success."""
     checker = CHECKERS.get(validator_type)
     if checker is None:

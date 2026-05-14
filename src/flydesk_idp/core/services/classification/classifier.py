@@ -47,11 +47,11 @@ class _ClassifierOutput(BaseModel):
 class ClassificationResult:
     """One classifier verdict for a single input file."""
 
-    document_type: str            # canonical docType from candidates, or ``unmatched``
+    document_type: str  # canonical docType from candidates, or ``unmatched``
     confidence: float = 0.0
     description: str = ""
     notes: str = ""
-    matched: bool = True          # False when document_type == ``unmatched``
+    matched: bool = True  # False when document_type == ``unmatched``
 
 
 class DocumentClassifier:
@@ -115,9 +115,7 @@ class DocumentClassifier:
             prompt.user,
             BinaryContent(data=document_bytes, media_type=media_type),
         ]
-        run_result = await timed_agent_run(
-            agent, content, op="classifier", model=model or self._model
-        )
+        run_result = await timed_agent_run(agent, content, op="classifier", model=model or self._model)
         raw: _ClassifierOutput = run_result.output
 
         doc_type = (raw.document_type or "").strip() or UNMATCHED

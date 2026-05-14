@@ -44,10 +44,12 @@ def _template() -> PromptTemplate:
 def _spec(doctype: str = "deed") -> DocSpec:
     return DocSpec(
         docType=DocType(documentType=doctype, description="x", country="ES"),
-        fieldGroups=[FieldGroup(
-            fieldGroupName="g",
-            fieldGroupFields=[FieldSpec(fieldName="a", fieldType=FieldType.STRING)],
-        )],
+        fieldGroups=[
+            FieldGroup(
+                fieldGroupName="g",
+                fieldGroupFields=[FieldSpec(fieldName="a", fieldType=FieldType.STRING)],
+            )
+        ],
         validators=ValidatorsSpec(),
     )
 
@@ -56,9 +58,7 @@ class _StubAgent:
     def __init__(self, *_a: Any, **_kw: Any) -> None: ...
 
 
-def _patch_llm(
-    monkeypatch: pytest.MonkeyPatch, segments: list[dict[str, Any]]
-) -> None:
+def _patch_llm(monkeypatch: pytest.MonkeyPatch, segments: list[dict[str, Any]]) -> None:
     async def _fake(agent: Any, content: Any, *, op: str, model: str) -> Any:
         output = splitter_module._SplitterOutput(
             segments=[splitter_module._SegmentModel(**s) for s in segments]
@@ -97,12 +97,23 @@ async def test_single_page_shortcircuits_no_llm(monkeypatch: pytest.MonkeyPatch)
 @pytest.mark.asyncio
 async def test_multi_segment_clamped_to_page_range(monkeypatch: pytest.MonkeyPatch) -> None:
     """LLM-reported pages are clamped to ``[1, page_count]``."""
-    _patch_llm(monkeypatch, [
-        {"pages": {"start": 1, "end": 3}, "provisional_type": "DNI",
-         "description": "Spanish DNI", "confidence": 0.95},
-        {"pages": {"start": 4, "end": 999}, "provisional_type": "utility_bill",
-         "description": "Utility bill", "confidence": 0.8},
-    ])
+    _patch_llm(
+        monkeypatch,
+        [
+            {
+                "pages": {"start": 1, "end": 3},
+                "provisional_type": "DNI",
+                "description": "Spanish DNI",
+                "confidence": 0.95,
+            },
+            {
+                "pages": {"start": 4, "end": 999},
+                "provisional_type": "utility_bill",
+                "description": "Utility bill",
+                "confidence": 0.8,
+            },
+        ],
+    )
     splitter = DocumentSplitter(template=_template(), model="anthropic:claude-opus-4-7")
 
     result = await splitter.discover(
@@ -117,7 +128,7 @@ async def test_multi_segment_clamped_to_page_range(monkeypatch: pytest.MonkeyPat
     assert result.segments[0].page_end == 3
     assert result.segments[0].provisional_type == "dni"  # lower-cased
     assert result.segments[1].page_start == 4
-    assert result.segments[1].page_end == 10    # clamped from 999
+    assert result.segments[1].page_end == 10  # clamped from 999
 
 
 @pytest.mark.asyncio
@@ -139,18 +150,23 @@ async def test_empty_llm_response_falls_back_to_whole_file(
     seg = result.segments[0]
     assert seg.page_start == 1
     assert seg.page_end == 21
-    assert seg.confidence == 0.0    # signal that segmentation failed
+    assert seg.confidence == 0.0  # signal that segmentation failed
 
 
 @pytest.mark.asyncio
 async def test_provisional_type_lowercased(monkeypatch: pytest.MonkeyPatch) -> None:
     """The free-text type label is normalised to snake_case-ish lowercase."""
-    _patch_llm(monkeypatch, [{
-        "pages": {"start": 1, "end": 21},
-        "provisional_type": " Notarial_Deed  ",
-        "description": "Spanish notarial deed",
-        "confidence": 0.9,
-    }])
+    _patch_llm(
+        monkeypatch,
+        [
+            {
+                "pages": {"start": 1, "end": 21},
+                "provisional_type": " Notarial_Deed  ",
+                "description": "Spanish notarial deed",
+                "confidence": 0.9,
+            }
+        ],
+    )
     splitter = DocumentSplitter(template=_template(), model="anthropic:claude-opus-4-7")
 
     result = await splitter.discover(

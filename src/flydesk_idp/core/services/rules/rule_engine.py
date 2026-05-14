@@ -110,9 +110,7 @@ class RuleEngine:
                 break  # safety net -- shouldn't happen for an acyclic graph
             active_rules: list[RuleSpec] = [rule_by_id[rid] for rid in ready_ids if rid in rule_by_id]
             level_index += 1
-            logger.debug(
-                "Evaluating rule level %d (%d rule(s))", level_index, len(active_rules)
-            )
+            logger.debug("Evaluating rule level %d (%d rule(s))", level_index, len(active_rules))
 
             prompt = self._template.render(
                 active_rules_json=json.dumps(
@@ -122,9 +120,7 @@ class RuleEngine:
                     self._build_rules_context(active_rules), indent=2, ensure_ascii=False
                 ),
                 documents_context_json=json.dumps(
-                    self._build_documents_context(
-                        active_rules, docs, extracted_by_doc, visual_by_doc
-                    ),
+                    self._build_documents_context(active_rules, docs, extracted_by_doc, visual_by_doc),
                     indent=2,
                     ensure_ascii=False,
                 ),
@@ -140,7 +136,9 @@ class RuleEngine:
                 intention=intention,
             )
             run_result = await timed_agent_run(
-                agent, prompt.user, op=f"rules.level.{level_index}",
+                agent,
+                prompt.user,
+                op=f"rules.level.{level_index}",
                 model=model or self._model,
             )
             for raw in run_result.output.rule_results:
@@ -160,9 +158,7 @@ class RuleEngine:
 
     # -------------------------------------------------------- DAG / context
 
-    def _build_dag(
-        self, rules: list[RuleSpec], rule_by_id: dict[str, RuleSpec]
-    ) -> TopologicalSorter[str]:
+    def _build_dag(self, rules: list[RuleSpec], rule_by_id: dict[str, RuleSpec]) -> TopologicalSorter[str]:
         sorter: TopologicalSorter[str] = TopologicalSorter()
         for rule in rules:
             parents: list[str] = []
@@ -171,9 +167,7 @@ class RuleEngine:
                     if parent.ruleId in rule_by_id:
                         parents.append(parent.ruleId)
                     else:
-                        logger.warning(
-                            "Rule %r references unknown parent rule %r", rule.id, parent.ruleId
-                        )
+                        logger.warning("Rule %r references unknown parent rule %r", rule.id, parent.ruleId)
             sorter.add(rule.id, *parents)
         return sorter
 
@@ -192,9 +186,13 @@ class RuleEngine:
         for rule in active_rules:
             for parent in rule.parents:
                 if isinstance(parent, RuleFieldParent):
-                    deps.setdefault(parent.documentType, {"fields": set(), "validators": set()})["fields"].update(parent.fieldNames)
+                    deps.setdefault(parent.documentType, {"fields": set(), "validators": set()})[
+                        "fields"
+                    ].update(parent.fieldNames)
                 elif isinstance(parent, RuleValidatorParent):
-                    deps.setdefault(parent.documentType, {"fields": set(), "validators": set()})["validators"].add(parent.validatorName)
+                    deps.setdefault(parent.documentType, {"fields": set(), "validators": set()})[
+                        "validators"
+                    ].add(parent.validatorName)
         # Walk every required dep and emit a row per match.
         rows: list[dict[str, Any]] = []
         spec_by_type = {d.docType.documentType: d for d in docs}

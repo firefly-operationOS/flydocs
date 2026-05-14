@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 @dataclass(slots=True)
 class PageRange:
     start: int  # 1-indexed, inclusive
-    end: int    # 1-indexed, inclusive
+    end: int  # 1-indexed, inclusive
 
 
 def slice_pdf(pdf_bytes: bytes, page_range: PageRange) -> bytes:

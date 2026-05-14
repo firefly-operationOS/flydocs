@@ -64,7 +64,9 @@ class RuleResult(BaseModel):
 
     rule_id: str
     predicate: str
-    output: str = Field(default="", description="The resolved output value (string form -- ``true``/``false``/...).")
+    output: str = Field(
+        default="", description="The resolved output value (string form -- ``true``/``false``/...)."
+    )
     summary: str = ""
     notes: list[str] = Field(default_factory=list)
     human_revision: str = Field(default="", description="Instructions for a human reviewer if needed.")

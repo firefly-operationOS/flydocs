@@ -19,11 +19,11 @@ from pyfly.starters.core import enable_core_stack
     version="0.1.0",
     description="Firefly Desk IDP -- multimodal document extraction with bounding boxes.",
     scan_packages=[
-        "flydesk_idp.core",                       # @configuration class
-        "flydesk_idp.core.services.extract",      # extract command handler
-        "flydesk_idp.core.services.jobs",         # job command/query handlers
-        "flydesk_idp.web.controllers",            # REST controllers
-        "flydesk_idp.web.advice",                 # exception advice
+        "flydesk_idp.core",  # @configuration class
+        "flydesk_idp.core.services.extract",  # extract command handler
+        "flydesk_idp.core.services.jobs",  # job command/query handlers
+        "flydesk_idp.web.controllers",  # REST controllers
+        "flydesk_idp.web.advice",  # exception advice
     ],
 )
 class FlydeskIDPApplication:
