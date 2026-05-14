@@ -19,11 +19,29 @@ dependencies = [
     # over pydantic-ai. Pulls in the OpenAI / Anthropic / Bedrock providers via pydantic-ai-slim.
     "fireflyframework-agentic[rest,security,redis]>=26.5.11",
 
-    # Document handling -- pypdf only for cheap page counting; the document
-    # bytes themselves are shipped straight to the multimodal LLM (no local
-    # rasterisation, no Pillow), so we stay format-agnostic (PDF, PNG, JPEG,
-    # WebP, TIFF, DOCX, ...).
+    # Document handling.
+    #
+    # ``pypdf`` -- cheap page counting + encrypted-PDF detection in the
+    # binary normalizer (raw bytes still ship straight to the multimodal
+    # LLM, no local rasterisation for the extraction path).
+    #
+    # ``Pillow`` + ``pillow-heif`` -- the binary normalizer uses Pillow
+    # to canonicalise raster inputs the LLM provider can't natively read
+    # (HEIC/HEIF iPhone photos, multi-frame TIFF fax scans, animated GIFs,
+    # SVG via cairosvg) into PNG or multi-page PDF.
+    #
+    # ``cairosvg`` -- vector SVG rasterisation; the providers don't accept
+    # SVG so we render to PNG before shipping.
+    #
+    # ``py7zr`` -- 7-Zip archive expansion (.zip and .tar are stdlib).
+    #
+    # ``extract-msg`` -- Outlook .msg parsing; .eml is stdlib ``email``.
     "pypdf>=4.3.0",
+    "Pillow>=11.0",
+    "pillow-heif>=0.18",
+    "cairosvg>=2.7",
+    "py7zr>=0.22",
+    "extract-msg>=0.51",
 
     # Pydantic AI models for multimodal/vision LLMs.
     "pydantic-ai-slim[anthropic,openai,bedrock]>=1.56.0",
@@ -65,6 +83,7 @@ dev = [
     "respx>=0.21",
     "httpx>=0.28",
     "reportlab>=4.2",  # synthesise sample PDFs in fixtures
+    "python-docx>=1.1",  # synthesise sample DOCX in fixtures
 ]
 
 [build-system]
