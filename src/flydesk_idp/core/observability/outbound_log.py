@@ -184,8 +184,8 @@ def _extract_usage_fields(result: Any, model: str) -> dict[str, Any]:
         # under a different module path; we keep the call lazy and
         # swallow every failure mode so missing pricing data degrades
         # to a zero-cost log line instead of a hard error.
-        from fireflyframework_agentic.observability.cost import (
-            get_cost_calculator,  # pyright: ignore[reportAttributeAccessIssue, reportMissingImports]  # noqa: E501
+        from fireflyframework_agentic.observability.cost import (  # pyright: ignore[reportMissingImports]
+            get_cost_calculator,  # pyright: ignore[reportAttributeAccessIssue]
         )
 
         calc = get_cost_calculator("auto")
