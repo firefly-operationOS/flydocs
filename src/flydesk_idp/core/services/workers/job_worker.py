@@ -100,6 +100,7 @@ class JobWorker:
                 result=result,
                 metadata=job.metadata_json or {},
                 callback_url=job.callback_url,
+                correlation=_extract_correlation(job.metadata_json),
             )
         except Exception as exc:  # noqa: BLE001
             attempts = (job.attempts or 0) + 1
@@ -115,6 +116,7 @@ class JobWorker:
                     callback_url=job.callback_url,
                     error_code="EXTRACTION_FAILED",
                     error_message=str(exc),
+                    correlation=_extract_correlation(job.metadata_json),
                 )
             else:
                 logger.warning(
@@ -149,16 +151,30 @@ class JobWorker:
         callback_url: str | None,
         error_code: str | None = None,
         error_message: str | None = None,
+        correlation: dict[str, str] | None = None,
     ) -> None:
         if not callback_url:
             return
+        # Strip internal-only entries from metadata before serialising to the
+        # webhook -- _correlation is propagated as headers, not as body fields.
+        clean_metadata = {k: v for k, v in (metadata or {}).items() if not k.startswith("_")}
         payload = JobWebhookPayload(
             job_id=job_id,
             status=status,
             occurred_at=datetime.now(timezone.utc),
-            metadata=metadata,
+            metadata=clean_metadata,
             result=result,
             error_code=error_code,
             error_message=error_message,
         )
-        await self._webhook.deliver(callback_url, payload)
+        await self._webhook.deliver(callback_url, payload, extra_headers=correlation or {})
+
+
+def _extract_correlation(metadata: dict[str, Any] | None) -> dict[str, str]:
+    """Pull the propagation context the submit handler stored in ``_correlation``."""
+    if not metadata:
+        return {}
+    raw = metadata.get("_correlation")
+    if not isinstance(raw, dict):
+        return {}
+    return {str(k): str(v) for k, v in raw.items() if v}

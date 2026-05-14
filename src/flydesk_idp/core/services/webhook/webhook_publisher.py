@@ -37,13 +37,34 @@ class WebhookPublisher:
         self._signature_header = signature_header
         self._signature_scheme = signature_scheme
 
-    async def deliver(self, url: str, payload: JobWebhookPayload) -> bool:
-        """Return True on success, False on permanent failure (after retries)."""
+    async def deliver(
+        self,
+        url: str,
+        payload: JobWebhookPayload,
+        *,
+        extra_headers: dict[str, str] | None = None,
+    ) -> bool:
+        """Return True on success, False on permanent failure (after retries).
+
+        Extra headers (typically the inbound X-Correlation-Id /
+        X-Request-Id / X-Tenant-Id / traceparent / tracestate the caller
+        supplied at submit time) are merged onto every outbound POST so
+        the downstream webhook receiver can correlate the delivery with
+        the original HTTP request.
+        """
         body = payload.model_dump_json(by_alias=True).encode("utf-8")
         headers = {
             "Content-Type": "application/json",
             "User-Agent": "flydesk-idp/0.1.0",
         }
+        if extra_headers:
+            # Don't let propagated headers stomp on the publisher's own.
+            for name, value in extra_headers.items():
+                if not value:
+                    continue
+                if name.lower() in ("content-type", "user-agent"):
+                    continue
+                headers[name] = value
         if self._hmac_secret is not None:
             digest = hmac.new(self._hmac_secret, body, hashlib.sha256).hexdigest()
             headers[self._signature_header] = f"{self._signature_scheme}={digest}"
