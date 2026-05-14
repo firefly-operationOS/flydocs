@@ -100,13 +100,43 @@ Two opt-in features that are on by default:
 
 - **Provenance**: `provenance: true` on `docker/build-push-action`
   records an SLSA-style attestation that the image came from this
-  workflow run.
+  workflow run. This one is emitted by buildkit and travels with the
+  manifest — works on every org plan.
 - **SBOM**: `sbom: true` attaches a CycloneDX SBOM to the manifest.
   `cosign verify-attestation` can read it.
 
+There is also an *advisory* `actions/attest-build-provenance` step
+that uploads a separate signed attestation document to the GitHub
+attestation store. That feature requires the *Build & Validate
+Attestations* setting, which is gated behind a paid plan (or making
+the repository public). The step is marked
+`continue-on-error: true`, so a free-tier org simply logs the 403 and
+the publish workflow stays green — the buildkit-emitted provenance
+above is still applied.
+
 The job's `permissions:` block grants the workflow `packages: write`
-(GHCR push), `id-token: write` and `attestations: write` (SLSA
-provenance attestation upload).
+(GHCR push), `id-token: write` and `attestations: write` (the
+attestation API call, when the feature is enabled).
+
+### Package visibility
+
+GHCR packages created by Actions are **private by default**. To pull
+the image without a token, flip the visibility in the package
+settings:
+
+1. Go to <https://github.com/orgs/firefly-operationOS/packages/container/flydesk-idp/settings>.
+2. Under *Danger Zone*, click **Change visibility** → **Public**.
+
+Or pull with auth:
+
+```bash
+echo "$GITHUB_TOKEN" | docker login ghcr.io -u <user> --password-stdin
+docker pull ghcr.io/firefly-operationos/flydesk-idp:latest
+```
+
+The GitHub Action's built-in token has `packages: read` (and `write`
+on the publish workflow) by default, so cross-repo CI pulls work
+without an extra secret.
 
 ### Image labels
 
