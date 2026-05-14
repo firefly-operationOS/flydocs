@@ -50,7 +50,7 @@ object containing, for every document you asked about:
 
 | Layer                       | What it tells you                                                                              |
 | --------------------------- | ---------------------------------------------------------------------------------------------- |
-| **Fields**                  | The extracted value, page number, normalised bounding box, model confidence, and free-text notes. |
+| **Fields**                  | The extracted value, page number, normalised bounding box (with a geometric quality verdict), model confidence, and free-text notes. |
 | **Field validation**        | Per-field PASS / FAIL plus a verdict from any built-in `StandardValidator` (IBAN, NIF, IBAN, Luhn, phone, postal code, …). |
 | **Visual authenticity**     | Yes/no verdicts on caller-defined visual validators (signature present, stamp present, photo present, …). |
 | **Content authenticity**    | Document-level integrity audit: date consistency, totals tally, expected boilerplate, tampering signals. |
@@ -58,9 +58,18 @@ object containing, for every document you asked about:
 | **Business rules**          | Boolean / categorical decisions over the data, evaluated as a DAG — _"is this KYC-complete?"_, _"escalate to manual review?"_, _"approve / reject"_. |
 | **Audit trail**             | Request id, per-stage latencies, per-doc model used, structured logs.                          |
 
+A single request can carry **one file or many**. Submit
+`documents: [...]` to ship several at once: pin each file's
+`document_type` when you know it, or let the LLM classifier decide.
+Each extracted document carries a `source_file` field so callers can
+map output back to the input file that produced it. The full
+multi-file shape is documented in
+[docs/api-reference.md § 2a](docs/api-reference.md#2a-multi-file-extraction).
+
 The same call works **synchronously** (`POST /api/v1/extract`, blocks
 until done) or as a **queued job** with a webhook
-(`POST /api/v1/jobs`, returns 202 + a job id).
+(`POST /api/v1/jobs`, returns 202 + a job id). The async endpoint is
+single-file only for now.
 
 ---
 
@@ -105,20 +114,23 @@ request through `ExtractionOptions.stages`; the engine builds a fresh
 DAG for each call so the audit trail reflects exactly what executed.
 
 ```
-                ┌────────────────────────────────────────────────────────┐
-   POST  ──────▶│  load → split? → extract → validate? → visual_auth? →  │──────▶ JSON
- (PDF/PNG/…)    │  content_auth? → judge? → rules? → assemble            │  (fields + bbox
-                └────────────────────────────────────────────────────────┘   + verdicts)
+                ┌──────────────────────────────────────────────────────────────────┐
+   POST  ──────▶│ load → classifier? → split? → plan_tasks → extract →             │──────▶ JSON
+ (PDF/PNG/…)    │ bbox_validation → field_validation? → visual_auth? →             │  (fields + bbox
+                │ content_auth? → judge? → judge_escalation? → rules? → assemble   │   + verdicts)
+                └──────────────────────────────────────────────────────────────────┘
                               │
-                              │  per-doc concurrency (asyncio.gather)
+                              │  per-task concurrency (asyncio.gather)
                               │  per-stage timeouts + error capture
                               ▼
                        structured trace
                        (request_id, latency_ms, pipeline_errors)
 ```
 
-The extractor is the only mandatory stage. Everything else is a
-caller-chosen trade-off between cost, latency, and rigor.
+The extractor and the geometric bbox check are the only mandatory
+stages. Everything else is a caller-chosen trade-off between cost,
+latency, and rigor. The classifier kicks in only when a multi-file
+request contains files without a `document_type` pin.
 
 See [docs/pipeline.md](docs/pipeline.md) for the deep dive.
 

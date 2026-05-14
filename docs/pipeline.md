@@ -29,23 +29,33 @@ exactly what executed.
 
 ## 2. The stages, at a glance
 
-| Order | Stage               | Mandatory? | What it does                                                                                       | Default timeout |
-| ----: | ------------------- | :--------: | -------------------------------------------------------------------------------------------------- | --------------: |
-|     1 | `load`              | yes        | Sniff media type, count pages. Pure Python.                                                        | 10 s            |
-|     2 | `split`             | no         | LLM identifies the page range of every target `docType` in a multi-doc file.                       | 60 s            |
-|     3 | `extract`           | yes        | LLM produces fields + normalised bboxes for every target document.                                 | 240 s           |
-|     4 | `field_validation`  | no         | Pure-Python validation: regex / enum / range + every `StandardValidator` declared per field.       | 5 s             |
-|     5 | `visual_authenticity` | no       | LLM evaluates caller-defined visual validators (signature present, stamp present, …).              | 180 s           |
-|     6 | `content_authenticity` | no      | LLM audit: dates consistent, totals add up, expected boilerplate, tampering signals.               | 180 s           |
-|     7 | `judge`             | no         | Second LLM pass re-grades every extracted value against the source.                                 | 180 s           |
-|     8 | `judge_escalation`  | no         | When the judge's failure rate exceeds `escalation_threshold`, re-run extract + judge with `escalation_model` and keep the better result. | 300 s |
-|     9 | `rules`             | no         | LLM evaluates the business-rule DAG, level by level.                                                | 180 s           |
-|    10 | `assemble`          | yes        | Pure Python: compose the `ExtractionResult`.                                                       | 5 s             |
+| Order | Stage                  | Mandatory? | What it does                                                                                                                             | Default timeout |
+| ----: | ---------------------- | :--------: | ---------------------------------------------------------------------------------------------------------------------------------------- | --------------: |
+|     1 | `load`                 | yes        | Sniff media type and count pages on every input file. Pure Python.                                                                      | 20 s            |
+|     2 | `classifier`           | no         | LLM picks which declared `DocSpec` each **unpinned** file matches. Skipped in single-file mode and when every file is pinned.            | 120 s           |
+|     3 | `split`                | no         | LLM identifies the page range of every target `docType`. Single-file only — multi-file requests treat each file as its own document.    | 60 s            |
+|     4 | `plan_tasks`           | yes        | Pure Python: build the flat `(file, DocSpec)` task list every downstream stage iterates.                                                | 5 s             |
+|     5 | `extract`              | yes        | LLM produces fields + normalised bboxes for every task. Fanned out with `asyncio.gather`.                                               | 300 s           |
+|     6 | `bbox_validation`      | yes        | Pure-Python geometric hallucination check: stamps every bbox with a `BboxQuality` verdict + continuous `quality_score`.                  | 5 s             |
+|     7 | `field_validation`     | no         | Pure-Python validation: regex / enum / range + every `StandardValidator` declared per field.                                            | 5 s             |
+|     8 | `visual_authenticity`  | no         | LLM evaluates caller-defined visual validators (signature present, stamp present, …).                                                   | 180 s           |
+|     9 | `content_authenticity` | no         | LLM audit: dates consistent, totals add up, expected boilerplate, tampering signals.                                                   | 180 s           |
+|    10 | `judge`                | no         | Second LLM pass re-grades every extracted value against the source.                                                                     | 180 s           |
+|    11 | `judge_escalation`     | no         | When the judge's failure rate exceeds `escalation_threshold`, re-run extract + judge with `escalation_model` and keep the better result. | 300 s           |
+|    12 | `rules`                | no         | LLM evaluates the business-rule DAG, level by level.                                                                                    | 180 s           |
+|    13 | `assemble`             | yes        | Pure Python: compose the `ExtractionResult`.                                                                                            | 5 s             |
 
-Stages 2–9 are caller-toggled through `ExtractionOptions.stages`. The
-splitter is additionally short-circuited when there's only one
-document type (no need to split) or the source is a single page.
-`judge_escalation` is silently skipped when `judge` is off.
+Optional stages are caller-toggled through `ExtractionOptions.stages`.
+Other short-circuits:
+
+- `classifier` runs only in multi-file mode AND when at least one file
+  lacks a `document_type` pin AND `stages.classifier` is on (default
+  `true`).
+- `split` is single-file only and is additionally skipped when there's
+  only one document type or the source is a single page.
+- `bbox_validation` is non-toggleable — it is pure geometry and runs
+  on every request.
+- `judge_escalation` is silently skipped when `judge` is off.
 
 ---
 
@@ -53,13 +63,28 @@ document type (no need to split) or the source is a single page.
 
 ```python
 builder = PipelineBuilder("flydesk-idp")
-builder.add_node("load",    CallableStep(self._step_load),    timeout_seconds=10)
-if stages.splitter and len(request.docs) > 1:
+builder.add_node("load", CallableStep(self._step_load), timeout_seconds=20)
+
+# Classifier only runs in multi-file mode AND when some file lacks a pin.
+needs_classifier = (
+    stages.classifier and is_multi_file and any(not f.document_type for f in files)
+)
+if needs_classifier:
+    builder.add_node("classifier", CallableStep(self._step_classifier), timeout_seconds=120)
+
+# Splitter is single-file only.
+if stages.splitter and not is_multi_file and len(request.docs) > 1:
     builder.add_node("split", CallableStep(self._step_split), timeout_seconds=60)
-builder.add_node("extract", CallableStep(self._step_extract), timeout_seconds=240)
+
+builder.add_node("plan_tasks", CallableStep(self._step_plan_tasks), timeout_seconds=5)
+builder.add_node("extract",    CallableStep(self._step_extract),    timeout_seconds=300)
+builder.add_node("bbox_validation", CallableStep(self._step_bbox_validation), timeout_seconds=5)
+
 if stages.field_validation:
     builder.add_node("field_validation", ...)
-...
+# ...visual_authenticity, content_authenticity, judge, judge_escalation, rules...
+
+builder.add_node("assemble", CallableStep(self._step_assemble), timeout_seconds=5)
 builder.chain(*chain)        # linear order
 engine = builder.build()
 engine._event_handler = _LoggingEventHandler(str(request.request_id))
@@ -81,16 +106,57 @@ Three properties fall out of this design:
 
 ## 4. Stage-by-stage
 
+> **Multi-file primer.** Two request shapes converge onto the same
+> downstream pipeline. The orchestrator normalises both into a flat
+> `tasks: list[_ExtractionTask]` -- one entry per `(file, DocSpec)`
+> pair -- and every per-stage method iterates that list.
+>
+> - **Single file** (`request.document`, legacy shape): one task per
+>   target `DocSpec` when the splitter ran, otherwise one task against
+>   the whole document.
+> - **Multi-file** (`request.documents = [...]`): one task per submitted
+>   file. The caller may pin each file's `document_type`; unpinned
+>   files go through the classifier. Files the classifier marks
+>   `unmatched` skip extraction entirely and land in
+>   `result.additional_documents` with `document_type="unmatched"`.
+
 ### 4a. `load`
 
-`core/services/extraction/loader.py::load_document` sniffs the media
-type (magic bytes, then declared content type as a fallback) and
-counts pages (`pypdf` for PDF; everything else is one page from the
-extractor's point of view). Stored in `ctx.metadata["loaded"]`.
+`core/services/extraction/loader.py::load_document` runs once per input
+file. It sniffs the media type (magic bytes first, declared content
+type as a fallback) and counts pages (`pypdf` for PDF; everything else
+is one page from the extractor's point of view). Each file becomes a
+`_FileSlot` in `ctx.metadata["files_data"]`.
 
 No LLM calls. Cheap.
 
-### 4b. `split`
+### 4b. `classifier`
+
+`core/services/classification/classifier.py`. One LLM call per
+**unpinned** file, fanned out with `asyncio.gather`.
+
+Each call sees the file bytes (multimodal `BinaryContent`) plus the
+JSON dump of every candidate `DocSpec.docType` (id, description,
+country). The LLM returns one of the declared `documentType` values or
+the literal `"unmatched"`. The classifier coerces anything outside the
+closed candidate set to `unmatched` defensively.
+
+The per-file verdict is surfaced on `result.files[i].classification`
+(matched, confidence, description, notes). Files that come back
+`unmatched` skip extraction and appear in
+`result.additional_documents` as `document_type="unmatched"`.
+
+The stage is skipped when:
+
+- the request is single-file (the docType is implicit in `docs[]`), or
+- every file is pinned with a `document_type` (nothing to classify), or
+- `stages.classifier` is off.
+
+### 4c. `split`
+
+> Single-file only. In multi-file mode each input is already one
+> document — the splitter is short-circuited and `plan_tasks` builds
+> one task per file directly.
 
 `core/services/splitting/splitter.py`. Shortcut for single-page or
 single-target requests — no LLM call.
@@ -105,10 +171,20 @@ Page ranges are clamped to `[1, page_count]` and `start <= end` is
 enforced before slicing. PDF slicing uses `pypdf` (see
 `pdf_slicer.py`); non-PDF inputs are not sliced.
 
-### 4c. `extract`
+### 4d. `plan_tasks`
 
-`core/services/extraction/extractor.py`. One LLM call per `DocSpec`,
-fanned out with `asyncio.gather`.
+Pure-Python bookkeeping (no LLM). Walks the per-file slots and the
+splitter / classifier outcomes and produces the flat
+`tasks: list[_ExtractionTask]` that every downstream stage iterates.
+A task is one `(file, DocSpec, slice_bytes, page_range)` tuple --
+exactly the unit `extract` runs once. The conversion from "request
+shape" to "tasks" lives here, so the downstream stages don't have to
+care whether the request was single- or multi-file.
+
+### 4e. `extract`
+
+`core/services/extraction/extractor.py`. One LLM call per task, fanned
+out with `asyncio.gather`.
 
 For each call:
 
@@ -124,10 +200,37 @@ For each call:
 
 Fallback: if the primary model fails (timeout, content policy, etc.)
 **and** `FLYDESK_IDP_FALLBACK_MODEL` is set to a different model, the
-extractor retries on the fallback. The actual model used is reported
-back in `per_doc_model_used` and reflected in `result.model`.
+extractor retries on the fallback. The actual model used per task is
+reflected in `result.model` (when more than one model contributed,
+they're joined with a comma).
 
-### 4d. `field_validation`
+### 4f. `bbox_validation`
+
+`core/services/bbox/bbox_validator.py`. Pure Python — no LLM, no OCR.
+
+Runs on **every** request immediately after extract. For each
+extracted field's `bbox`, the validator stamps:
+
+- `quality`: one of `good`, `poor`, `suspicious`, `invalid`, `empty`,
+- `quality_score`: continuous score in `[0, 1]` (area + aspect-ratio
+  + margin-hugging components, weighted 0.5 / 0.3 / 0.2).
+
+Heuristics, in priority order:
+
+| Verdict       | Trigger                                                                                                       | Default score |
+| ------------- | ------------------------------------------------------------------------------------------------------------- | ------------- |
+| `empty`       | `fieldValueFound is None` or zero-area placeholder `BoundingBox.empty()`.                                     | 0.0           |
+| `invalid`     | Corners outside `[0, 1]`, `xmin >= xmax`, or `ymin >= ymax` (pydantic also rejects most of these at parse).   | 0.0           |
+| `suspicious`  | Area > 0.7 of the page, or covers > 0.9 horizontally / vertically. Classic LLM hallucination of a generic region. | 0.2           |
+| `poor`        | Area < 5e-5 (~5px×5px on a 1000px-wide render) or extreme aspect ratio (height/width > 30 or < 1/30).        | 0.4           |
+| `good`        | Anything else. Score combines area, aspect, and margin sanity.                                                | 0.5 – 1.0     |
+
+This is a cheap geometric defence -- not a full OCR-grounded check. A
+"good" verdict means the box is geometrically plausible; it does not
+prove the LLM correctly anchored the value. Pair it with `judge` for
+semantic anchoring.
+
+### 4g. `field_validation`
 
 `core/services/validation/field_validator.py`. Pure Python — no LLM.
 
@@ -147,7 +250,7 @@ default a failure flips `field_validation.valid` to false; pass
 `{"severity": "warning"}` to record the error without flipping the
 flag.
 
-### 4e. `visual_authenticity`
+### 4h. `visual_authenticity`
 
 `core/services/authenticity/visual_validator.py`. One LLM call per
 document.
@@ -164,7 +267,7 @@ Output: one `VisualValidationOutcome` per validator with `passed`,
 Use this for visible-only checks (presence of a signature, a stamp, a
 photo, an MRZ band, …) — not for semantic checks over field values.
 
-### 4f. `content_authenticity`
+### 4i. `content_authenticity`
 
 `core/services/authenticity/content_validator.py`. One LLM call per
 document. No caller-defined validators — the LLM picks the coherence
@@ -180,7 +283,7 @@ Output: a `ContentAuthenticity` aggregate with:
 Useful for "is this document internally consistent" checks where
 hand-coding the list of validators is impractical.
 
-### 4g. `judge`
+### 4j. `judge`
 
 `core/services/judge/judge.py`. One LLM call per document.
 
@@ -198,7 +301,7 @@ The judge is **strict**: a value that's plausible but unsupported by
 the document gets `status=FAIL`. This is the cheapest defence against
 LLM hallucinations.
 
-### 4h. `judge_escalation`
+### 4k. `judge_escalation`
 
 `core/services/escalation/judge_escalator.py`. Implements the
 "cheap-by-default + escalate-on-uncertainty" policy: when the judge
@@ -223,7 +326,7 @@ escalation `claude-opus` / `gpt-4o`. The cheap model handles ~80% of
 traffic; the expensive one only kicks in on documents where the cheap
 model misled the judge.
 
-### 4i. `rules`
+### 4l. `rules`
 
 `core/services/rules/rule_engine.py`. The business-rule DAG.
 
@@ -238,7 +341,7 @@ model misled the judge.
 
 See [rule-engine.md](rule-engine.md) for the full mechanics.
 
-### 4j. `assemble`
+### 4m. `assemble`
 
 Pure Python. A no-op node; the actual result composition happens in
 `PipelineOrchestrator._build_result` after the engine completes. The

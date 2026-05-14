@@ -35,6 +35,11 @@ Blocks until the orchestrator finishes or `FLYDESK_IDP_SYNC_TIMEOUT_S`
 elapses (default 60 s). On timeout the controller returns
 `408 extraction_timeout`.
 
+The request accepts **either** a single file (`document`) or a list
+(`documents`) -- they're mutually exclusive. The legacy single-file
+shape is unchanged for backwards compatibility; the multi-file shape
+is documented in [§ 2a](#2a-multi-file-extraction).
+
 ### Request
 
 ```jsonc
@@ -114,12 +119,24 @@ elapses (default 60 s). On timeout the controller returns
 ```jsonc
 {
   "request_id": "8d6624d3-96b0-43e4-b99f-e03258a99b22",
-  "document": {
+  "document": {                                  // legacy single-file echo; null in multi-file mode
     "filename": "deed.pdf",
     "media_type": "application/pdf",
     "page_count": 21,
-    "bytes": 384112
+    "bytes": 384112,
+    "document_type": null,                       // implicit in docs[0] for the legacy shape
+    "classification": null                       // classifier didn't run in single-file mode
   },
+  "files": [                                     // per-file summary; one entry per input file
+    {
+      "filename": "deed.pdf",
+      "media_type": "application/pdf",
+      "page_count": 21,
+      "bytes": 384112,
+      "document_type": null,
+      "classification": null
+    }
+  ],
   "documents": [
     {
       "document_type": "escritura_poderes",
@@ -127,6 +144,7 @@ elapses (default 60 s). On timeout the controller returns
       "pages": [1, 2, /* ... */ 21],
       "description": "Escritura notarial de poderes",
       "confidence": 1.0,
+      "source_file": null,                        // filename of the input file; set only in multi-file mode
       "fields": [
         {
           "fieldGroupName": "otorgamiento",
@@ -136,7 +154,11 @@ elapses (default 60 s). On timeout the controller returns
               "fieldValueFound": "2025-05-15",
               "confidence": 0.98,
               "pagesFound": [1],
-              "bbox": {"xmin": 0.15, "ymin": 0.26, "xmax": 0.85, "ymax": 0.30},
+              "bbox": {
+                "xmin": 0.15, "ymin": 0.26, "xmax": 0.85, "ymax": 0.30,
+                "quality": "good",                // bbox_validation verdict; good|poor|suspicious|invalid|empty
+                "quality_score": 0.94             // continuous score in [0, 1]
+              },
               "notes": "Otorgamiento date on first page header.",
               "field_validation": {"valid": true, "errors": []},
               "judge": {
@@ -183,7 +205,78 @@ elapses (default 60 s). On timeout the controller returns
 |    400 | _various_              | Pydantic validation failed (RFC 7807 body with field errors).      |
 |    408 | `extraction_timeout`   | Sync pipeline exceeded `FLYDESK_IDP_SYNC_TIMEOUT_S`.                |
 |    413 | `document_too_large`   | Decoded document exceeds `FLYDESK_IDP_MAX_BYTES` (default 32 MiB).  |
-|    422 | `invalid_base64`       | `document.content_base64` failed strict base64 parsing.            |
+|    422 | `invalid_base64`       | A `content_base64` field failed strict base64 parsing.             |
+|    422 | `invalid_request`      | Semantic validator rejected the payload (e.g. a `document_type` pin references an undeclared docType, rule points at an unknown field). The body includes the full report so the caller can fix every issue at once. |
+
+### 2a. Multi-file extraction
+
+Submit several files in one request by sending `documents` (a list)
+instead of `document` (a single object). The two shapes are mutually
+exclusive; the request validator rejects payloads that set both or
+neither.
+
+Each entry in `documents` carries the same fields as the legacy
+`document`, plus an optional `document_type` pin:
+
+```jsonc
+{
+  "intention": "KYC pack: deed + spanish DNI + utility bill.",
+  "documents": [
+    {
+      "filename": "deed.pdf",
+      "content_base64": "JVBERi0xLjQK...",
+      "content_type": "application/pdf",
+      "document_type": "escritura_poderes"     // caller pin -- skips the classifier
+    },
+    {
+      "filename": "dni.jpg",
+      "content_base64": "/9j/4AAQ...",
+      "content_type": "image/jpeg"
+                                                // no pin -- classifier picks the docType
+    },
+    {
+      "filename": "utility.pdf",
+      "content_base64": "JVBERi0xLjQK...",
+      "content_type": "application/pdf"
+    }
+  ],
+  "docs": [
+    { "docType": {"documentType": "escritura_poderes", "description": "...", "country": "ES"}, "fieldGroups": [/* ... */] },
+    { "docType": {"documentType": "dni",               "description": "...", "country": "ES"}, "fieldGroups": [/* ... */] },
+    { "docType": {"documentType": "utility_bill",      "description": "...", "country": "ES"}, "fieldGroups": [/* ... */] }
+  ],
+  "options": {
+    "stages": {
+      "classifier": true,                       // default; on for multi-file with unpinned files
+      "splitter": false,                        // splitter is single-file only
+      "field_validation": true,
+      "judge": true
+    }
+  }
+}
+```
+
+The response shape is the same `ExtractionResult`, but:
+
+- `document` is `null` (the legacy field).
+- `files[]` has one entry per input file. For unpinned files,
+  `files[i].classification` carries the classifier verdict
+  (`document_type`, `matched`, `confidence`, `description`, `notes`).
+- `documents[i].source_file` carries the input filename that each
+  extracted document came from -- so the caller can map per-task
+  output back to the file that produced it.
+- Files the classifier marks `unmatched` skip extraction and appear in
+  `additional_documents` with `document_type: "unmatched"` and
+  `source_file` set to the original filename.
+
+Two correctness notes:
+
+- A `document_type` pin **must** reference a docType declared in
+  `docs[]`. Unknown pins are rejected with `422 invalid_request /
+  code=document_type_unknown` before the pipeline runs.
+- Per-file size limits (`FLYDESK_IDP_MAX_BYTES`) are enforced
+  individually -- a single oversized file rejects the whole request
+  with `413 document_too_large` naming that file.
 
 ---
 
@@ -193,6 +286,10 @@ For documents that may take longer than the sync ceiling, or for
 fire-and-forget workflows with a webhook callback. The submit endpoint
 returns immediately; the worker drives the same orchestrator behind
 the scenes.
+
+> **Single-file only.** The async submit endpoint currently accepts
+> the legacy `document` shape only. Multi-file workloads should use
+> the sync endpoint, or open one job per file.
 
 ### Submit
 
