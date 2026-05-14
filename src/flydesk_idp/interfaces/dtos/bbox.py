@@ -5,6 +5,25 @@ All values are floats in ``[0, 1]``. ``(0, 0)`` is the top-left of the
 rendered page; ``(1, 1)`` is the bottom-right. The contract is enforced
 both by the prompt sent to the LLM and by post-processing in
 :mod:`flydesk_idp.core.services.extraction.postprocess`.
+
+.. warning::
+
+   **LLM-estimated bboxes are NOT precise.** Today the coordinates come
+   straight from the multimodal model's visual estimate, with no
+   grounding against the document's real text layer. Empirically the
+   boxes land in the right region of the page but are routinely off by
+   one or more lines and frequently miss the actual value entirely. The
+   geometric :class:`BboxValidator` only verifies that the shape is
+   plausible (area, aspect ratio, edge sanity) -- it cannot detect
+   whether the box actually fences any real text.
+
+   **Near-future improvement** (tracked, not yet implemented): anchor
+   every bbox to the document text by extracting word-level coordinates
+   with ``pdfplumber`` for born-digital PDFs and Tesseract OCR for
+   scanned PDFs / images, then replacing the LLM box with the union of
+   the matching word boxes. Callers will be able to distinguish the
+   two via a ``source: "llm" | "ocr"`` discriminator. Until that ships,
+   treat bboxes as a "where to look" hint, not a precise locator.
 """
 
 from __future__ import annotations
@@ -53,7 +72,9 @@ class BoundingBox(BaseModel):
             "Continuous geometric quality score in ``[0, 1]``. Combines "
             "area, aspect ratio, and edge sanity. 0.0 for empty / "
             "missing boxes; ~1.0 for boxes that fall in a plausible "
-            "text-bounding region."
+            "text-bounding region. **Does NOT mean the box actually "
+            "fences the real text** -- it only means the shape is "
+            "plausible. See the module docstring on LLM bbox imprecision."
         ),
     )
 

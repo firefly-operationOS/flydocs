@@ -249,6 +249,18 @@ This is a cheap geometric defence -- not a full OCR-grounded check. A
 prove the LLM correctly anchored the value. Pair it with `judge` for
 semantic anchoring.
 
+> **Known limitation — near-future improvement.** LLM-estimated bboxes
+> are imprecise: they land in roughly the right region of the page but
+> routinely miss the actual text by one or more lines. The geometric
+> validator cannot catch this. The planned fix is **text-layer
+> grounding**: extract word-level coordinates with `pdfplumber` for
+> born-digital PDFs and Tesseract OCR for scanned PDFs / images, then
+> replace the LLM's box with the union of the words that match the
+> extracted value. Once in place the response will distinguish the two
+> via a `bbox.source: "llm" | "ocr"` discriminator. Until that ships,
+> treat bboxes as a "where to look" hint, not a precise locator -- see
+> the warning in `interfaces/dtos/bbox.py`.
+
 ### 4g. `field_validation`
 
 `core/services/validation/field_validator.py`. Pure Python — no LLM.
