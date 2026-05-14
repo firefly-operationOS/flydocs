@@ -39,8 +39,14 @@ _TIFF_LE = b"II*\x00"
 _TIFF_BE = b"MM\x00*"
 
 _IMAGE_TYPES = {
-    "image/png", "image/jpeg", "image/jpg", "image/webp",
-    "image/gif", "image/tiff", "image/heic", "image/heif",
+    "image/png",
+    "image/jpeg",
+    "image/jpg",
+    "image/webp",
+    "image/gif",
+    "image/tiff",
+    "image/heic",
+    "image/heif",
 }
 
 

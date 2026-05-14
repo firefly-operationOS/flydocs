@@ -35,9 +35,7 @@ class CancelJobHandler(CommandHandler[CancelJobCommand, JobStatusResponse | None
             return None
         status = JobStatus(job.status)
         if status != JobStatus.QUEUED:
-            raise JobNotCancellable(
-                f"Job {job.id!r} cannot be cancelled in status {status.value}"
-            )
+            raise JobNotCancellable(f"Job {job.id!r} cannot be cancelled in status {status.value}")
         await self._repository.mark_cancelled(job.id)
         return JobStatusResponse(
             job_id=job.id,

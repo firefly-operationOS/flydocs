@@ -46,7 +46,6 @@ from flydesk_idp.interfaces.dtos.standard_validator import StandardValidatorSpec
 from flydesk_idp.interfaces.enums.field_type import FieldType
 from flydesk_idp.interfaces.enums.standard_validator import StandardValidatorType
 
-
 PDF_PATH = Path.home() / "Downloads" / "escritura_poderes_2025.pdf"
 MODEL = os.environ.get("FLYDESK_IDP_TEST_MODEL", "anthropic:claude-opus-4-7")
 
@@ -292,7 +291,7 @@ def test_real_claude_extraction_with_rules() -> None:
             model=MODEL,
             language_hint="es",
             stages=StageToggles(
-                splitter=False,           # single doc-type, no need to split
+                splitter=False,  # single doc-type, no need to split
                 field_validation=True,
                 visual_authenticity=True,
                 content_authenticity=False,
@@ -326,9 +325,9 @@ def test_real_claude_extraction_with_rules() -> None:
     for f in located:
         assert f.pagesFound, f"Located field {f.fieldName!r} has no pages"
         assert all(p >= 1 for p in f.pagesFound)
-        assert (
-            f.bbox.xmax > f.bbox.xmin and f.bbox.ymax > f.bbox.ymin
-        ), f"Located field {f.fieldName!r} has degenerate bbox"
+        assert f.bbox.xmax > f.bbox.xmin and f.bbox.ymax > f.bbox.ymin, (
+            f"Located field {f.fieldName!r} has degenerate bbox"
+        )
 
     # Judge must have stamped a verdict on every located field.
     for f in located:
@@ -357,9 +356,7 @@ async def _run_via_di(request: ExtractionRequest):
     pyfly_app = PyFlyApplication(FlydeskIDPApplication)
     await pyfly_app.startup()
     try:
-        orchestrator: PipelineOrchestrator = pyfly_app.context.container.resolve(
-            PipelineOrchestrator
-        )
+        orchestrator: PipelineOrchestrator = pyfly_app.context.container.resolve(PipelineOrchestrator)
         return await orchestrator.execute(request)
     finally:
         await pyfly_app.shutdown()

@@ -33,7 +33,6 @@ from flydesk_idp.interfaces.dtos.rule import (
     RuleValidatorParent,
 )
 
-
 Severity = Literal["error", "warning"]
 
 
@@ -105,16 +104,18 @@ class RequestValidator:
             if not file.document_type:
                 continue
             if file.document_type not in known_types:
-                report.issues.append(ValidationIssue(
-                    severity="error",
-                    code="document_type_unknown",
-                    message=(
-                        f"File {file.filename!r} pins document_type "
-                        f"{file.document_type!r} which is not declared in "
-                        "docs[]."
-                    ),
-                    path=f"documents[{f_index}].document_type",
-                ))
+                report.issues.append(
+                    ValidationIssue(
+                        severity="error",
+                        code="document_type_unknown",
+                        message=(
+                            f"File {file.filename!r} pins document_type "
+                            f"{file.document_type!r} which is not declared in "
+                            "docs[]."
+                        ),
+                        path=f"documents[{f_index}].document_type",
+                    )
+                )
 
     # -- doc-level checks ------------------------------------------------
 
@@ -127,85 +128,82 @@ class RequestValidator:
             doc_type = doc.docType.documentType
             seen_doctypes[doc_type] = seen_doctypes.get(doc_type, 0) + 1
             if not doc.fieldGroups:
-                report.issues.append(ValidationIssue(
-                    severity="error",
-                    code="empty_field_groups",
-                    message=f"DocSpec {doc_type!r} declares no fieldGroups -- nothing to extract.",
-                    path=f"docs[{d_index}].fieldGroups",
-                ))
+                report.issues.append(
+                    ValidationIssue(
+                        severity="error",
+                        code="empty_field_groups",
+                        message=f"DocSpec {doc_type!r} declares no fieldGroups -- nothing to extract.",
+                        path=f"docs[{d_index}].fieldGroups",
+                    )
+                )
                 continue
             for g_index, group in enumerate(doc.fieldGroups):
                 if not group.fieldGroupFields:
-                    report.issues.append(ValidationIssue(
-                        severity="error",
-                        code="empty_field_group",
-                        message=(
-                            f"DocSpec {doc_type!r} fieldGroup "
-                            f"{group.fieldGroupName!r} has no fields."
-                        ),
-                        path=f"docs[{d_index}].fieldGroups[{g_index}].fieldGroupFields",
-                    ))
+                    report.issues.append(
+                        ValidationIssue(
+                            severity="error",
+                            code="empty_field_group",
+                            message=(
+                                f"DocSpec {doc_type!r} fieldGroup {group.fieldGroupName!r} has no fields."
+                            ),
+                            path=f"docs[{d_index}].fieldGroups[{g_index}].fieldGroupFields",
+                        )
+                    )
             # Duplicate field names within the same doc.
-            all_names: list[str] = [
-                f.fieldName
-                for g in doc.fieldGroups
-                for f in g.fieldGroupFields
-            ]
+            all_names: list[str] = [f.fieldName for g in doc.fieldGroups for f in g.fieldGroupFields]
             seen: set[str] = set()
             for name in all_names:
                 if name in seen:
-                    report.issues.append(ValidationIssue(
-                        severity="error",
-                        code="duplicate_field_name",
-                        message=(
-                            f"DocSpec {doc_type!r} declares fieldName {name!r} "
-                            "more than once."
-                        ),
-                        path=path,
-                    ))
+                    report.issues.append(
+                        ValidationIssue(
+                            severity="error",
+                            code="duplicate_field_name",
+                            message=(f"DocSpec {doc_type!r} declares fieldName {name!r} more than once."),
+                            path=path,
+                        )
+                    )
                 seen.add(name)
 
         # Duplicate documentType across docs.
         for doc_type, count in seen_doctypes.items():
             if count > 1:
-                report.issues.append(ValidationIssue(
-                    severity="error",
-                    code="duplicate_document_type",
-                    message=(
-                        f"documentType {doc_type!r} declared {count} times in "
-                        "docs[]; document types must be unique."
-                    ),
-                    path="docs[].docType.documentType",
-                ))
+                report.issues.append(
+                    ValidationIssue(
+                        severity="error",
+                        code="duplicate_document_type",
+                        message=(
+                            f"documentType {doc_type!r} declared {count} times in "
+                            "docs[]; document types must be unique."
+                        ),
+                        path="docs[].docType.documentType",
+                    )
+                )
 
     # -- rule reference checks -------------------------------------------
 
-    def _check_rule_references(
-        self, request: ExtractionRequest, report: ValidationReport
-    ) -> None:
+    def _check_rule_references(self, request: ExtractionRequest, report: ValidationReport) -> None:
         # Catalog what's declared so rule parents can be resolved.
-        doc_index = {
-            doc.docType.documentType: doc for doc in request.docs
-        }
+        doc_index = {doc.docType.documentType: doc for doc in request.docs}
         fields_per_doc: dict[str, set[str]] = {
             dt: {f.fieldName for g in d.fieldGroups for f in g.fieldGroupFields}
             for dt, d in doc_index.items()
         }
         validators_per_doc: dict[str, set[str]] = {
-            dt: {v.name for v in d.validators.visual}
-            for dt, d in doc_index.items()
+            dt: {v.name for v in d.validators.visual} for dt, d in doc_index.items()
         }
         rule_ids = {r.id for r in request.rules}
 
         seen_ids: set[str] = set()
         for r_index, rule in enumerate(request.rules):
             if rule.id in seen_ids:
-                report.issues.append(ValidationIssue(
-                    severity="error",
-                    code="duplicate_rule_id",
-                    message=f"Rule id {rule.id!r} is declared more than once.",
-                    path=f"rules[{r_index}].id",
-                ))
+                report.issues.append(
+                    ValidationIssue(
+                        severity="error",
+                        code="duplicate_rule_id",
+                        message=f"Rule id {rule.id!r} is declared more than once.",
+                        path=f"rules[{r_index}].id",
+                    )
+                )
             seen_ids.add(rule.id)
 
             for p_index, parent in enumerate(rule.parents):
@@ -213,147 +211,158 @@ class RequestValidator:
 
                 if isinstance(parent, RuleFieldParent):
                     if parent.documentType not in doc_index:
-                        report.issues.append(ValidationIssue(
-                            severity="error",
-                            code="rule_unknown_doctype",
-                            message=(
-                                f"Rule {rule.id!r} references documentType "
-                                f"{parent.documentType!r} which is not declared in docs[]."
-                            ),
-                            path=parent_path,
-                        ))
+                        report.issues.append(
+                            ValidationIssue(
+                                severity="error",
+                                code="rule_unknown_doctype",
+                                message=(
+                                    f"Rule {rule.id!r} references documentType "
+                                    f"{parent.documentType!r} which is not declared in docs[]."
+                                ),
+                                path=parent_path,
+                            )
+                        )
                         continue
                     known = fields_per_doc.get(parent.documentType, set())
                     for fn in parent.fieldNames:
                         if fn not in known:
-                            report.issues.append(ValidationIssue(
-                                severity="error",
-                                code="rule_unknown_field",
-                                message=(
-                                    f"Rule {rule.id!r} references field "
-                                    f"{fn!r} on documentType "
-                                    f"{parent.documentType!r}, but that doc "
-                                    "doesn't declare such a field."
-                                ),
-                                path=parent_path,
-                            ))
+                            report.issues.append(
+                                ValidationIssue(
+                                    severity="error",
+                                    code="rule_unknown_field",
+                                    message=(
+                                        f"Rule {rule.id!r} references field "
+                                        f"{fn!r} on documentType "
+                                        f"{parent.documentType!r}, but that doc "
+                                        "doesn't declare such a field."
+                                    ),
+                                    path=parent_path,
+                                )
+                            )
 
                 elif isinstance(parent, RuleValidatorParent):
                     if parent.documentType not in doc_index:
-                        report.issues.append(ValidationIssue(
-                            severity="error",
-                            code="rule_unknown_doctype",
-                            message=(
-                                f"Rule {rule.id!r} references documentType "
-                                f"{parent.documentType!r} which is not declared in docs[]."
-                            ),
-                            path=parent_path,
-                        ))
+                        report.issues.append(
+                            ValidationIssue(
+                                severity="error",
+                                code="rule_unknown_doctype",
+                                message=(
+                                    f"Rule {rule.id!r} references documentType "
+                                    f"{parent.documentType!r} which is not declared in docs[]."
+                                ),
+                                path=parent_path,
+                            )
+                        )
                         continue
                     known = validators_per_doc.get(parent.documentType, set())
                     if parent.validatorName not in known:
-                        report.issues.append(ValidationIssue(
-                            severity="error",
-                            code="rule_unknown_validator",
-                            message=(
-                                f"Rule {rule.id!r} references validator "
-                                f"{parent.validatorName!r} on documentType "
-                                f"{parent.documentType!r}, but that doc "
-                                "doesn't declare such a visual validator."
-                            ),
-                            path=parent_path,
-                        ))
+                        report.issues.append(
+                            ValidationIssue(
+                                severity="error",
+                                code="rule_unknown_validator",
+                                message=(
+                                    f"Rule {rule.id!r} references validator "
+                                    f"{parent.validatorName!r} on documentType "
+                                    f"{parent.documentType!r}, but that doc "
+                                    "doesn't declare such a visual validator."
+                                ),
+                                path=parent_path,
+                            )
+                        )
 
                 elif isinstance(parent, RuleRuleParent):
                     if parent.ruleId not in rule_ids:
-                        report.issues.append(ValidationIssue(
-                            severity="error",
-                            code="rule_unknown_parent",
-                            message=(
-                                f"Rule {rule.id!r} declares parent rule "
-                                f"{parent.ruleId!r} which is not present in "
-                                "the request."
-                            ),
-                            path=parent_path,
-                        ))
+                        report.issues.append(
+                            ValidationIssue(
+                                severity="error",
+                                code="rule_unknown_parent",
+                                message=(
+                                    f"Rule {rule.id!r} declares parent rule "
+                                    f"{parent.ruleId!r} which is not present in "
+                                    "the request."
+                                ),
+                                path=parent_path,
+                            )
+                        )
                     elif parent.ruleId == rule.id:
-                        report.issues.append(ValidationIssue(
-                            severity="error",
-                            code="rule_self_reference",
-                            message=f"Rule {rule.id!r} declares itself as a parent.",
-                            path=parent_path,
-                        ))
+                        report.issues.append(
+                            ValidationIssue(
+                                severity="error",
+                                code="rule_self_reference",
+                                message=f"Rule {rule.id!r} declares itself as a parent.",
+                                path=parent_path,
+                            )
+                        )
 
     # -- DAG cycle check -------------------------------------------------
 
-    def _check_rule_dag(
-        self, request: ExtractionRequest, report: ValidationReport
-    ) -> None:
+    def _check_rule_dag(self, request: ExtractionRequest, report: ValidationReport) -> None:
         rule_ids = {r.id for r in request.rules}
         sorter: TopologicalSorter[str] = TopologicalSorter()
         for rule in request.rules:
             parents = [
-                p.ruleId for p in rule.parents
-                if isinstance(p, RuleRuleParent) and p.ruleId in rule_ids
+                p.ruleId for p in rule.parents if isinstance(p, RuleRuleParent) and p.ruleId in rule_ids
             ]
             sorter.add(rule.id, *parents)
         try:
             sorter.prepare()
         except CycleError as exc:
             cycle = list(exc.args[1]) if len(exc.args) > 1 else []
-            report.issues.append(ValidationIssue(
-                severity="error",
-                code="rule_cycle",
-                message=(
-                    "Rule graph contains a cycle: "
-                    + (" -> ".join(cycle) if cycle else "(unknown path)")
-                ),
-                path="rules[]",
-            ))
+            report.issues.append(
+                ValidationIssue(
+                    severity="error",
+                    code="rule_cycle",
+                    message=(
+                        "Rule graph contains a cycle: " + (" -> ".join(cycle) if cycle else "(unknown path)")
+                    ),
+                    path="rules[]",
+                )
+            )
 
     # -- stage / toggle consistency --------------------------------------
 
-    def _check_stage_consistency(
-        self, request: ExtractionRequest, report: ValidationReport
-    ) -> None:
+    def _check_stage_consistency(self, request: ExtractionRequest, report: ValidationReport) -> None:
         stages = request.options.stages
 
         # rule_engine on but no rules => the stage is a no-op. Warn.
         if stages.rule_engine and not request.rules:
-            report.issues.append(ValidationIssue(
-                severity="warning",
-                code="rule_engine_no_rules",
-                message=(
-                    "stages.rule_engine is enabled but no rules are declared "
-                    "-- the stage will run as a no-op."
-                ),
-                path="options.stages.rule_engine",
-            ))
+            report.issues.append(
+                ValidationIssue(
+                    severity="warning",
+                    code="rule_engine_no_rules",
+                    message=(
+                        "stages.rule_engine is enabled but no rules are declared "
+                        "-- the stage will run as a no-op."
+                    ),
+                    path="options.stages.rule_engine",
+                )
+            )
 
         # visual_authenticity on but no visual validators anywhere => warn.
         if stages.visual_authenticity:
-            any_visual = any(
-                bool(d.validators.visual) for d in request.docs
-            )
+            any_visual = any(bool(d.validators.visual) for d in request.docs)
             if not any_visual:
-                report.issues.append(ValidationIssue(
-                    severity="warning",
-                    code="visual_authenticity_no_validators",
-                    message=(
-                        "stages.visual_authenticity is enabled but no "
-                        "DocSpec declares visual validators."
-                    ),
-                    path="options.stages.visual_authenticity",
-                ))
+                report.issues.append(
+                    ValidationIssue(
+                        severity="warning",
+                        code="visual_authenticity_no_validators",
+                        message=(
+                            "stages.visual_authenticity is enabled but no DocSpec declares visual validators."
+                        ),
+                        path="options.stages.visual_authenticity",
+                    )
+                )
 
         # splitter on but only one doc => the stage will short-circuit. Warn.
         if stages.splitter and len(request.docs) <= 1:
-            report.issues.append(ValidationIssue(
-                severity="warning",
-                code="splitter_single_doc",
-                message=(
-                    "stages.splitter is enabled but the request declares "
-                    "only one DocSpec -- the splitter will short-circuit."
-                ),
-                path="options.stages.splitter",
-            ))
+            report.issues.append(
+                ValidationIssue(
+                    severity="warning",
+                    code="splitter_single_doc",
+                    message=(
+                        "stages.splitter is enabled but the request declares "
+                        "only one DocSpec -- the splitter will short-circuit."
+                    ),
+                    path="options.stages.splitter",
+                )
+            )

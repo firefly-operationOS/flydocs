@@ -54,9 +54,7 @@ class JudgeEscalator:
         self._default_threshold = default_threshold
         self._default_model = default_model
 
-    async def maybe_escalate(
-        self, ctx: Any, request: ExtractionRequest
-    ) -> EscalationInfo | None:
+    async def maybe_escalate(self, ctx: Any, request: ExtractionRequest) -> EscalationInfo | None:
         """Return an :class:`EscalationInfo` when escalation fires, ``None`` otherwise.
 
         Mutates ``ctx.metadata["per_doc_extracted"]`` in place when the
@@ -73,9 +71,7 @@ class JudgeEscalator:
         if escalation_model == primary_model:
             return None  # nothing to gain from same-model re-run
 
-        per_doc_extracted: dict[str, list[ExtractedFieldGroup]] = ctx.metadata.get(
-            "per_doc_extracted", {}
-        )
+        per_doc_extracted: dict[str, list[ExtractedFieldGroup]] = ctx.metadata.get("per_doc_extracted", {})
         per_doc_inputs = ctx.metadata.get("per_doc_inputs", {})
         primary_fail, total = _count_failures(per_doc_extracted)
         if total == 0:
@@ -86,7 +82,10 @@ class JudgeEscalator:
 
         logger.info(
             "judge_escalation triggered primary_model=%s primary_rate=%.2f threshold=%.2f -> escalate to %s",
-            primary_model, primary_rate, threshold, escalation_model,
+            primary_model,
+            primary_rate,
+            threshold,
+            escalation_model,
         )
 
         new_per_doc: dict[str, list[ExtractedFieldGroup]] = {}
@@ -152,7 +151,9 @@ class JudgeEscalator:
             ctx.metadata["per_doc_model_used"] = used
         logger.info(
             "judge_escalation primary_rate=%.2f escalation_rate=%.2f accepted=%s",
-            primary_rate, new_rate, info.accepted,
+            primary_rate,
+            new_rate,
+            info.accepted,
         )
         return info
 
@@ -166,9 +167,7 @@ class JudgeEscalator:
         return request.options.escalation_model or self._default_model
 
 
-def _count_failures(
-    per_doc_extracted: dict[str, list[ExtractedFieldGroup]]
-) -> tuple[int, int]:
+def _count_failures(per_doc_extracted: dict[str, list[ExtractedFieldGroup]]) -> tuple[int, int]:
     """Count fields with a bad judge verdict.
 
     A "bad" verdict is any of:

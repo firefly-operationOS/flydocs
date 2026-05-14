@@ -16,8 +16,9 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any, Iterator
+from typing import Any
 
 logger = logging.getLogger("flydesk_idp.outbound")
 
@@ -46,7 +47,11 @@ def log_outbound(
     extras = " ".join(f"{k}={_format(v)}" for k, v in fields.items() if v is not None)
     logger.info(
         "outbound_call target=%s op=%s status=%s latency_ms=%.0f %s",
-        target, op, status, latency_ms, extras,
+        target,
+        op,
+        status,
+        latency_ms,
+        extras,
     )
 
 
@@ -109,7 +114,6 @@ async def timed_agent_run(agent: Any, content: Any, *, op: str, model: str) -> A
     the log line and never alters control flow.
     """
     from fireflyframework_agentic.agents.context import AgentContext
-
     from pyfly.observability.correlation import get_correlation_id
 
     target = model.split(":", 1)[0] if ":" in model else "llm"
@@ -122,8 +126,12 @@ async def timed_agent_run(agent: Any, content: Any, *, op: str, model: str) -> A
     except Exception as exc:
         latency_ms = (time.monotonic() - started) * 1000
         log_outbound(
-            target, op=op, status="error", latency_ms=latency_ms,
-            model=model, error=type(exc).__name__,
+            target,
+            op=op,
+            status="error",
+            latency_ms=latency_ms,
+            model=model,
+            error=type(exc).__name__,
             correlation_id=correlation_id,
         )
         raise
@@ -131,7 +139,11 @@ async def timed_agent_run(agent: Any, content: Any, *, op: str, model: str) -> A
     latency_ms = (time.monotonic() - started) * 1000
     usage_fields = _extract_usage_fields(result, model)
     log_outbound(
-        target, op=op, status="ok", latency_ms=latency_ms, model=model,
+        target,
+        op=op,
+        status="ok",
+        latency_ms=latency_ms,
+        model=model,
         correlation_id=correlation_id,
         **usage_fields,
     )
@@ -154,9 +166,7 @@ def _extract_usage_fields(result: Any, model: str) -> dict[str, Any]:
         return {}
     input_tokens = getattr(usage, "input_tokens", 0) or 0
     output_tokens = getattr(usage, "output_tokens", 0) or 0
-    total_tokens = (
-        getattr(usage, "total_tokens", 0) or (input_tokens + output_tokens)
-    )
+    total_tokens = getattr(usage, "total_tokens", 0) or (input_tokens + output_tokens)
     cache_write = getattr(usage, "cache_write_tokens", 0) or 0
     cache_read = getattr(usage, "cache_read_tokens", 0) or 0
     fields: dict[str, Any] = {

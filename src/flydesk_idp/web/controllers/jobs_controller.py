@@ -6,6 +6,7 @@ from __future__ import annotations
 import logging
 
 from pyfly.container import rest_controller
+
 # Depend on the concrete bus classes -- pyfly's container resolves by
 # exact type and the CQRS auto-config registers DefaultCommandBus /
 # DefaultQueryBus (the Protocols are not registered as bean types).
@@ -140,9 +141,7 @@ class JobsController:
         try:
             cancelled = await self._commands.send(CancelJobCommand(job_id=job_id))
         except JobNotCancellable as exc:
-            raise _http_problem(
-                409, "job_not_cancellable", "Job cannot be cancelled", str(exc)
-            ) from exc
+            raise _http_problem(409, "job_not_cancellable", "Job cannot be cancelled", str(exc)) from exc
         if cancelled is None:
             raise ResourceNotFoundException(
                 f"Job {job_id!r} not found", code="JOB_NOT_FOUND", context={"job_id": job_id}

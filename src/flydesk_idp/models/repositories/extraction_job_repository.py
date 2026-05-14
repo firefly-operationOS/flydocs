@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import select
@@ -60,9 +60,7 @@ class ExtractionJobRepository:
 
     async def get_by_idempotency_key(self, key: str) -> ExtractionJob | None:
         async with self._session_factory() as session:
-            result = await session.execute(
-                select(ExtractionJob).where(ExtractionJob.idempotency_key == key)
-            )
+            result = await session.execute(select(ExtractionJob).where(ExtractionJob.idempotency_key == key))
             return result.scalars().first()
 
     # -- mutations -----------------------------------------------------
@@ -112,9 +110,7 @@ class ExtractionJobRepository:
             error_message=None,
         )
 
-    async def mark_failed(
-        self, job_id: str, *, code: str, message: str
-    ) -> ExtractionJob | None:
+    async def mark_failed(self, job_id: str, *, code: str, message: str) -> ExtractionJob | None:
         return await self.update(
             job_id,
             status="FAILED",
@@ -128,7 +124,7 @@ class ExtractionJobRepository:
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 __all__: list[Callable[..., Any] | str] = ["ExtractionJobRepository"]

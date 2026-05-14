@@ -3,13 +3,12 @@
 
 from __future__ import annotations
 
-import asyncio
 import base64
 import logging
 
 from pydantic import BaseModel, Field
-
 from pyfly.container import rest_controller
+
 # Depend on the concrete bus class -- pyfly's container resolves by exact
 # type and the CQRS auto-config registers ``DefaultCommandBus``, not the
 # ``CommandBus`` Protocol.
@@ -36,6 +35,7 @@ class ValidationResponse(BaseModel):
     warning_count: int = 0
     errors: list[dict[str, str]] = Field(default_factory=list)
     warnings: list[dict[str, str]] = Field(default_factory=list)
+
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +120,7 @@ class ExtractController:
         _enforce_semantic_validation(request, self._validator)
         try:
             return await self._commands.send(ExtractCommand(request=request))
-        except asyncio.TimeoutError as exc:
+        except TimeoutError as exc:
             raise _http_problem(408, "extraction_timeout", "Extraction timed out", str(exc)) from exc
 
 
@@ -144,9 +144,7 @@ def _enforce_size_limits(request: ExtractionRequest, *, max_bytes: int) -> None:
             ) from exc
 
 
-def _enforce_semantic_validation(
-    request: ExtractionRequest, validator: RequestValidator
-) -> None:
+def _enforce_semantic_validation(request: ExtractionRequest, validator: RequestValidator) -> None:
     """Reject the request with a 422 when the semantic validator finds errors."""
     report: ValidationReport = validator.validate(request)
     if report.has_errors:
@@ -164,7 +162,9 @@ def _enforce_semantic_validation(
         for issue in report.warnings:
             logger.warning(
                 "request_validation_warning code=%s path=%s message=%s",
-                issue.code, issue.path, issue.message,
+                issue.code,
+                issue.path,
+                issue.message,
             )
 
 

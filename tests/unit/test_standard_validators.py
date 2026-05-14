@@ -38,8 +38,8 @@ def test_iban_invalid_checksum() -> None:
 @pytest.mark.parametrize(
     "card,ok",
     [
-        ("4242 4242 4242 4242", True),   # Stripe-test
-        ("4111-1111-1111-1111", True),   # Visa-test
+        ("4242 4242 4242 4242", True),  # Stripe-test
+        ("4111-1111-1111-1111", True),  # Visa-test
         ("4242 4242 4242 4243", False),  # Luhn fails
     ],
 )

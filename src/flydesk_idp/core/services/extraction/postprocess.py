@@ -55,9 +55,7 @@ def _array_from_payload(spec: FieldSpec, payload: dict[str, Any]) -> ExtractedFi
         for item in spec.items or []:
             item_payload = row.get(item.fieldName)
             if not isinstance(item_payload, dict):
-                sub_fields.append(
-                    ExtractedField(fieldName=item.fieldName, fieldValueFound=None)
-                )
+                sub_fields.append(ExtractedField(fieldName=item.fieldName, fieldValueFound=None))
                 continue
             item_spec = FieldSpec.model_validate(
                 item.model_dump() | {"name": item.fieldName, "type": item.fieldType}
@@ -101,9 +99,7 @@ def normalise_doc(raw_output: BaseModel, doc: DocSpec) -> list[ExtractedFieldGro
                 fields.append(_array_from_payload(spec, field_payload))
             else:
                 fields.append(_scalar_from_payload(spec, field_payload))
-        groups.append(
-            ExtractedFieldGroup(fieldGroupName=group.fieldGroupName, fieldGroupFields=fields)
-        )
+        groups.append(ExtractedFieldGroup(fieldGroupName=group.fieldGroupName, fieldGroupFields=fields))
     return groups
 
 

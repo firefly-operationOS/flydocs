@@ -22,7 +22,13 @@ class ProblemDetails(BaseModel):
     type: str = Field(default="about:blank", description="URI reference identifying the problem type.")
     title: str = Field(..., description="Short human-readable summary.")
     status: int = Field(..., ge=100, le=599, description="HTTP status code.")
-    detail: str | None = Field(default=None, description="Human-readable explanation specific to this occurrence.")
-    instance: str | None = Field(default=None, description="URI reference identifying the specific occurrence.")
+    detail: str | None = Field(
+        default=None, description="Human-readable explanation specific to this occurrence."
+    )
+    instance: str | None = Field(
+        default=None, description="URI reference identifying the specific occurrence."
+    )
     code: str | None = Field(default=None, description="Stable application error code (snake_case).")
-    extensions: dict[str, Any] | None = Field(default=None, description="Additional context as a nested object.")
+    extensions: dict[str, Any] | None = Field(
+        default=None, description="Additional context as a nested object."
+    )

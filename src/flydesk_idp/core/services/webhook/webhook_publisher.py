@@ -99,9 +99,14 @@ class WebhookPublisher:
             except httpx.RequestError as exc:
                 latency_ms = (time.monotonic() - started) * 1000
                 log_outbound(
-                    "webhook", op="deliver", status="error",
-                    latency_ms=latency_ms, url=url, attempt=attempt,
-                    job_id=payload.job_id, correlation_id=correlation_id,
+                    "webhook",
+                    op="deliver",
+                    status="error",
+                    latency_ms=latency_ms,
+                    url=url,
+                    attempt=attempt,
+                    job_id=payload.job_id,
+                    correlation_id=correlation_id,
                     error=type(exc).__name__,
                 )
                 raise
@@ -109,30 +114,45 @@ class WebhookPublisher:
             http_status = response.status_code
             if 500 <= http_status < 600 or http_status == 429:
                 log_outbound(
-                    "webhook", op="deliver", status="retry",
-                    latency_ms=latency_ms, url=url, attempt=attempt,
-                    http_status=http_status, job_id=payload.job_id,
+                    "webhook",
+                    op="deliver",
+                    status="retry",
+                    latency_ms=latency_ms,
+                    url=url,
+                    attempt=attempt,
+                    http_status=http_status,
+                    job_id=payload.job_id,
                     correlation_id=correlation_id,
                 )
-                raise _RetryableWebhook(
-                    f"webhook {url} returned retryable status {http_status}"
-                )
+                raise _RetryableWebhook(f"webhook {url} returned retryable status {http_status}")
             if http_status >= 400:
                 log_outbound(
-                    "webhook", op="deliver", status="permanent_failure",
-                    latency_ms=latency_ms, url=url, attempt=attempt,
-                    http_status=http_status, job_id=payload.job_id,
+                    "webhook",
+                    op="deliver",
+                    status="permanent_failure",
+                    latency_ms=latency_ms,
+                    url=url,
+                    attempt=attempt,
+                    http_status=http_status,
+                    job_id=payload.job_id,
                     correlation_id=correlation_id,
                 )
                 logger.error(
                     "Webhook %s returned non-retryable %d: %s",
-                    url, http_status, response.text[:500],
+                    url,
+                    http_status,
+                    response.text[:500],
                 )
                 return False
             log_outbound(
-                "webhook", op="deliver", status="ok",
-                latency_ms=latency_ms, url=url, attempt=attempt,
-                http_status=http_status, job_id=payload.job_id,
+                "webhook",
+                op="deliver",
+                status="ok",
+                latency_ms=latency_ms,
+                url=url,
+                attempt=attempt,
+                http_status=http_status,
+                job_id=payload.job_id,
                 correlation_id=correlation_id,
             )
             return True
@@ -141,17 +161,27 @@ class WebhookPublisher:
             return await _do_post()
         except RetryError as exc:
             log_outbound(
-                "webhook", op="deliver", status="exhausted",
-                latency_ms=0.0, url=url, attempts=attempt_counter["n"],
-                job_id=payload.job_id, error=type(exc).__name__,
+                "webhook",
+                op="deliver",
+                status="exhausted",
+                latency_ms=0.0,
+                url=url,
+                attempts=attempt_counter["n"],
+                job_id=payload.job_id,
+                error=type(exc).__name__,
             )
             logger.error("Webhook %s exhausted retries: %s", url, exc)
             return False
         except httpx.RequestError as exc:
             log_outbound(
-                "webhook", op="deliver", status="transport_error",
-                latency_ms=0.0, url=url, attempts=attempt_counter["n"],
-                job_id=payload.job_id, error=type(exc).__name__,
+                "webhook",
+                op="deliver",
+                status="transport_error",
+                latency_ms=0.0,
+                url=url,
+                attempts=attempt_counter["n"],
+                job_id=payload.job_id,
+                error=type(exc).__name__,
             )
             logger.error("Webhook %s transport error: %s", url, exc)
             return False

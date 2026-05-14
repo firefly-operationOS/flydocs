@@ -32,7 +32,6 @@ from flydesk_idp.core.observability import (
 from flydesk_idp.core.services.pipeline import orchestrator as orch
 from flydesk_idp.interfaces.dtos.extract import TraceEntry, UsageBreakdown
 
-
 # ---------------------------------------------------------------------------
 # correlation id contextvar
 # ---------------------------------------------------------------------------
@@ -68,9 +67,7 @@ async def test_correlation_id_propagates_into_agent_run(
 
     token = set_correlation_id("req-abc")
     try:
-        await outbound_log.timed_agent_run(
-            _FakeAgent(), [], op="extract", model="anthropic:claude-opus-4-7"
-        )
+        await outbound_log.timed_agent_run(_FakeAgent(), [], op="extract", model="anthropic:claude-opus-4-7")
     finally:
         reset_correlation_id(token)
     assert captured["context"] is not None
@@ -98,9 +95,7 @@ def test_prompt_cache_default_on(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.parametrize("value", ["off", "OFF", "0", "false", "False", "no"])
-def test_prompt_cache_env_var_disables_middleware(
-    monkeypatch: pytest.MonkeyPatch, value: str
-) -> None:
+def test_prompt_cache_env_var_disables_middleware(monkeypatch: pytest.MonkeyPatch, value: str) -> None:
     """``FLYDESK_IDP_PROMPT_CACHE`` truthy-off values empty the middleware list."""
     monkeypatch.setenv("FLYDESK_IDP_PROMPT_CACHE", value)
     mod = _reload_middleware_module()
@@ -144,9 +139,13 @@ def test_genai_prices_resolves_our_anthropic_models() -> None:
         "anthropic:claude-sonnet-4-6",
         "anthropic:claude-haiku-4-5",
     ):
-        cost = genai_prices_cost(CostContext(
-            model=model, input_tokens=1_000_000, output_tokens=1_000_000,
-        ))
+        cost = genai_prices_cost(
+            CostContext(
+                model=model,
+                input_tokens=1_000_000,
+                output_tokens=1_000_000,
+            )
+        )
         assert cost is not None, f"genai-prices does not know about {model}"
         assert cost > 1.0, f"{model} priced absurdly cheap: ${cost}"
 
@@ -168,18 +167,29 @@ def _make_summary(*, record_count: int = 3, cost: float = 0.42) -> Any:
         record_count=record_count,
         by_agent={
             "flydesk-idp-extract": {
-                "input_tokens": 700, "output_tokens": 350, "total_tokens": 1050,
-                "cost_usd": 0.30, "requests": 2,
+                "input_tokens": 700,
+                "output_tokens": 350,
+                "total_tokens": 1050,
+                "cost_usd": 0.30,
+                "requests": 2,
             },
             "flydesk-idp-judge": {
-                "input_tokens": 300, "output_tokens": 150, "total_tokens": 450,
-                "cost_usd": 0.12, "requests": 1,
+                "input_tokens": 300,
+                "output_tokens": 150,
+                "total_tokens": 450,
+                "cost_usd": 0.12,
+                "requests": 1,
             },
         },
-        by_model={"anthropic:claude-opus-4-7": {
-            "input_tokens": 1000, "output_tokens": 500, "total_tokens": 1500,
-            "cost_usd": cost, "requests": record_count,
-        }},
+        by_model={
+            "anthropic:claude-opus-4-7": {
+                "input_tokens": 1000,
+                "output_tokens": 500,
+                "total_tokens": 1500,
+                "cost_usd": cost,
+                "requests": record_count,
+            }
+        },
     )
 
 
@@ -198,9 +208,7 @@ def test_usage_breakdown_returns_none_when_no_records() -> None:
     pipeline_result = SimpleNamespace(usage=_make_summary(record_count=0))
     # The tracker fallback may still pick up unrelated records from
     # other tests -- a fresh correlation id should give an empty result.
-    breakdown = orch._usage_breakdown(
-        request_id="req-no-records-xyz", pipeline_result=pipeline_result
-    )
+    breakdown = orch._usage_breakdown(request_id="req-no-records-xyz", pipeline_result=pipeline_result)
     assert breakdown is None
 
 
