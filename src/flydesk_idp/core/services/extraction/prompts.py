@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 _PROMPT_FILES: dict[str, str] = {
     "extract":              "extract.yaml",
     "splitter":             "splitter.yaml",
+    "classifier":           "classifier.yaml",
     "content_authenticity": "content_authenticity.yaml",
     "visual_authenticity":  "visual_authenticity.yaml",
     "judge":                "judge.yaml",
@@ -71,6 +72,10 @@ class PromptCatalog:
     @property
     def splitter(self) -> PromptTemplate:
         return self._templates["splitter"]
+
+    @property
+    def classifier(self) -> PromptTemplate:
+        return self._templates["classifier"]
 
     @property
     def content_authenticity(self) -> PromptTemplate:

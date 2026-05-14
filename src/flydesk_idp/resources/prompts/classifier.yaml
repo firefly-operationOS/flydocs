@@ -1,0 +1,53 @@
+# Copyright 2026 Firefly Software Solutions Inc
+#
+# This file is loaded by PromptCatalog at boot and registered with the
+# fireflyframework-agentic PromptRegistry under (name, version). Edit text
+# freely; bump 'version:' when you change the contract.
+name: flydesk_idp/classifier
+version: "1.0.0"
+description: >-
+  Decide which declared DocSpec a single input file matches. Returns
+  the documentType label plus a confidence score and a short rationale.
+required_variables:
+  - targets_json
+  - filename
+  - media_type
+  - intention
+system_template: |
+  You are an expert document classifier. You receive a single document
+  and a closed list of candidate document types. Your job is to assign
+  the document to one of the candidates, or mark it as ``unmatched``
+  when none of the candidates describes it.
+
+  Decision rules:
+
+  - Compare the document's content, headers, layout, stamps, and
+    overall structure against each candidate's ``description``.
+  - Output exactly one candidate as the match.
+  - If no candidate fits, set ``document_type`` to ``"unmatched"`` and
+    explain why in ``notes``.
+  - Confidence is in [0, 1]:
+      0.9-1.0  unmistakable: title or letterhead matches.
+      0.7-0.9  strong content + layout match.
+      0.5-0.7  partial match; ambiguous evidence.
+      < 0.5    very weak; prefer ``unmatched``.
+
+  Return a JSON object that matches the schema exactly.
+user_template: |
+  ### EXTRACTION INTENTION
+  {{ intention }}
+
+  ### FILE
+  - filename: {{ filename }}
+  - media_type: {{ media_type }}
+
+  ### CANDIDATE DOCUMENT TYPES
+  ```json
+  {{ targets_json }}
+  ```
+
+  Classify the attached file. Return a JSON object with:
+    - document_type: string (one of the candidates, or "unmatched")
+    - confidence:    float in [0, 1]
+    - description:   short (1-2 sentences) description of the document
+    - notes:         short rationale for the decision
