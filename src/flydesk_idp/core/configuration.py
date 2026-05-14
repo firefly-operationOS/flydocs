@@ -37,7 +37,7 @@ from flydesk_idp.core.services.pipeline import PipelineOrchestrator
 from flydesk_idp.core.services.queue import JobQueue, create_job_queue
 from flydesk_idp.core.services.rules import RuleEngine
 from flydesk_idp.core.services.splitting import DocumentSplitter
-from flydesk_idp.core.services.validation import FieldValidator
+from flydesk_idp.core.services.validation import FieldValidator, RequestValidator
 from flydesk_idp.core.services.webhook import WebhookPublisher
 from flydesk_idp.core.services.workers.job_worker import JobWorker
 from flydesk_idp.models.repositories import ExtractionJobRepository
@@ -103,6 +103,11 @@ class IDPCoreConfiguration:
     @bean
     def field_validator(self) -> FieldValidator:
         return FieldValidator()
+
+    @bean
+    def request_validator(self) -> RequestValidator:
+        """Pre-flight semantic checker on the public ExtractionRequest."""
+        return RequestValidator()
 
     @bean
     def visual_checker(

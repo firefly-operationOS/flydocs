@@ -16,6 +16,7 @@ from pyfly.web import Body, Valid, post_mapping, request_mapping
 
 from flydesk_idp.config import IDPSettings
 from flydesk_idp.core.services.extract import ExtractCommand
+from flydesk_idp.core.services.validation import RequestValidator, ValidationReport
 from flydesk_idp.interfaces.dtos.extract import ExtractionRequest, ExtractionResult
 
 logger = logging.getLogger(__name__)
@@ -32,11 +33,25 @@ class ExtractController:
     ``asyncio.wait_for(FLYDESK_IDP_SYNC_TIMEOUT_S)``; if that elapses
     the caller gets a 408 ``extraction_timeout`` problem-detail and is
     expected to retry through ``POST /api/v1/jobs``.
+
+    Two gates run *before* the request enters the pipeline so a
+    malformed call never reaches the LLM provider:
+
+    * size and base64 gates (``_enforce_size_limits``) cap the document
+      bytes and validate the encoding,
+    * :class:`RequestValidator` runs semantic cross-checks (rules
+      reference real fields, no cycles, no duplicate ids, ...).
     """
 
-    def __init__(self, commands: DefaultCommandBus, settings: IDPSettings) -> None:
+    def __init__(
+        self,
+        commands: DefaultCommandBus,
+        settings: IDPSettings,
+        validator: RequestValidator,
+    ) -> None:
         self._commands = commands
         self._settings = settings
+        self._validator = validator
 
     @post_mapping("/extract")
     async def extract(self, request: Valid[Body[ExtractionRequest]]) -> ExtractionResult:
@@ -54,9 +69,14 @@ class ExtractController:
         Errors map to RFC 7807 problem-details:
         ``408 extraction_timeout`` (pipeline exceeded the sync ceiling),
         ``413 document_too_large`` (document over ``FLYDESK_IDP_MAX_BYTES``),
-        ``422 invalid_base64`` (``content_base64`` failed strict parsing).
+        ``422 invalid_base64`` (``content_base64`` failed strict parsing),
+        ``422 invalid_request`` (semantic mismatch detected by the
+        :class:`RequestValidator`, e.g. a rule referencing an unknown
+        documentType -- the response includes a list of every issue
+        found so the caller can fix them all at once).
         """
         _enforce_size_limits(request, max_bytes=self._settings.max_bytes)
+        _enforce_semantic_validation(request, self._validator)
         try:
             return await self._commands.send(ExtractCommand(request=request))
         except asyncio.TimeoutError as exc:
@@ -79,6 +99,30 @@ def _enforce_size_limits(request: ExtractionRequest, *, max_bytes: int) -> None:
         raise _http_problem(422, "invalid_base64", "Invalid base64 content", str(exc)) from exc
 
 
+def _enforce_semantic_validation(
+    request: ExtractionRequest, validator: RequestValidator
+) -> None:
+    """Reject the request with a 422 when the semantic validator finds errors."""
+    report: ValidationReport = validator.validate(request)
+    if report.has_errors:
+        raise _http_problem_with_payload(
+            status_code=422,
+            code="invalid_request",
+            title="Request failed semantic validation",
+            detail=(
+                f"{len(report.errors)} error(s) and {len(report.warnings)} "
+                "warning(s) detected before the pipeline."
+            ),
+            extra=report.to_payload(),
+        )
+    if report.warnings:
+        for issue in report.warnings:
+            logger.warning(
+                "request_validation_warning code=%s path=%s message=%s",
+                issue.code, issue.path, issue.message,
+            )
+
+
 def _http_problem(status_code: int, code: str, title: str, detail: str) -> Exception:
     from fastapi import HTTPException
 
@@ -86,3 +130,23 @@ def _http_problem(status_code: int, code: str, title: str, detail: str) -> Excep
         status_code=status_code,
         detail={"code": code, "title": title, "detail": detail},
     )
+
+
+def _http_problem_with_payload(
+    *,
+    status_code: int,
+    code: str,
+    title: str,
+    detail: str,
+    extra: dict,
+) -> Exception:
+    """RFC 7807-ish problem-detail that also surfaces the validator's findings."""
+    from fastapi import HTTPException
+
+    body = {
+        "code": code,
+        "title": title,
+        "detail": detail,
+        **extra,
+    }
+    return HTTPException(status_code=status_code, detail=body)

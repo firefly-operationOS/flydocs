@@ -1,5 +1,13 @@
 # Copyright 2026 Firefly Software Solutions Inc
-"""``SubmitJobHandler`` -- persist the job + publish it to the queue."""
+"""``SubmitJobHandler`` -- persist the job + publish it to the queue.
+
+Before anything is written to Postgres or Redis, the handler runs the
+same :class:`RequestValidator` the sync controller uses. A semantic
+mismatch (rule pointing at a non-existent docType, cycles in the rule
+DAG, duplicate rule ids, ...) raises :class:`InvalidRequestError` so
+the REST layer can return a ``422 invalid_request`` problem-detail
+with every issue surfaced -- without persisting an unrunnable job.
+"""
 
 from __future__ import annotations
 
@@ -12,12 +20,27 @@ from pyfly.container import service
 from pyfly.cqrs import Command, CommandHandler, command_handler
 
 from flydesk_idp.core.services.queue import JobQueue
+from flydesk_idp.core.services.validation import RequestValidator, ValidationReport
+from flydesk_idp.interfaces.dtos.extract import ExtractionRequest
 from flydesk_idp.interfaces.dtos.job import SubmitJobRequest, SubmitJobResponse
 from flydesk_idp.interfaces.enums.job_status import JobStatus
 from flydesk_idp.models.entities.extraction_job import ExtractionJob
 from flydesk_idp.models.repositories import ExtractionJobRepository
+from flydesk_idp.web.correlation_filter import current_correlation_context
 
 logger = logging.getLogger(__name__)
+
+
+class InvalidRequestError(ValueError):
+    """Raised when the semantic validator finds errors on a submit.
+
+    Carries the full :class:`ValidationReport` so the REST controller
+    can surface every issue to the caller in one shot.
+    """
+
+    def __init__(self, report: ValidationReport) -> None:
+        super().__init__(f"{len(report.errors)} validation error(s) on submit")
+        self.report = report
 
 
 @dataclass(frozen=True)
@@ -33,10 +56,12 @@ class SubmitJobHandler(CommandHandler[SubmitJobCommand, SubmitJobResponse]):
         self,
         repository: ExtractionJobRepository,
         queue: JobQueue,
+        validator: RequestValidator,
     ) -> None:
         super().__init__()
         self._repository = repository
         self._queue = queue
+        self._validator = validator
 
     async def do_handle(self, command: SubmitJobCommand) -> SubmitJobResponse:
         if command.idempotency_key:
@@ -49,8 +74,35 @@ class SubmitJobHandler(CommandHandler[SubmitJobCommand, SubmitJobResponse]):
                 )
 
         payload = command.request
+        # Reuse the sync semantic validator over an ExtractionRequest
+        # built from the submit payload -- same checks, same error shape.
+        as_extraction = ExtractionRequest(
+            intention=payload.intention,
+            document=payload.document,
+            docs=payload.docs,
+            rules=payload.rules,
+            options=payload.options,
+        )
+        report = self._validator.validate(as_extraction)
+        if report.has_errors:
+            raise InvalidRequestError(report)
+        for issue in report.warnings:
+            logger.warning(
+                "submit_validation_warning code=%s path=%s message=%s",
+                issue.code, issue.path, issue.message,
+            )
+
         bytes_decoded = payload.document.decoded_bytes()
         content_sha256 = hashlib.sha256(bytes_decoded).hexdigest()
+
+        # Persist the inbound correlation context alongside the caller's
+        # free-form metadata. The worker reads it back later to stamp
+        # outbound webhook headers, so a single Correlation-Id flows from
+        # the original HTTP request all the way to the webhook receiver.
+        metadata = dict(payload.metadata or {})
+        ctx = current_correlation_context()
+        if ctx:
+            metadata.setdefault("_correlation", ctx)
 
         job = ExtractionJob(
             idempotency_key=command.idempotency_key,
@@ -67,7 +119,7 @@ class SubmitJobHandler(CommandHandler[SubmitJobCommand, SubmitJobResponse]):
             },
             options_json=payload.options.model_dump(mode="json"),
             callback_url=str(payload.callback_url) if payload.callback_url else None,
-            metadata_json=payload.metadata,
+            metadata_json=metadata,
         )
         job = await self._repository.add(job)
         await self._queue.publish(job.id)

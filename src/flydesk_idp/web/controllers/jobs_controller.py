@@ -30,6 +30,7 @@ from flydesk_idp.core.services.jobs import (
 )
 from flydesk_idp.core.services.jobs.cancel_job_handler import JobNotCancellable
 from flydesk_idp.core.services.jobs.get_job_result_handler import JobNotReady
+from flydesk_idp.core.services.jobs.submit_job_handler import InvalidRequestError
 from flydesk_idp.interfaces.dtos.job import (
     JobResult,
     JobStatusResponse,
@@ -71,11 +72,27 @@ class JobsController:
         as the sync endpoint behind the scenes.
 
         Send the same ``Idempotency-Key`` header to replay an existing
-        submission instead of creating a duplicate job.
+        submission instead of creating a duplicate job. The handler also
+        runs the semantic ``RequestValidator`` before persisting the job;
+        a mismatch -- e.g. a rule referencing an unknown documentType --
+        returns ``422 invalid_request`` with every issue surfaced, and
+        nothing is written to Postgres or Redis.
         """
-        return await self._commands.send(
-            SubmitJobCommand(request=request, idempotency_key=idempotency_key or None)
-        )
+        try:
+            return await self._commands.send(
+                SubmitJobCommand(request=request, idempotency_key=idempotency_key or None)
+            )
+        except InvalidRequestError as exc:
+            raise _http_problem_with_payload(
+                status_code=422,
+                code="invalid_request",
+                title="Request failed semantic validation",
+                detail=(
+                    f"{len(exc.report.errors)} error(s) and "
+                    f"{len(exc.report.warnings)} warning(s) detected before queueing."
+                ),
+                extra=exc.report.to_payload(),
+            ) from exc
 
     @get_mapping("/{job_id}")
     async def get_status(self, job_id: PathVar[str]) -> JobStatusResponse:
@@ -140,3 +157,18 @@ def _http_problem(status_code: int, code: str, title: str, detail: str) -> Excep
         status_code=status_code,
         detail={"code": code, "title": title, "detail": detail},
     )
+
+
+def _http_problem_with_payload(
+    *,
+    status_code: int,
+    code: str,
+    title: str,
+    detail: str,
+    extra: dict,
+) -> Exception:
+    """RFC 7807-ish problem-detail that also surfaces the validator findings."""
+    from fastapi import HTTPException
+
+    body = {"code": code, "title": title, "detail": detail, **extra}
+    return HTTPException(status_code=status_code, detail=body)
