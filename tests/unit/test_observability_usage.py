@@ -17,6 +17,7 @@ Covers the three behaviours that surface ``usage`` + ``trace`` on the
 
 from __future__ import annotations
 
+import importlib
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
@@ -74,6 +75,37 @@ async def test_correlation_id_propagates_into_agent_run(
         reset_correlation_id(token)
     assert captured["context"] is not None
     assert captured["context"].correlation_id == "req-abc"
+
+
+# ---------------------------------------------------------------------------
+# prompt cache toggle
+# ---------------------------------------------------------------------------
+
+
+def _reload_middleware_module() -> Any:
+    """Force re-import so the module-level env var read is re-run."""
+    from flydesk_idp.core.observability import agent_middleware
+
+    return importlib.reload(agent_middleware)
+
+
+def test_prompt_cache_default_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No env var set -> caching is on, one middleware in the list."""
+    monkeypatch.delenv("FLYDESK_IDP_PROMPT_CACHE", raising=False)
+    mod = _reload_middleware_module()
+    assert mod._prompt_cache_enabled() is True
+    assert len(mod.DEFAULT_MIDDLEWARE) == 1
+
+
+@pytest.mark.parametrize("value", ["off", "OFF", "0", "false", "False", "no"])
+def test_prompt_cache_env_var_disables_middleware(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    """``FLYDESK_IDP_PROMPT_CACHE`` truthy-off values empty the middleware list."""
+    monkeypatch.setenv("FLYDESK_IDP_PROMPT_CACHE", value)
+    mod = _reload_middleware_module()
+    assert mod._prompt_cache_enabled() is False
+    assert mod.DEFAULT_MIDDLEWARE == []
 
 
 # ---------------------------------------------------------------------------

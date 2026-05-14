@@ -25,7 +25,21 @@ Cached blocks for our pipeline:
 
 from __future__ import annotations
 
+import os
+
 from fireflyframework_agentic.agents.prompt_cache import PromptCacheMiddleware
+
+
+def _prompt_cache_enabled() -> bool:
+    """Read ``FLYDESK_IDP_PROMPT_CACHE`` and decide if caching is on.
+
+    Default ``"on"``. Set to ``"off"`` / ``"0"`` / ``"false"`` to skip
+    attaching the middleware (useful for A/B benchmarking and disaster
+    rollback). Case-insensitive.
+    """
+    raw = os.environ.get("FLYDESK_IDP_PROMPT_CACHE", "on").strip().lower()
+    return raw not in {"off", "0", "false", "no"}
+
 
 #: A single shared instance reused by every service. Module-level so
 #: the agent factories don't need DI plumbing for what is effectively
@@ -34,9 +48,12 @@ PROMPT_CACHE_MIDDLEWARE = PromptCacheMiddleware(
     cache_system_prompt=True,
     cache_last_message=True,
     cache_ttl_seconds=300,
+    enabled=_prompt_cache_enabled(),
 )
 
 #: Default middleware list passed to every FireflyAgent constructed
 #: inside an IDP service. New cross-cutting middleware (auditing,
 #: budget guards, etc.) is added here once and picked up everywhere.
-DEFAULT_MIDDLEWARE = [PROMPT_CACHE_MIDDLEWARE]
+#: When the prompt cache is disabled via ``FLYDESK_IDP_PROMPT_CACHE=off``
+#: the middleware list goes empty so the agent constructs without it.
+DEFAULT_MIDDLEWARE = [PROMPT_CACHE_MIDDLEWARE] if _prompt_cache_enabled() else []

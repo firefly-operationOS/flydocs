@@ -504,6 +504,25 @@ response.
 > the templates -- moving per-call variables into the user message --
 > is tracked as a follow-up.
 
+**Disabling the cache.** Set `FLYDESK_IDP_PROMPT_CACHE=off` (or `0` /
+`false` / `no`) in the service env to attach the middleware list
+empty for the next process start. Useful for A/B benchmarking, for
+quick rollback when caching misbehaves, and for low-volume workloads
+where the per-call write premium (`+25%` over normal input) can
+exceed the read discount (`-90%` of input) if cache hit-rate is low.
+
+**Observed cost characteristics.** In our bastanteo benchmark
+(1 request -> ~27 LLM calls, mostly-unique per-call prompts) the
+warm-cache run costs ~33% more than the no-cache run for the *same
+request*. The first ON-mode request is roughly 2x because it writes
+the whole cache without reading anything. We believe this is the
+expected Anthropic-side accounting for high-fanout, low-repetition
+workloads -- cache pays off when the same prefix is replayed many
+times within the 5-minute TTL, e.g. batch reprocessing of the same
+expediente against multiple DocSpec variations. The toggle is there
+so callers with that pattern can stay on while one-shot consumers
+can flip it off.
+
 ---
 
 ## 8. Retry policy (async)
