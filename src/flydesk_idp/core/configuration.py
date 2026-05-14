@@ -37,6 +37,16 @@ from flydesk_idp.core.services.authenticity import (
     VisualAuthenticityChecker,
 )
 from flydesk_idp.core.services.bbox import BboxValidator
+from flydesk_idp.core.services.binary import (
+    ArchiveUnpacker,
+    BinaryNormalizer,
+    EmailUnpacker,
+    GotenbergConverter,
+    ImageNormalizer,
+    LibreOfficeConverter,
+    OfficeConverter,
+    PdfGuard,
+)
 from flydesk_idp.core.services.classification import DocumentClassifier
 from flydesk_idp.core.services.escalation import JudgeEscalator
 from flydesk_idp.core.services.extraction.extractor import MultimodalExtractor
@@ -132,6 +142,52 @@ class IDPCoreConfiguration:
         """Pre-flight semantic checker on the public ExtractionRequest."""
         return RequestValidator()
 
+    # ------------------------------------------------------------------
+    # Binary normalization
+    #
+    # Office conversion is pluggable behind the OfficeConverter
+    # protocol. The default ``gotenberg`` adapter keeps the runtime
+    # container distroless-friendly by delegating to a Gotenberg
+    # sidecar; ``libreoffice`` falls back to an in-container subprocess
+    # for slim/dev images that bundle ``soffice``.
+    # ------------------------------------------------------------------
+
+    @bean
+    def office_converter(self, settings: IDPSettings) -> OfficeConverter:
+        kind = (settings.office_converter or "gotenberg").lower()
+        if kind == "libreoffice":
+            return LibreOfficeConverter(settings=settings)
+        if kind == "gotenberg":
+            return GotenbergConverter(settings=settings)
+        raise ValueError(
+            f"unknown FLYDESK_IDP_OFFICE_CONVERTER={settings.office_converter!r}; "
+            "expected 'gotenberg' or 'libreoffice'"
+        )
+
+    @bean
+    def binary_normalizer(
+        self,
+        settings: IDPSettings,
+        pdf_guard: PdfGuard,
+        image_normalizer: ImageNormalizer,
+        office_converter: OfficeConverter,
+        archive_unpacker: ArchiveUnpacker,
+        email_unpacker: EmailUnpacker,
+    ) -> BinaryNormalizer:
+        return BinaryNormalizer(
+            settings=settings,
+            pdf_guard=pdf_guard,
+            image=image_normalizer,
+            office=office_converter,
+            archive=archive_unpacker,
+            email_=email_unpacker,
+        )
+
+    # PdfGuard / ImageNormalizer / ArchiveUnpacker / EmailUnpacker carry
+    # ``@service`` decorators -- pyfly autoscan picks them up via the
+    # ``flydesk_idp.core`` scan_packages entry. They are listed here only
+    # so the dependency graph is auditable from this single file.
+
     @bean
     def visual_checker(self, settings: IDPSettings, prompts: PromptCatalog) -> VisualAuthenticityChecker:
         return VisualAuthenticityChecker(template=prompts.visual_authenticity, model=settings.model)
@@ -175,6 +231,7 @@ class IDPCoreConfiguration:
         classifier: DocumentClassifier,
         field_validator: FieldValidator,
         bbox_validator: BboxValidator,
+        binary_normalizer: BinaryNormalizer,
         visual_checker: VisualAuthenticityChecker,
         content_checker: ContentAuthenticityChecker,
         judge: Judge,
@@ -188,6 +245,7 @@ class IDPCoreConfiguration:
             classifier=classifier,
             field_validator=field_validator,
             bbox_validator=bbox_validator,
+            binary_normalizer=binary_normalizer,
             visual_checker=visual_checker,
             content_checker=content_checker,
             judge=judge,
