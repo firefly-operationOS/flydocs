@@ -1,6 +1,10 @@
 # Copyright 2026 Firefly Software Solutions Inc
 """Cross-cutting observability helpers."""
 
+from flydesk_idp.core.observability.agent_middleware import (
+    DEFAULT_MIDDLEWARE,
+    PROMPT_CACHE_MIDDLEWARE,
+)
 from flydesk_idp.core.observability.correlation import (
     get_correlation_id,
     reset_correlation_id,
@@ -13,6 +17,8 @@ from flydesk_idp.core.observability.outbound_log import (
 )
 
 __all__ = [
+    "DEFAULT_MIDDLEWARE",
+    "PROMPT_CACHE_MIDDLEWARE",
     "get_correlation_id",
     "log_outbound",
     "measure",

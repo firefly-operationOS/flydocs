@@ -16,7 +16,7 @@ from fireflyframework_agentic.prompts import PromptTemplate
 from fireflyframework_agentic.types import BinaryContent
 from pydantic import BaseModel, Field
 
-from flydesk_idp.core.observability import timed_agent_run
+from flydesk_idp.core.observability import DEFAULT_MIDDLEWARE, timed_agent_run
 from flydesk_idp.interfaces.dtos.authenticity import (
     ContentAuthenticity,
     ContentCoherenceCheck,
@@ -74,6 +74,7 @@ class ContentAuthenticityChecker:
             output_type=_ContentOutput,
             description="Content authenticity audit",
             tags=["idp", "authenticity"],
+            middleware=list(DEFAULT_MIDDLEWARE),
             auto_register=False,
         )
         content: list[Any] = [

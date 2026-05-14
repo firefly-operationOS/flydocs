@@ -26,12 +26,6 @@ from __future__ import annotations
 from pyfly.container import bean, configuration
 
 from flydesk_idp.config import IDPSettings, get_settings
-from flydesk_idp.core.observability.pricing import install_price_overrides
-
-# Patch the framework's LLM price table at module import so every
-# StaticPriceCostCalculator instance the agentic framework builds
-# afterwards (one per ``agent.run`` call) picks up our overrides.
-install_price_overrides()
 from flydesk_idp.core.services.authenticity import (
     ContentAuthenticityChecker,
     VisualAuthenticityChecker,

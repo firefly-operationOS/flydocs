@@ -20,7 +20,7 @@ from fireflyframework_agentic.prompts import PromptTemplate
 from fireflyframework_agentic.types import BinaryContent
 from pydantic import BaseModel, Field
 
-from flydesk_idp.core.observability import timed_agent_run
+from flydesk_idp.core.observability import DEFAULT_MIDDLEWARE, timed_agent_run
 from flydesk_idp.interfaces.dtos.doc import DocSpec
 from flydesk_idp.interfaces.dtos.field import (
     ExtractedField,
@@ -96,6 +96,7 @@ class Judge:
             output_type=_JudgeOutput,
             description="Judge / re-evaluator",
             tags=["idp", "judge"],
+            middleware=list(DEFAULT_MIDDLEWARE),
             auto_register=False,
         )
         content: list[Any] = [

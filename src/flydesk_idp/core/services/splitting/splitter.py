@@ -27,7 +27,7 @@ from fireflyframework_agentic.prompts import PromptTemplate
 from fireflyframework_agentic.types import BinaryContent
 from pydantic import BaseModel, Field
 
-from flydesk_idp.core.observability import timed_agent_run
+from flydesk_idp.core.observability import DEFAULT_MIDDLEWARE, timed_agent_run
 from flydesk_idp.interfaces.dtos.doc import DocSpec
 
 logger = logging.getLogger(__name__)
@@ -139,6 +139,7 @@ class DocumentSplitter:
             output_type=_SplitterOutput,
             description="LLM document splitter (discovery)",
             tags=["idp", "splitter"],
+            middleware=list(DEFAULT_MIDDLEWARE),
             auto_register=False,
         )
         content: list[Any] = [

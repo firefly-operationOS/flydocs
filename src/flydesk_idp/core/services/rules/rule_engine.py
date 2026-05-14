@@ -21,7 +21,7 @@ from fireflyframework_agentic.agents import FireflyAgent
 from fireflyframework_agentic.prompts import PromptTemplate
 from pydantic import BaseModel, Field
 
-from flydesk_idp.core.observability import timed_agent_run
+from flydesk_idp.core.observability import DEFAULT_MIDDLEWARE, timed_agent_run
 from flydesk_idp.interfaces.dtos.authenticity import VisualValidationOutcome
 from flydesk_idp.interfaces.dtos.doc import DocSpec
 from flydesk_idp.interfaces.dtos.field import ExtractedField, ExtractedFieldGroup
@@ -99,6 +99,7 @@ class RuleEngine:
             output_type=_RuleEngineOutput,
             description="LLM business rule evaluator",
             tags=["idp", "rules"],
+            middleware=list(DEFAULT_MIDDLEWARE),
             auto_register=False,
         )
 

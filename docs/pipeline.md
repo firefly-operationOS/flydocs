@@ -471,21 +471,38 @@ that correlation id; the orchestrator maps it into the
 `ExtractionResult.trace`. See `docs/api-reference.md` for the exact
 response shape.
 
-### 7c. Price table overrides
+### 7c. Pricing & prompt caching
 
-The framework ships a `StaticPriceCostCalculator` with prices for the
-common model families but does not yet include the Claude 4 line. We
-patch the framework's `_DEFAULT_PRICES` table at boot from
-`core/observability/pricing.py::install_price_overrides()` (called as
-a side effect of importing `core/configuration.py`). Update the dict
-there when Anthropic changes their tariffs.
+The framework uses the `genai-prices` package as a live pricing source
+for every model id we hand it. The full Claude 4 family
+(`opus-4-*`, `sonnet-4-*`, `haiku-4-*`) is covered out of the box; the
+USD figures in the response's `usage` block reflect Anthropic's
+current published tariffs without any local override.
 
-The framework's `GenAIPricesCostCalculator` (a wrapper around the
-`genai-prices` package for live pricing) is currently inactive because
-the `genai-prices` library renamed its API between releases -- the
-framework still imports `find_model` which no longer exists. Fixing
-this upstream is tracked but not on the critical path: the static
-table is enough for our model set.
+**Prompt caching.** Every `FireflyAgent` we construct ships with a
+shared `PromptCacheMiddleware` from
+`core/observability/agent_middleware.py::DEFAULT_MIDDLEWARE`. The
+middleware injects pydantic-ai's `anthropic_cache_instructions` +
+`anthropic_cache_messages` settings on every request, so the
+Anthropic API caches the system prompt and the last user-message
+block on the first call (5-minute TTL by default). Subsequent calls
+within the TTL pay ~10% on cached tokens. The bbox / token line on
+each `outbound_call` log line carries the per-call `cache_write` /
+`cache_read` counts; the same data is aggregated into
+`usage.cache_creation_tokens` / `usage.cache_read_tokens` on the
+response.
+
+> **Cache hits depend on prompt stability.** Anthropic caches by
+> exact byte prefix of (instructions + tools + messages). Our system
+> prompts are rendered through Jinja per call -- if the rendered text
+> changes between calls (e.g. classifier with a different
+> `targets_json`), the cache key changes and the next call writes a
+> fresh cache instead of hitting the previous one. Cache writes show
+> up immediately (`cache_write_tokens` > 0); cache reads
+> (`cache_read_tokens` > 0) only appear when the same agent runs
+> twice in a row with an identical rendered system prompt. Stabilising
+> the templates -- moving per-call variables into the user message --
+> is tracked as a follow-up.
 
 ---
 

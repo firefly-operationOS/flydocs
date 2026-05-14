@@ -57,7 +57,8 @@ object containing, for every document you asked about:
 | **Judge**                   | A second LLM pass re-checks each extracted value against the document and stamps PASS / FAIL / UNCERTAIN with evidence. |
 | **Business rules**          | Boolean / categorical decisions over the data, evaluated as a DAG — _"is this KYC-complete?"_, _"escalate to manual review?"_, _"approve / reject"_. |
 | **Audit trail**             | Request id, per-stage latencies, per-doc model used, structured logs.                          |
-| **Cost telemetry**          | Aggregated `usage` block in every response: input/output tokens + estimated USD cost, broken down by agent (extractor, classifier, judge, ...) and by model. Plus a per-call `cost_usd` on every `outbound_call` log line. |
+| **Cost telemetry**          | Aggregated `usage` block in every response: input/output tokens + estimated USD cost (live Anthropic tariffs via `genai-prices`), broken down by agent and by model. Plus a per-call `cost_usd` on every `outbound_call` log line. |
+| **Prompt caching**          | Anthropic prompt caching is on for every agent: system prompt + last user-message block are cached with a 5-minute TTL. Cache writes / reads are surfaced as `cache_creation_tokens` / `cache_read_tokens` on the response and on every `outbound_call` log line. |
 
 A single request can carry **one file or many**. Submit
 `documents: [...]` to ship several at once: pin each file's

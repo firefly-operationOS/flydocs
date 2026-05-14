@@ -28,7 +28,6 @@ from flydesk_idp.core.observability import (
     reset_correlation_id,
     set_correlation_id,
 )
-from flydesk_idp.core.observability.pricing import install_price_overrides
 from flydesk_idp.core.services.pipeline import orchestrator as orch
 from flydesk_idp.interfaces.dtos.extract import TraceEntry, UsageBreakdown
 
@@ -78,19 +77,35 @@ async def test_correlation_id_propagates_into_agent_run(
 
 
 # ---------------------------------------------------------------------------
-# price override
+# cost resolution (delegated to genai-prices via the framework)
 # ---------------------------------------------------------------------------
 
 
-def test_price_override_covers_opus_sonnet_haiku() -> None:
-    install_price_overrides()
-    from fireflyframework_agentic.observability.cost import get_cost_calculator
+def test_genai_prices_resolves_our_anthropic_models() -> None:
+    """The framework's resolver chain hits ``genai-prices`` for our model ids.
 
-    calc = get_cost_calculator("auto")
-    # 1 M input + 1 M output -> (in + out) per-M dollars
-    assert calc.estimate("anthropic:claude-opus-4-7", 1_000_000, 1_000_000) == pytest.approx(90.00)
-    assert calc.estimate("anthropic:claude-sonnet-4-6", 1_000_000, 1_000_000) == pytest.approx(18.00)
-    assert calc.estimate("anthropic:claude-haiku-4-5", 1_000_000, 1_000_000) == pytest.approx(4.80)
+    Asserts the live price database knows about Claude 4 Opus/Sonnet/Haiku --
+    if a release shuffles those entries the test fails loudly so the
+    response stops reporting ``$0.00`` silently.
+    """
+    from fireflyframework_agentic.observability.cost import (
+        CostContext,
+        genai_prices_cost,
+    )
+
+    # 1 M input + 1 M output. Exact numbers are not asserted (genai-prices
+    # tracks the live tariff and changes over time); we only require that
+    # the lookup succeeds and returns something material.
+    for model in (
+        "anthropic:claude-opus-4-7",
+        "anthropic:claude-sonnet-4-6",
+        "anthropic:claude-haiku-4-5",
+    ):
+        cost = genai_prices_cost(CostContext(
+            model=model, input_tokens=1_000_000, output_tokens=1_000_000,
+        ))
+        assert cost is not None, f"genai-prices does not know about {model}"
+        assert cost > 1.0, f"{model} priced absurdly cheap: ${cost}"
 
 
 # ---------------------------------------------------------------------------
