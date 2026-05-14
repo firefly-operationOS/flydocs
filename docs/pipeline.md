@@ -31,28 +31,29 @@ exactly what executed.
 
 | Order | Stage                  | Mandatory? | What it does                                                                                                                             | Default timeout |
 | ----: | ---------------------- | :--------: | ---------------------------------------------------------------------------------------------------------------------------------------- | --------------: |
-|     1 | `load`                 | yes        | Sniff media type and count pages on every input file. Pure Python.                                                                      | 20 s            |
-|     2 | `classifier`           | no         | LLM picks which declared `DocSpec` each **unpinned** file matches. Skipped in single-file mode and when every file is pinned.            | 120 s           |
-|     3 | `split`                | no         | LLM identifies the page range of every target `docType`. Single-file only — multi-file requests treat each file as its own document.    | 60 s            |
-|     4 | `plan_tasks`           | yes        | Pure Python: build the flat `(file, DocSpec)` task list every downstream stage iterates.                                                | 5 s             |
-|     5 | `extract`              | yes        | LLM produces fields + normalised bboxes for every task. Fanned out with `asyncio.gather`.                                               | 300 s           |
-|     6 | `bbox_validation`      | yes        | Pure-Python geometric hallucination check: stamps every bbox with a `BboxQuality` verdict + continuous `quality_score`.                  | 5 s             |
-|     7 | `field_validation`     | no         | Pure-Python validation: regex / enum / range + every `StandardValidator` declared per field.                                            | 5 s             |
-|     8 | `visual_authenticity`  | no         | LLM evaluates caller-defined visual validators (signature present, stamp present, …).                                                   | 180 s           |
-|     9 | `content_authenticity` | no         | LLM audit: dates consistent, totals add up, expected boilerplate, tampering signals.                                                   | 180 s           |
-|    10 | `judge`                | no         | Second LLM pass re-grades every extracted value against the source.                                                                     | 180 s           |
+|     1 | `load`                 | yes        | Sniff media type and count pages on every input file. Pure Python.                                                                       | 20 s            |
+|     2 | `discover`             | no         | LLM enumerates every sub-document inside each unpinned, multi-page file. Returns one segment per discovered sub-document with a page range. | 180 s        |
+|     3 | `classify`             | no         | LLM assigns each segment a declared `DocSpec` (or the `unmatched` sentinel). Per-segment fan-out via `asyncio.gather`.                   | 180 s           |
+|     4 | `plan_tasks`           | yes        | Pure Python: build the flat `(segment, DocSpec)` task list every downstream stage iterates.                                              | 5 s             |
+|     5 | `extract`              | yes        | LLM produces fields + normalised bboxes for every task. Fanned out with `asyncio.gather`.                                                | 300 s           |
+|     6 | `bbox_validation`      | yes        | Pure-Python geometric hallucination check: stamps every bbox with a `BboxQuality` verdict + continuous `quality_score`.                   | 5 s             |
+|     7 | `field_validation`     | no         | Pure-Python validation: regex / enum / range + every `StandardValidator` declared per field.                                             | 5 s             |
+|     8 | `visual_authenticity`  | no         | LLM evaluates caller-defined visual validators (signature present, stamp present, …).                                                    | 180 s           |
+|     9 | `content_authenticity` | no         | LLM audit: dates consistent, totals add up, expected boilerplate, tampering signals.                                                     | 180 s           |
+|    10 | `judge`                | no         | Second LLM pass re-grades every extracted value against the source.                                                                       | 180 s           |
 |    11 | `judge_escalation`     | no         | When the judge's failure rate exceeds `escalation_threshold`, re-run extract + judge with `escalation_model` and keep the better result. | 300 s           |
-|    12 | `rules`                | no         | LLM evaluates the business-rule DAG, level by level.                                                                                    | 180 s           |
-|    13 | `assemble`             | yes        | Pure Python: compose the `ExtractionResult`.                                                                                            | 5 s             |
+|    12 | `rules`                | no         | LLM evaluates the business-rule DAG, level by level.                                                                                     | 180 s           |
+|    13 | `assemble`             | yes        | Pure Python: compose the `ExtractionResult`.                                                                                              | 5 s             |
 
 Optional stages are caller-toggled through `ExtractionOptions.stages`.
 Other short-circuits:
 
-- `classifier` runs only in multi-file mode AND when at least one file
-  lacks a `document_type` pin AND `stages.classifier` is on (default
-  `true`).
-- `split` is single-file only and is additionally skipped when there's
-  only one document type or the source is a single page.
+- `discover` (the splitter) runs only when `stages.splitter` is on AND
+  at least one file is unpinned AND that file has more than one page.
+  Pinned files are treated as a single segment of the pinned type.
+- `classify` runs per **segment**, not per file. Skipped for segments
+  whose doctype is already resolved (pin or single-declared-DocSpec
+  short-circuit), and as a whole when `stages.classifier` is off.
 - `bbox_validation` is non-toggleable — it is pure geometry and runs
   on every request.
 - `judge_escalation` is silently skipped when `judge` is off.
@@ -65,19 +66,20 @@ Other short-circuits:
 builder = PipelineBuilder("flydesk-idp")
 builder.add_node("load", CallableStep(self._step_load), timeout_seconds=20)
 
-# Classifier only runs in multi-file mode AND when some file lacks a pin.
-needs_classifier = (
-    stages.classifier and is_multi_file and any(not f.document_type for f in files)
-)
-if needs_classifier:
-    builder.add_node("classifier", CallableStep(self._step_classifier), timeout_seconds=120)
+# Discover runs when the splitter is on AND at least one file is unpinned.
+# Pinned files keep their single default segment (covers the whole file).
+needs_discover = stages.splitter and any(not f.document_type for f in files)
+if needs_discover:
+    builder.add_node("discover", CallableStep(self._step_discover), timeout_seconds=180)
 
-# Splitter is single-file only.
-if stages.splitter and not is_multi_file and len(request.docs) > 1:
-    builder.add_node("split", CallableStep(self._step_split), timeout_seconds=60)
+# Classify runs per segment when on. The step short-circuits internally
+# when there are no segments needing a doctype (everything pinned, or
+# only one declared DocSpec).
+if stages.classifier:
+    builder.add_node("classify", CallableStep(self._step_classifier), timeout_seconds=180)
 
-builder.add_node("plan_tasks", CallableStep(self._step_plan_tasks), timeout_seconds=5)
-builder.add_node("extract",    CallableStep(self._step_extract),    timeout_seconds=300)
+builder.add_node("plan_tasks",     CallableStep(self._step_plan_tasks),     timeout_seconds=5)
+builder.add_node("extract",        CallableStep(self._step_extract),        timeout_seconds=300)
 builder.add_node("bbox_validation", CallableStep(self._step_bbox_validation), timeout_seconds=5)
 
 if stages.field_validation:
@@ -106,19 +108,22 @@ Three properties fall out of this design:
 
 ## 4. Stage-by-stage
 
-> **Multi-file primer.** Two request shapes converge onto the same
-> downstream pipeline. The orchestrator normalises both into a flat
-> `tasks: list[_ExtractionTask]` -- one entry per `(file, DocSpec)`
-> pair -- and every per-stage method iterates that list.
+> **Unified flow.** Every file -- whether the caller submitted
+> `document` or `documents[]` -- flows through the same pipeline. The
+> orchestrator normalises everything into two flat lists kept on the
+> pipeline context:
 >
-> - **Single file** (`request.document`, legacy shape): one task per
->   target `DocSpec` when the splitter ran, otherwise one task against
->   the whole document.
-> - **Multi-file** (`request.documents = [...]`): one task per submitted
->   file. The caller may pin each file's `document_type`; unpinned
->   files go through the classifier. Files the classifier marks
->   `unmatched` skip extraction entirely and land in
->   `result.additional_documents` with `document_type="unmatched"`.
+> - `files_data: list[_FileSlot]` -- one slot per input file.
+> - `tasks: list[_ExtractionTask]` -- one task per **(segment, DocSpec)**
+>   pair, where a "segment" is a sub-document inside a file.
+>
+> A segment is produced by the `discover` stage (one segment per
+> sub-document the LLM identifies) or, when discovery is off /
+> short-circuited, a default segment that covers the whole file. Each
+> segment is then assigned a declared DocSpec by the `classify` stage
+> (or by a caller pin, or by the single-DocSpec short-circuit). A task
+> is produced for every segment that ends up with a resolved DocSpec;
+> the rest go to `result.additional_documents` as `unmatched`.
 
 ### 4a. `load`
 
@@ -126,60 +131,74 @@ Three properties fall out of this design:
 file. It sniffs the media type (magic bytes first, declared content
 type as a fallback) and counts pages (`pypdf` for PDF; everything else
 is one page from the extractor's point of view). Each file becomes a
-`_FileSlot` in `ctx.metadata["files_data"]`.
+`_FileSlot` in `ctx.metadata["files_data"]` and is seeded with **one
+default segment** covering the whole file. The discover stage may
+later replace that with finer-grained segments. For pinned files the
+default segment's `resolved_doctype` is set from the pin so they skip
+classification.
 
 No LLM calls. Cheap.
 
-### 4b. `classifier`
+### 4b. `discover`
 
-`core/services/classification/classifier.py`. One LLM call per
-**unpinned** file, fanned out with `asyncio.gather`.
+`core/services/splitting/splitter.py`. One LLM call per unpinned,
+multi-page file, fanned out with `asyncio.gather`.
 
-Each call sees the file bytes (multimodal `BinaryContent`) plus the
-JSON dump of every candidate `DocSpec.docType` (id, description,
-country). The LLM returns one of the declared `documentType` values or
-the literal `"unmatched"`. The classifier coerces anything outside the
-closed candidate set to `unmatched` defensively.
+The splitter is a pure **segmentation** service: it enumerates every
+distinct sub-document inside a file and returns one entry per
+sub-document with a contiguous page range, a free-text
+`provisional_type` hint, a description, and a segmentation
+`confidence`. It does NOT decide which declared DocSpec each segment
+matches -- that is the classifier's job.
 
-The per-file verdict is surfaced on `result.files[i].classification`
-(matched, confidence, description, notes). Files that come back
-`unmatched` skip extraction and appear in
-`result.additional_documents` as `document_type="unmatched"`.
+The caller's declared DocSpecs are passed to the LLM as routing
+context (so it can recognise familiar layouts), not as a constraint:
+the splitter outputs what is actually in the file, even when no
+declared target matches.
 
 The stage is skipped when:
 
-- the request is single-file (the docType is implicit in `docs[]`), or
-- every file is pinned with a `document_type` (nothing to classify), or
-- `stages.classifier` is off.
+- `stages.splitter` is off, or
+- the file is pinned with a `document_type` (caller already told us
+  what it is), or
+- the file has a single page (one segment is always enough).
 
-### 4c. `split`
+When the LLM returns an empty list, the splitter falls back to a
+single segment covering the whole file so the pipeline can still
+proceed.
 
-> Single-file only. In multi-file mode each input is already one
-> document — the splitter is short-circuited and `plan_tasks` builds
-> one task per file directly.
+### 4c. `classify`
 
-`core/services/splitting/splitter.py`. Shortcut for single-page or
-single-target requests — no LLM call.
+`core/services/classification/classifier.py`. One LLM call per
+**segment**, fanned out with `asyncio.gather`.
 
-Otherwise: the document bytes go to the LLM along with the list of
-target `docType`s. The LLM returns, for each target, either a page
-range (`start`, `end` 1-indexed) or `missing: true`. Plus any
-**additional** documents in the source that don't match a target (the
-`additional_docs` list).
+Each call sees the segment bytes (the file is sliced down to the
+segment's page range with `pypdf` for PDFs; for non-PDF inputs the
+whole file is sent) plus the JSON dump of every candidate
+`DocSpec.docType`. The LLM returns one of the declared `documentType`
+values or the literal `"unmatched"`. Any value outside the closed
+candidate set is coerced to `unmatched` defensively.
 
-Page ranges are clamped to `[1, page_count]` and `start <= end` is
-enforced before slicing. PDF slicing uses `pypdf` (see
-`pdf_slicer.py`); non-PDF inputs are not sliced.
+The per-segment verdict is surfaced on the corresponding
+`documents[]` or `additional_documents[]` entry. For single-segment
+files we additionally roll the verdict up onto
+`result.files[i].classification` so the top-level summary is useful.
+
+The stage is skipped when:
+
+- `stages.classifier` is off, or
+- the segment already has a resolved doctype (caller pin, or the
+  single-declared-DocSpec short-circuit that auto-assigns the only
+  candidate without an LLM call).
 
 ### 4d. `plan_tasks`
 
-Pure-Python bookkeeping (no LLM). Walks the per-file slots and the
-splitter / classifier outcomes and produces the flat
-`tasks: list[_ExtractionTask]` that every downstream stage iterates.
-A task is one `(file, DocSpec, slice_bytes, page_range)` tuple --
-exactly the unit `extract` runs once. The conversion from "request
-shape" to "tasks" lives here, so the downstream stages don't have to
-care whether the request was single- or multi-file.
+Pure-Python bookkeeping (no LLM). Walks the per-file segments and
+produces one `_ExtractionTask` per (segment, DocSpec) pair where the
+segment has a resolved doctype. PDF segments that don't cover the
+whole file get sliced down with `pypdf` so the extractor sees only
+the segment's pages. Unmatched segments are routed to
+`additional_documents` and never reach the extractor.
 
 ### 4e. `extract`
 

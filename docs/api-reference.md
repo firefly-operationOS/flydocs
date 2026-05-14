@@ -208,12 +208,24 @@ is documented in [§ 2a](#2a-multi-file-extraction).
 |    422 | `invalid_base64`       | A `content_base64` field failed strict base64 parsing.             |
 |    422 | `invalid_request`      | Semantic validator rejected the payload (e.g. a `document_type` pin references an undeclared docType, rule points at an unknown field). The body includes the full report so the caller can fix every issue at once. |
 
-### 2a. Multi-file extraction
+### 2a. Multi-file & sub-document discovery
 
-Submit several files in one request by sending `documents` (a list)
-instead of `document` (a single object). The two shapes are mutually
-exclusive; the request validator rejects payloads that set both or
-neither.
+The pipeline accepts two complementary shapes for "documents per
+request":
+
+1. **Multi-file**: submit several files by sending `documents` (a
+   list) instead of `document` (a single object). The two shapes are
+   mutually exclusive; the request validator rejects payloads that
+   set both or neither.
+2. **Sub-document discovery**: enable `options.stages.splitter` and a
+   single uploaded PDF that contains several documents inside (deed
+   + ID + utility bill, for example) is split into its sub-documents
+   automatically. Each sub-document is then classified against the
+   declared `DocSpec`s and extracted independently.
+
+The two work in any combination -- you can submit five files and turn
+on the splitter, and every file gets its own discover → classify →
+extract sub-pipeline.
 
 Each entry in `documents` carries the same fields as the legacy
 `document`, plus an optional `document_type` pin:

@@ -115,12 +115,12 @@ DAG for each call so the audit trail reflects exactly what executed.
 
 ```
                 ┌──────────────────────────────────────────────────────────────────┐
-   POST  ──────▶│ load → classifier? → split? → plan_tasks → extract →             │──────▶ JSON
+   POST  ──────▶│ load → discover? → classify? → plan_tasks → extract →            │──────▶ JSON
  (PDF/PNG/…)    │ bbox_validation → field_validation? → visual_auth? →             │  (fields + bbox
                 │ content_auth? → judge? → judge_escalation? → rules? → assemble   │   + verdicts)
                 └──────────────────────────────────────────────────────────────────┘
                               │
-                              │  per-task concurrency (asyncio.gather)
+                              │  per-segment concurrency (asyncio.gather)
                               │  per-stage timeouts + error capture
                               ▼
                        structured trace
@@ -129,8 +129,12 @@ DAG for each call so the audit trail reflects exactly what executed.
 
 The extractor and the geometric bbox check are the only mandatory
 stages. Everything else is a caller-chosen trade-off between cost,
-latency, and rigor. The classifier kicks in only when a multi-file
-request contains files without a `document_type` pin.
+latency, and rigor. With `splitter` enabled, every file -- even a
+single uploaded PDF -- is split into its sub-documents and each is
+independently classified against the declared `DocSpec`s, so a pack
+that bundles a deed + an ID + a utility bill comes out as three
+separate routed documents without the caller having to know what's
+inside.
 
 See [docs/pipeline.md](docs/pipeline.md) for the deep dive.
 
