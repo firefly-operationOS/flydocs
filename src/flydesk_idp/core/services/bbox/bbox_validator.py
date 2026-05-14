@@ -46,13 +46,13 @@ logger = logging.getLogger(__name__)
 # Tunable thresholds. The defaults are conservative and chosen so the
 # real-world notarial-deed run -- where every bbox covers ~3% of the
 # page -- comes out as ``good``.
-_AREA_MIN = 5e-5            # roughly 5px × 5px at 1000px width
+_AREA_MIN = 5e-5  # roughly 5px × 5px at 1000px width
 _AREA_TYP_MIN = 1e-4
 _AREA_TYP_MAX = 0.5
 _AREA_SUSPICIOUS = 0.7
-_ASPECT_MIN = 1.0 / 30.0    # very narrow
-_ASPECT_MAX = 30.0          # very wide
-_EDGE_EPSILON = 1e-3        # tolerance for "exactly on the edge"
+_ASPECT_MIN = 1.0 / 30.0  # very narrow
+_ASPECT_MAX = 30.0  # very wide
+_EDGE_EPSILON = 1e-3  # tolerance for "exactly on the edge"
 
 
 class BboxValidator:

@@ -13,7 +13,7 @@ import hmac
 import json
 import socket
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
@@ -21,7 +21,6 @@ import pytest
 from flydesk_idp.core.services.webhook import WebhookPublisher
 from flydesk_idp.interfaces.dtos.webhook import JobWebhookPayload
 from flydesk_idp.interfaces.enums.job_status import JobStatus
-
 
 # ---------------------------------------------------------------------------
 # In-process webhook receiver
@@ -94,7 +93,7 @@ def _payload() -> JobWebhookPayload:
     return JobWebhookPayload(
         job_id="01HEM2ZZ7M0Q800000000",
         status=JobStatus.SUCCEEDED,
-        occurred_at=datetime(2026, 5, 14, 12, 0, 0, tzinfo=timezone.utc),
+        occurred_at=datetime(2026, 5, 14, 12, 0, 0, tzinfo=UTC),
         metadata={"tenant_id": "acme"},
         result=None,
     )
@@ -135,17 +134,17 @@ async def test_webhook_propagates_extra_headers(receiver) -> None:
 
     extra = {
         "X-Correlation-Id": "corr-123",
-        "X-Request-Id":     "req-456",
-        "X-Tenant-Id":      "acme",
-        "traceparent":      "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
+        "X-Request-Id": "req-456",
+        "X-Tenant-Id": "acme",
+        "traceparent": "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
     }
     ok = await pub.deliver(url, _payload(), extra_headers=extra)
 
     assert ok is True
     assert capture.headers.get("X-Correlation-Id") == "corr-123"
-    assert capture.headers.get("X-Request-Id")     == "req-456"
-    assert capture.headers.get("X-Tenant-Id")      == "acme"
-    assert capture.headers.get("traceparent")       == extra["traceparent"]
+    assert capture.headers.get("X-Request-Id") == "req-456"
+    assert capture.headers.get("X-Tenant-Id") == "acme"
+    assert capture.headers.get("traceparent") == extra["traceparent"]
 
 
 @pytest.mark.asyncio

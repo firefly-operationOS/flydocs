@@ -72,10 +72,7 @@ class FieldValidator:
             value=field.fieldValueFound,
         )
         # ``severity=warning`` validators record errors but don't flip ``valid``.
-        hard_errors = [
-            e for e in errors
-            if not e.message.endswith("[warning]")
-        ]
+        hard_errors = [e for e in errors if not e.message.endswith("[warning]")]
         field.field_validation = FieldValidation(valid=not hard_errors, errors=errors)
 
     def _validate_array(self, spec: FieldSpec, field: ExtractedField) -> None:
@@ -134,14 +131,13 @@ class FieldValidator:
             err = self._validate_format(fmt, value)
             if err is not None:
                 errors.append(err)
-        if enum is not None:
-            if value not in enum:
-                errors.append(
-                    FieldValidationError(
-                        rule=ValidationRule.ENUM,
-                        message=f"Value {value!r} is not one of {enum}",
-                    )
+        if enum is not None and value not in enum:
+            errors.append(
+                FieldValidationError(
+                    rule=ValidationRule.ENUM,
+                    message=f"Value {value!r} is not one of {enum}",
                 )
+            )
         if minimum is not None:
             err = self._validate_minimum(minimum, value)
             if err is not None:
@@ -220,9 +216,7 @@ class FieldValidator:
         try:
             num = float(value)
         except (TypeError, ValueError):
-            return FieldValidationError(
-                rule=ValidationRule.MINIMUM, message=f"{value!r} is not a number"
-            )
+            return FieldValidationError(rule=ValidationRule.MINIMUM, message=f"{value!r} is not a number")
         if num < minimum:
             return FieldValidationError(
                 rule=ValidationRule.MINIMUM, message=f"Value {value} is below minimum {minimum}"
@@ -233,9 +227,7 @@ class FieldValidator:
         try:
             num = float(value)
         except (TypeError, ValueError):
-            return FieldValidationError(
-                rule=ValidationRule.MAXIMUM, message=f"{value!r} is not a number"
-            )
+            return FieldValidationError(rule=ValidationRule.MAXIMUM, message=f"{value!r} is not a number")
         if num > maximum:
             return FieldValidationError(
                 rule=ValidationRule.MAXIMUM, message=f"Value {value} exceeds maximum {maximum}"

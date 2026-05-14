@@ -23,7 +23,6 @@ from flydesk_idp.interfaces.dtos.doc import DocSpec
 from flydesk_idp.interfaces.dtos.field import ExtractedFieldGroup
 from flydesk_idp.interfaces.dtos.rule import RuleResult, RuleSpec
 
-
 # ---------------------------------------------------------------------------
 # Document input
 # ---------------------------------------------------------------------------
@@ -50,10 +49,7 @@ class DocumentInput(BaseModel):
     )
     content_type: str | None = Field(
         default=None,
-        description=(
-            "Optional MIME type hint. When omitted, the service sniffs from "
-            "magic bytes."
-        ),
+        description=("Optional MIME type hint. When omitted, the service sniffs from magic bytes."),
     )
     document_type: str | None = Field(
         default=None,
@@ -197,8 +193,7 @@ class ExtractionRequest(BaseModel):
     documents: list[DocumentInput] = Field(
         default_factory=list,
         description=(
-            "Multi-file input. Each file is processed independently. "
-            "Mutually exclusive with ``document``."
+            "Multi-file input. Each file is processed independently. Mutually exclusive with ``document``."
         ),
     )
     docs: list[DocSpec] = Field(..., min_length=1)
@@ -206,17 +201,14 @@ class ExtractionRequest(BaseModel):
     options: ExtractionOptions = Field(default_factory=ExtractionOptions)
 
     @model_validator(mode="after")
-    def _normalise_documents(self) -> "ExtractionRequest":
+    def _normalise_documents(self) -> ExtractionRequest:
         if self.document is not None and self.documents:
             raise ValueError(
                 "request can carry either ``document`` (legacy single-file) "
                 "or ``documents`` (multi-file) but not both"
             )
         if self.document is None and not self.documents:
-            raise ValueError(
-                "request must carry either ``document`` or at least one "
-                "entry in ``documents``"
-            )
+            raise ValueError("request must carry either ``document`` or at least one entry in ``documents``")
         return self
 
     @property
@@ -356,9 +348,7 @@ class TraceEntry(BaseModel):
     started_at: datetime
     completed_at: datetime
     latency_ms: float
-    status: str = Field(
-        description="``success`` | ``failed`` | ``skipped``."
-    )
+    status: str = Field(description="``success`` | ``failed`` | ``skipped``.")
 
 
 class ExtractionResult(BaseModel):

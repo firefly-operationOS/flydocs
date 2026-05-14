@@ -30,7 +30,7 @@ import logging
 import random
 import socket
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from pyfly.eda import EventEnvelope, EventPublisher
@@ -107,8 +107,10 @@ class JobWorker:
         await self._publisher.start()
         logger.info(
             "JobWorker %s started (adapter=%s, destination=%s, event_type=%s)",
-            self._consumer_id, self._settings.eda_adapter,
-            self._settings.jobs_topic, self._settings.jobs_event_type,
+            self._consumer_id,
+            self._settings.eda_adapter,
+            self._settings.jobs_topic,
+            self._settings.jobs_event_type,
         )
         try:
             await self._stop.wait()
@@ -125,7 +127,8 @@ class JobWorker:
         if not job_id:
             logger.warning(
                 "Received %s event without job_id: %r -- dropping",
-                envelope.event_type, envelope.payload,
+                envelope.event_type,
+                envelope.payload,
             )
             return
         await self._process(str(job_id))
@@ -143,8 +146,12 @@ class JobWorker:
         job = await self._repository.mark_running(job.id) or job
         attempts = job.attempts or 1
         log_outbound(
-            "worker", op="job.run", status="started",
-            latency_ms=0.0, job_id=job.id, attempt=attempts,
+            "worker",
+            op="job.run",
+            status="started",
+            latency_ms=0.0,
+            job_id=job.id,
+            attempt=attempts,
         )
         request = self._build_request(job)
         started = time.monotonic()
@@ -156,9 +163,12 @@ class JobWorker:
                 job.id, result=result.model_dump(mode="json", by_alias=True)
             )
             log_outbound(
-                "worker", op="job.run", status="ok",
+                "worker",
+                op="job.run",
+                status="ok",
                 latency_ms=(time.monotonic() - started) * 1000,
-                job_id=job.id, attempt=attempts,
+                job_id=job.id,
+                attempt=attempts,
             )
             await self._fire_webhook(
                 job_id=job.id,
@@ -174,10 +184,14 @@ class JobWorker:
             terminal = permanent or exhausted
             error_code = "PERMANENT_ERROR" if permanent else "EXTRACTION_FAILED"
             log_outbound(
-                "worker", op="job.run", status="error",
+                "worker",
+                op="job.run",
+                status="error",
                 latency_ms=(time.monotonic() - started) * 1000,
-                job_id=job.id, attempt=attempts,
-                permanent=permanent, exhausted=exhausted,
+                job_id=job.id,
+                attempt=attempts,
+                permanent=permanent,
+                exhausted=exhausted,
                 error=type(exc).__name__,
             )
 
@@ -197,7 +211,10 @@ class JobWorker:
                 delay = self._backoff_delay(attempts)
                 logger.warning(
                     "Job %s failed attempt %d (%s); re-publishing in %.1fs",
-                    job.id, attempts, exc, delay,
+                    job.id,
+                    attempts,
+                    exc,
+                    delay,
                 )
                 # Mark QUEUED again so the API surface reflects the retry,
                 # then schedule the re-publish without blocking the handler.
@@ -222,8 +239,11 @@ class JobWorker:
                 payload={"job_id": job_id},
             )
             log_outbound(
-                "eda", op="republish", status="ok",
-                latency_ms=delay_s * 1000, job_id=job_id,
+                "eda",
+                op="republish",
+                status="ok",
+                latency_ms=delay_s * 1000,
+                job_id=job_id,
             )
         except Exception as exc:  # noqa: BLE001
             logger.error("Failed to re-publish job %s after backoff: %s", job_id, exc)
@@ -260,7 +280,7 @@ class JobWorker:
         payload = JobWebhookPayload(
             job_id=job_id,
             status=status,
-            occurred_at=datetime.now(timezone.utc),
+            occurred_at=datetime.now(UTC),
             metadata=clean_metadata,
             result=result,
             error_code=error_code,

@@ -58,8 +58,8 @@ class DiscoveredSegment:
     routes by the *classifier*'s verdict, not by this hint.
     """
 
-    page_start: int            # 1-indexed, inclusive
-    page_end: int              # 1-indexed, inclusive
+    page_start: int  # 1-indexed, inclusive
+    page_end: int  # 1-indexed, inclusive
     provisional_type: str = ""
     description: str = ""
     confidence: float = 0.0
@@ -110,10 +110,17 @@ class DocumentSplitter:
         """
         # Shortcut: single page -> one segment covers the whole file.
         if page_count <= 1:
-            return SplitResult(segments=[DiscoveredSegment(
-                page_start=1, page_end=max(1, page_count),
-                provisional_type="", description="", confidence=1.0,
-            )])
+            return SplitResult(
+                segments=[
+                    DiscoveredSegment(
+                        page_start=1,
+                        page_end=max(1, page_count),
+                        provisional_type="",
+                        description="",
+                        confidence=1.0,
+                    )
+                ]
+            )
 
         targets_json = json.dumps(
             [
@@ -146,28 +153,33 @@ class DocumentSplitter:
             prompt.user,
             BinaryContent(data=document_bytes, media_type=media_type),
         ]
-        run_result = await timed_agent_run(
-            agent, content, op="split", model=model or self._model
-        )
+        run_result = await timed_agent_run(agent, content, op="split", model=model or self._model)
         raw: _SplitterOutput = run_result.output
 
         segments: list[DiscoveredSegment] = []
         for entry in raw.segments:
             start = max(1, min(page_count, int(entry.pages.start)))
             end = max(start, min(page_count, int(entry.pages.end)))
-            segments.append(DiscoveredSegment(
-                page_start=start,
-                page_end=end,
-                provisional_type=(entry.provisional_type or "").strip().lower(),
-                description=entry.description.strip(),
-                confidence=float(entry.confidence),
-            ))
+            segments.append(
+                DiscoveredSegment(
+                    page_start=start,
+                    page_end=end,
+                    provisional_type=(entry.provisional_type or "").strip().lower(),
+                    description=entry.description.strip(),
+                    confidence=float(entry.confidence),
+                )
+            )
 
         # Defensive fallback: if the LLM came back empty, treat the
         # whole file as one segment so the pipeline can still proceed.
         if not segments:
-            segments.append(DiscoveredSegment(
-                page_start=1, page_end=page_count,
-                provisional_type="", description="", confidence=0.0,
-            ))
+            segments.append(
+                DiscoveredSegment(
+                    page_start=1,
+                    page_end=page_count,
+                    provisional_type="",
+                    description="",
+                    confidence=0.0,
+                )
+            )
         return SplitResult(segments=segments)

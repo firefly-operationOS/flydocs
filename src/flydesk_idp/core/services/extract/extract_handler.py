@@ -31,8 +31,6 @@ class ExtractHandler(CommandHandler[ExtractCommand, ExtractionResult]):
                 self._orchestrator.execute(command.request),
                 timeout=self._settings.sync_timeout_s,
             )
-        except asyncio.TimeoutError as exc:
+        except TimeoutError as exc:
             logger.warning("Sync extraction timed out after %ds", self._settings.sync_timeout_s)
-            raise TimeoutError(
-                f"extraction did not finish within {self._settings.sync_timeout_s}s"
-            ) from exc
+            raise TimeoutError(f"extraction did not finish within {self._settings.sync_timeout_s}s") from exc

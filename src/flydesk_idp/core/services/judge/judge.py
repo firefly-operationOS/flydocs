@@ -39,7 +39,7 @@ class _RawJudgeField(BaseModel):
     evidence: str = ""
     notes: str = ""
     flag_for_review: bool = False
-    items: list["_RawJudgeField"] | None = None
+    items: list[_RawJudgeField] | None = None
 
 
 class _RawJudgeGroup(BaseModel):
@@ -103,12 +103,9 @@ class Judge:
             prompt.user,
             BinaryContent(data=document_bytes, media_type=media_type),
         ]
-        run_result = await timed_agent_run(
-            agent, content, op="judge", model=model or self._model
-        )
+        run_result = await timed_agent_run(agent, content, op="judge", model=model or self._model)
         judge_by_group: dict[str, dict[str, _RawJudgeField]] = {
-            g.fieldGroupName: {f.fieldName: f for f in g.fieldGroupFields}
-            for g in run_result.output.fields
+            g.fieldGroupName: {f.fieldName: f for f in g.fieldGroupFields} for g in run_result.output.fields
         }
 
         for group in extracted_groups:

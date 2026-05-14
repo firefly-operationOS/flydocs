@@ -12,8 +12,8 @@ from unittest.mock import MagicMock
 
 from flydesk_idp.core.services.workers.job_worker import JobWorker, _is_permanent
 
-
 # -- classification --------------------------------------------------------
+
 
 def test_value_error_is_permanent() -> None:
     assert _is_permanent(ValueError("bad payload")) is True
@@ -48,6 +48,7 @@ def test_generic_runtime_error_is_retryable() -> None:
 
 
 # -- backoff math ----------------------------------------------------------
+
 
 def _worker_with(base: float, ceiling: float) -> JobWorker:
     settings = MagicMock()

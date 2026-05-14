@@ -21,7 +21,6 @@ from flydesk_idp.interfaces.dtos.standard_validator import StandardValidatorSpec
 from flydesk_idp.interfaces.enums.field_type import FieldType, StandardFormat
 from flydesk_idp.interfaces.enums.status import JudgeStatus, ValidationRule
 
-
 # ---------------------------------------------------------------------------
 # REQUEST side -- the schema the caller submits
 # ---------------------------------------------------------------------------
@@ -109,9 +108,9 @@ class ExtractedField(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     fieldName: str = Field(..., alias="name")
-    fieldValueFound: (
-        str | int | float | bool | list["ExtractedField"] | None
-    ) = Field(default=None, alias="value")
+    fieldValueFound: str | int | float | bool | list[ExtractedField] | None = Field(
+        default=None, alias="value"
+    )
     pagesFound: list[int] = Field(default_factory=list)
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     bbox: BoundingBox = Field(default_factory=BoundingBox.empty)

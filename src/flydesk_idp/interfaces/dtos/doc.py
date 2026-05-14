@@ -9,7 +9,9 @@ from flydesk_idp.interfaces.dtos.field import FieldGroup
 
 
 class DocType(BaseModel):
-    documentType: str = Field(..., min_length=1, description="Stable id for this document type (e.g. ``passport``).")
+    documentType: str = Field(
+        ..., min_length=1, description="Stable id for this document type (e.g. ``passport``)."
+    )
     description: str = ""
     country: str = Field(default="", description="ISO 3166-1 alpha-2 country code.")
 

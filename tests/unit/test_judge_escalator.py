@@ -30,7 +30,6 @@ from flydesk_idp.interfaces.dtos.field import (
 from flydesk_idp.interfaces.enums.field_type import FieldType
 from flydesk_idp.interfaces.enums.status import JudgeStatus
 
-
 _DUMMY = base64.b64encode(b"%PDF-1.4").decode("ascii")
 
 
@@ -103,22 +102,29 @@ def _ctx(
 
 # -- escalation is gated by threshold ---------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_no_escalation_when_threshold_zero() -> None:
     """threshold=0 disables escalation regardless of failure rate."""
     extractor = AsyncMock()
     judge = AsyncMock()
     escalator = JudgeEscalator(
-        extractor=extractor, judge=judge,
-        default_threshold=0.0, default_model="anthropic:claude-opus-4-7",
+        extractor=extractor,
+        judge=judge,
+        default_threshold=0.0,
+        default_model="anthropic:claude-opus-4-7",
     )
-    per_doc = {"passport": [ExtractedFieldGroup(
-        fieldGroupName="g",
-        fieldGroupFields=[
-            _field("a", "x", JudgeStatus.FAIL),
-            _field("b", "y", JudgeStatus.FAIL),
-        ],
-    )]}
+    per_doc = {
+        "passport": [
+            ExtractedFieldGroup(
+                fieldGroupName="g",
+                fieldGroupFields=[
+                    _field("a", "x", JudgeStatus.FAIL),
+                    _field("b", "y", JudgeStatus.FAIL),
+                ],
+            )
+        ]
+    }
     ctx = _ctx(extractor, judge, per_doc_extracted=per_doc)
     info = await escalator.maybe_escalate(ctx, _request(escalation_threshold=0.0))
     assert info is None
@@ -130,13 +136,19 @@ async def test_no_escalation_when_model_not_set() -> None:
     extractor = AsyncMock()
     judge = AsyncMock()
     escalator = JudgeEscalator(
-        extractor=extractor, judge=judge,
-        default_threshold=0.5, default_model=None,
+        extractor=extractor,
+        judge=judge,
+        default_threshold=0.5,
+        default_model=None,
     )
-    per_doc = {"passport": [ExtractedFieldGroup(
-        fieldGroupName="g",
-        fieldGroupFields=[_field("a", "x", JudgeStatus.FAIL), _field("b", "y", JudgeStatus.FAIL)],
-    )]}
+    per_doc = {
+        "passport": [
+            ExtractedFieldGroup(
+                fieldGroupName="g",
+                fieldGroupFields=[_field("a", "x", JudgeStatus.FAIL), _field("b", "y", JudgeStatus.FAIL)],
+            )
+        ]
+    }
     ctx = _ctx(extractor, judge, per_doc_extracted=per_doc)
     info = await escalator.maybe_escalate(ctx, _request())
     assert info is None
@@ -147,16 +159,22 @@ async def test_no_escalation_when_failure_rate_below_threshold() -> None:
     extractor = AsyncMock()
     judge = AsyncMock()
     escalator = JudgeEscalator(
-        extractor=extractor, judge=judge,
-        default_threshold=0.6, default_model="anthropic:claude-opus-4-7",
+        extractor=extractor,
+        judge=judge,
+        default_threshold=0.6,
+        default_model="anthropic:claude-opus-4-7",
     )
-    per_doc = {"passport": [ExtractedFieldGroup(
-        fieldGroupName="g",
-        fieldGroupFields=[
-            _field("a", "x", JudgeStatus.PASS),
-            _field("b", "y", JudgeStatus.FAIL),  # 1/2 = 0.5 < 0.6
-        ],
-    )]}
+    per_doc = {
+        "passport": [
+            ExtractedFieldGroup(
+                fieldGroupName="g",
+                fieldGroupFields=[
+                    _field("a", "x", JudgeStatus.PASS),
+                    _field("b", "y", JudgeStatus.FAIL),  # 1/2 = 0.5 < 0.6
+                ],
+            )
+        ]
+    }
     ctx = _ctx(extractor, judge, per_doc_extracted=per_doc)
     info = await escalator.maybe_escalate(ctx, _request())
     assert info is None
@@ -164,32 +182,41 @@ async def test_no_escalation_when_failure_rate_below_threshold() -> None:
 
 # -- escalation accepted when it improves the failure rate -----------------
 
+
 @pytest.mark.asyncio
 async def test_escalation_triggered_and_accepted() -> None:
     """Threshold crossed AND escalation improves the result -> accepted=True."""
-    new_groups = [ExtractedFieldGroup(
-        fieldGroupName="g",
-        fieldGroupFields=[
-            _field("a", "x", JudgeStatus.PASS),
-            _field("b", "y", JudgeStatus.PASS),
-        ],
-    )]
+    new_groups = [
+        ExtractedFieldGroup(
+            fieldGroupName="g",
+            fieldGroupFields=[
+                _field("a", "x", JudgeStatus.PASS),
+                _field("b", "y", JudgeStatus.PASS),
+            ],
+        )
+    ]
     extractor = AsyncMock()
     extractor.extract = AsyncMock(return_value=(new_groups, "anthropic:claude-opus-4-7"))
     judge = AsyncMock()
     judge.judge = AsyncMock(return_value=new_groups)
 
     escalator = JudgeEscalator(
-        extractor=extractor, judge=judge,
-        default_threshold=0.5, default_model="anthropic:claude-opus-4-7",
+        extractor=extractor,
+        judge=judge,
+        default_threshold=0.5,
+        default_model="anthropic:claude-opus-4-7",
     )
-    per_doc = {"passport": [ExtractedFieldGroup(
-        fieldGroupName="g",
-        fieldGroupFields=[
-            _field("a", "x", JudgeStatus.FAIL),
-            _field("b", "y", JudgeStatus.FAIL),  # 2/2 = 1.0 >= 0.5
-        ],
-    )]}
+    per_doc = {
+        "passport": [
+            ExtractedFieldGroup(
+                fieldGroupName="g",
+                fieldGroupFields=[
+                    _field("a", "x", JudgeStatus.FAIL),
+                    _field("b", "y", JudgeStatus.FAIL),  # 2/2 = 1.0 >= 0.5
+                ],
+            )
+        ]
+    }
     ctx = _ctx(extractor, judge, per_doc_extracted=per_doc)
 
     info = await escalator.maybe_escalate(ctx, _request())
@@ -209,32 +236,41 @@ async def test_escalation_triggered_and_accepted() -> None:
 
 # -- escalation rejected when it doesn't improve ---------------------------
 
+
 @pytest.mark.asyncio
 async def test_escalation_triggered_but_rejected() -> None:
     """Threshold crossed but escalation result is no better -> accepted=False."""
-    new_groups = [ExtractedFieldGroup(
-        fieldGroupName="g",
-        fieldGroupFields=[
-            _field("a", "x", JudgeStatus.FAIL),
-            _field("b", "y", JudgeStatus.FAIL),
-        ],
-    )]
+    new_groups = [
+        ExtractedFieldGroup(
+            fieldGroupName="g",
+            fieldGroupFields=[
+                _field("a", "x", JudgeStatus.FAIL),
+                _field("b", "y", JudgeStatus.FAIL),
+            ],
+        )
+    ]
     extractor = AsyncMock()
     extractor.extract = AsyncMock(return_value=(new_groups, "anthropic:claude-opus-4-7"))
     judge = AsyncMock()
     judge.judge = AsyncMock(return_value=new_groups)
 
     escalator = JudgeEscalator(
-        extractor=extractor, judge=judge,
-        default_threshold=0.5, default_model="anthropic:claude-opus-4-7",
+        extractor=extractor,
+        judge=judge,
+        default_threshold=0.5,
+        default_model="anthropic:claude-opus-4-7",
     )
-    per_doc = {"passport": [ExtractedFieldGroup(
-        fieldGroupName="g",
-        fieldGroupFields=[
-            _field("a", "x", JudgeStatus.FAIL),
-            _field("b", "y", JudgeStatus.FAIL),
-        ],
-    )]}
+    per_doc = {
+        "passport": [
+            ExtractedFieldGroup(
+                fieldGroupName="g",
+                fieldGroupFields=[
+                    _field("a", "x", JudgeStatus.FAIL),
+                    _field("b", "y", JudgeStatus.FAIL),
+                ],
+            )
+        ]
+    }
     ctx = _ctx(extractor, judge, per_doc_extracted=per_doc)
 
     info = await escalator.maybe_escalate(ctx, _request())
@@ -248,18 +284,25 @@ async def test_escalation_triggered_but_rejected() -> None:
 
 # -- same-model escalation is a no-op --------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_no_escalation_when_same_model_as_primary() -> None:
     extractor = AsyncMock()
     judge = AsyncMock()
     escalator = JudgeEscalator(
-        extractor=extractor, judge=judge,
-        default_threshold=0.1, default_model="anthropic:claude-opus-4-7",
+        extractor=extractor,
+        judge=judge,
+        default_threshold=0.1,
+        default_model="anthropic:claude-opus-4-7",
     )
-    per_doc = {"passport": [ExtractedFieldGroup(
-        fieldGroupName="g",
-        fieldGroupFields=[_field("a", "x", JudgeStatus.FAIL), _field("b", "y", JudgeStatus.FAIL)],
-    )]}
+    per_doc = {
+        "passport": [
+            ExtractedFieldGroup(
+                fieldGroupName="g",
+                fieldGroupFields=[_field("a", "x", JudgeStatus.FAIL), _field("b", "y", JudgeStatus.FAIL)],
+            )
+        ]
+    }
     ctx = _ctx(extractor, judge, per_doc_extracted=per_doc, primary_model="anthropic:claude-opus-4-7")
     info = await escalator.maybe_escalate(ctx, _request())
     assert info is None

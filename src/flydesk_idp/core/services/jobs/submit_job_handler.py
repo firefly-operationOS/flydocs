@@ -14,7 +14,7 @@ from __future__ import annotations
 import hashlib
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from pyfly.container import service
 from pyfly.cqrs import Command, CommandHandler, command_handler
@@ -92,7 +92,9 @@ class SubmitJobHandler(CommandHandler[SubmitJobCommand, SubmitJobResponse]):
         for issue in report.warnings:
             logger.warning(
                 "submit_validation_warning code=%s path=%s message=%s",
-                issue.code, issue.path, issue.message,
+                issue.code,
+                issue.path,
+                issue.message,
             )
 
         bytes_decoded = payload.document.decoded_bytes()
@@ -135,5 +137,5 @@ class SubmitJobHandler(CommandHandler[SubmitJobCommand, SubmitJobResponse]):
         return SubmitJobResponse(
             job_id=job.id,
             status=JobStatus(job.status),
-            submitted_at=job.created_at or datetime.now(timezone.utc),
+            submitted_at=job.created_at or datetime.now(UTC),
         )
