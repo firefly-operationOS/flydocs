@@ -21,6 +21,7 @@ from pyfly.web.adapters.fastapi.app import create_app
 
 from flydesk_idp import __version__
 from flydesk_idp.app import FlydeskIDPApplication
+from flydesk_idp.web.correlation_filter import CorrelationHeadersMiddleware
 from flydesk_idp.web.openapi_override import install_openapi
 
 _TITLE = "flydesk-idp"
@@ -70,3 +71,9 @@ app = create_app(
     actuator_enabled=True,
     lifespan=_lifespan,
 )
+# Correlation surface (X-Correlation-Id / X-Request-Id / X-Tenant-Id /
+# W3C traceparent / tracestate). Registered AFTER create_app so it sits
+# in front of pyfly's WebFilterChainMiddleware -- the inbound request
+# hits the correlation middleware first, gets stamped, then enters the
+# pyfly chain (TransactionIdFilter, request logging, etc.).
+app.add_middleware(CorrelationHeadersMiddleware)
