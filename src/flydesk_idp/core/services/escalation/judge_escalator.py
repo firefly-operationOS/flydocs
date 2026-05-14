@@ -92,8 +92,8 @@ class JudgeEscalator:
         new_per_doc: dict[str, list[ExtractedFieldGroup]] = {}
 
         async def _re_extract(doc_type: str) -> None:
-            slice_bytes, media_type, pages, doc_spec, split = per_doc_inputs[doc_type]
-            if split.missing:
+            slice_bytes, media_type, pages, doc_spec, _segment = per_doc_inputs[doc_type]
+            if not slice_bytes:
                 new_per_doc[doc_type] = []
                 return
             try:

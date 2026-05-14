@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from flydesk_idp.core.services.escalation import JudgeEscalator
-from flydesk_idp.core.services.splitting import SplitDocument
+from flydesk_idp.core.services.splitting import DiscoveredSegment
 from flydesk_idp.interfaces.dtos.bbox import BoundingBox
 from flydesk_idp.interfaces.dtos.doc import DocSpec, DocType, ValidatorsSpec
 from flydesk_idp.interfaces.dtos.extract import (
@@ -93,8 +93,7 @@ def _ctx(
                 "application/pdf",
                 1,
                 _doc_spec(),
-                SplitDocument(document_type="passport", page_start=1, page_end=1,
-                              confidence=1.0, description="", missing=False),
+                DiscoveredSegment(page_start=1, page_end=1, confidence=1.0, description=""),
             )
         },
         "per_doc_model_used": {"passport": primary_model},

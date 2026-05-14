@@ -4,37 +4,66 @@
 # fireflyframework-agentic PromptRegistry under (name, version). Edit text
 # freely; bump 'version:' when you change the contract.
 name: flydesk_idp/splitter
-version: "1.0.0"
+version: "2.0.0"
 description: >-
-  Identify each target document type inside a multi-document file and
-  pin it to a contiguous page range with a confidence score.
+  Discover every distinct sub-document inside a file and pin each one
+  to a contiguous, non-overlapping page range. The classifier then
+  decides which declared DocSpec (if any) each segment matches.
 required_variables:
   - targets_json
   - page_count
   - intention
 system_template: |
-  You analyse a multi-document file and identify which of the
-  caller's target document types appear, on which page range, with what
-  confidence.
+  You are a document segmentation expert. You receive one file
+  (potentially containing several distinct documents bundled together)
+  and you must enumerate every self-contained sub-document in it.
 
-  Return:
+  Output exactly one entry per distinct document, with consecutive
+  pages, no gaps, no overlaps. Cover the entire file.
 
-  - ``documents`` -- one entry per target type, in the order given. For
-    each entry: ``documentType``, ``pages: {start, end}`` (1-indexed,
-    inclusive), ``confidence`` in [0, 1], ``description`` (one-line
-    summary), and ``missing: true`` if the type does not appear.
-  - ``additional_docs`` -- one entry per document found in the source
-    that does NOT match any target type. Use the same shape minus
-    ``missing``.
+  Each entry has:
 
-  Pages MUST be consecutive within a document, and ``start <= end``.
-  Documents do not overlap.
+  - ``pages: {start, end}`` -- 1-indexed, inclusive. ``start`` and
+    ``end`` are page numbers of the source file.
+  - ``provisional_type`` -- a short, free-text best-guess label for
+    what the document is (e.g. ``"spanish_dni"``, ``"utility_bill"``,
+    ``"notarial_deed"``, ``"invoice"``). Lowercase, snake_case. This
+    is a routing hint only; the classifier downstream will assign the
+    final docType.
+  - ``description`` -- one-line summary of the sub-document's content
+    or purpose.
+  - ``confidence`` -- 0-1 score for the **segmentation boundary**
+    (not for the type label). 1.0 means you are certain the boundary
+    is in the right place.
+
+  Critical rules:
+
+  - A "sub-document" is a self-contained unit (a deed, an ID card, a
+    tax form, an invoice, a contract, ...). Cover pages, annexes, or
+    supporting paperwork that semantically belong to a single
+    document MUST be kept together as one segment.
+  - Page ranges MUST be consecutive within a segment, MUST NOT
+    overlap across segments, and together MUST cover pages 1 to
+    page_count exactly.
+  - If the whole file is one document, return one entry covering
+    pages 1 to page_count with confidence 1.0.
+  - The caller's declared target document types are passed below as
+    CONTEXT (so you can recognise familiar layouts and intentions),
+    but they do NOT constrain the output. Enumerate what is actually
+    in the file, even if it does not match any declared target.
+
+  Return a JSON object matching the schema exactly.
 user_template: |
-  The source has {{ page_count }} page(s). Extraction intention: {{ intention }}
+  ### EXTRACTION INTENTION
+  {{ intention }}
 
-  Target document types:
+  ### FILE
+  Total pages: {{ page_count }}
+
+  ### DECLARED DOCUMENT TYPES (CONTEXT ONLY, NOT A CONSTRAINT)
   ```json
   {{ targets_json }}
   ```
 
-  Return the splitter JSON object described in the system prompt.
+  Enumerate every distinct sub-document in the file. Return a JSON
+  object with a single ``segments`` array.

@@ -1,12 +1,18 @@
 # Copyright 2026 Firefly Software Solutions Inc
-"""``DocumentSplitter`` -- LLM identifies target docTypes and their page
-ranges inside a multi-document file.
+"""``DocumentSplitter`` -- discover every distinct sub-document inside
+a file and pin each one to a contiguous, non-overlapping page range.
 
-Built on :class:`FireflyAgent` with structured output. The orchestrator
-only calls this when (a) ``options.stages.splitter`` is true and
-(b) the input has more than one page **and** more than one target
-``DocSpec``. The split prompt is supplied through DI so the service has
-no coupling to a specific template revision.
+Pure segmentation: the splitter does **not** decide which caller-declared
+``DocSpec`` each segment matches -- that is the
+:class:`flydesk_idp.core.services.classification.DocumentClassifier`'s
+job. Keeping the two services separate means a single uploaded file
+that happens to contain several documents (a deed + a DNI + a utility
+bill in one PDF, say) is segmented first and then each segment is
+classified independently against the declared targets. Neither service
+needs to know the other.
+
+The splitter short-circuits when the input is a single page (one
+segment covers the whole file).
 """
 
 from __future__ import annotations
@@ -32,35 +38,44 @@ class _PageRangeModel(BaseModel):
     end: int = Field(default=1, ge=1)
 
 
-class _SplitDocumentModel(BaseModel):
-    documentType: str
-    pages: _PageRangeModel | None = None
-    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+class _SegmentModel(BaseModel):
+    pages: _PageRangeModel
+    provisional_type: str = ""
     description: str = ""
-    missing: bool = False
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
 
 
 class _SplitterOutput(BaseModel):
-    documents: list[_SplitDocumentModel] = Field(default_factory=list)
-    additional_docs: list[_SplitDocumentModel] = Field(default_factory=list)
+    segments: list[_SegmentModel] = Field(default_factory=list)
 
 
 @dataclass(slots=True)
-class SplitDocument:
-    """A located target document inside the multi-doc file."""
+class DiscoveredSegment:
+    """One sub-document the splitter identified inside an input file.
 
-    document_type: str
-    page_start: int | None = None  # 1-indexed, inclusive (None when missing)
-    page_end: int | None = None    # 1-indexed, inclusive
-    confidence: float = 0.0
+    The ``provisional_type`` is a free-text hint from the splitter --
+    useful as routing context and for telemetry, but the orchestrator
+    routes by the *classifier*'s verdict, not by this hint.
+    """
+
+    page_start: int            # 1-indexed, inclusive
+    page_end: int              # 1-indexed, inclusive
+    provisional_type: str = ""
     description: str = ""
-    missing: bool = False
+    confidence: float = 0.0
 
 
 @dataclass(slots=True)
 class SplitResult:
-    documents: list[SplitDocument] = field(default_factory=list)
-    additional_documents: list[SplitDocument] = field(default_factory=list)
+    """Every segment the splitter found in a single input file."""
+
+    segments: list[DiscoveredSegment] = field(default_factory=list)
+
+
+# Backwards-compatible alias retained for downstream imports that
+# treated each segment as a "located document". Internally everything
+# uses :class:`DiscoveredSegment`.
+SplitDocument = DiscoveredSegment
 
 
 class DocumentSplitter:
@@ -75,7 +90,7 @@ class DocumentSplitter:
         self._model = model
         self._agent_name = agent_name
 
-    async def split(
+    async def discover(
         self,
         *,
         document_bytes: bytes,
@@ -85,22 +100,20 @@ class DocumentSplitter:
         intention: str,
         model: str | None = None,
     ) -> SplitResult:
-        # Shortcut: single page or single target -> no real split, full range.
-        if page_count <= 1 or len(targets) <= 1:
-            return SplitResult(
-                documents=[
-                    SplitDocument(
-                        document_type=t.docType.documentType,
-                        page_start=1,
-                        page_end=page_count,
-                        confidence=1.0,
-                        description=t.docType.description,
-                        missing=False,
-                    )
-                    for t in targets
-                ],
-                additional_documents=[],
-            )
+        """Enumerate every distinct sub-document inside the file.
+
+        ``targets`` is passed to the LLM as routing **context** so it
+        can recognise familiar layouts; it does not constrain the
+        output. Page ranges in the response are clamped to
+        ``[1, page_count]`` and gaps / overlaps are not corrected --
+        callers should treat low-confidence segmentations as a hint.
+        """
+        # Shortcut: single page -> one segment covers the whole file.
+        if page_count <= 1:
+            return SplitResult(segments=[DiscoveredSegment(
+                page_start=1, page_end=max(1, page_count),
+                provisional_type="", description="", confidence=1.0,
+            )])
 
         targets_json = json.dumps(
             [
@@ -124,7 +137,7 @@ class DocumentSplitter:
             model=model or self._model,
             instructions=prompt.system,
             output_type=_SplitterOutput,
-            description="LLM document splitter",
+            description="LLM document splitter (discovery)",
             tags=["idp", "splitter"],
             auto_register=False,
         )
@@ -135,41 +148,25 @@ class DocumentSplitter:
         run_result = await timed_agent_run(
             agent, content, op="split", model=model or self._model
         )
-        raw = run_result.output
+        raw: _SplitterOutput = run_result.output
 
-        # Align by document type and clamp pages to the actual range.
-        raw_by_type = {d.documentType: d for d in raw.documents}
-        documents: list[SplitDocument] = []
-        for target in targets:
-            doc_type = target.docType.documentType
-            raw_doc = raw_by_type.get(doc_type)
-            if raw_doc is None or raw_doc.missing or raw_doc.pages is None:
-                documents.append(
-                    SplitDocument(document_type=doc_type, missing=True, description=target.docType.description)
-                )
-                continue
-            start = max(1, min(page_count, int(raw_doc.pages.start)))
-            end = max(start, min(page_count, int(raw_doc.pages.end)))
-            documents.append(
-                SplitDocument(
-                    document_type=doc_type,
-                    page_start=start,
-                    page_end=end,
-                    confidence=float(raw_doc.confidence),
-                    description=raw_doc.description or target.docType.description,
-                    missing=False,
-                )
-            )
+        segments: list[DiscoveredSegment] = []
+        for entry in raw.segments:
+            start = max(1, min(page_count, int(entry.pages.start)))
+            end = max(start, min(page_count, int(entry.pages.end)))
+            segments.append(DiscoveredSegment(
+                page_start=start,
+                page_end=end,
+                provisional_type=(entry.provisional_type or "").strip().lower(),
+                description=entry.description.strip(),
+                confidence=float(entry.confidence),
+            ))
 
-        additional = [
-            SplitDocument(
-                document_type=d.documentType,
-                page_start=d.pages.start if d.pages else None,
-                page_end=d.pages.end if d.pages else None,
-                confidence=float(d.confidence),
-                description=d.description,
-                missing=False,
-            )
-            for d in raw.additional_docs
-        ]
-        return SplitResult(documents=documents, additional_documents=additional)
+        # Defensive fallback: if the LLM came back empty, treat the
+        # whole file as one segment so the pipeline can still proceed.
+        if not segments:
+            segments.append(DiscoveredSegment(
+                page_start=1, page_end=page_count,
+                provisional_type="", description="", confidence=0.0,
+            ))
+        return SplitResult(segments=segments)

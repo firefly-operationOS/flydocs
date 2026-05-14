@@ -2,22 +2,31 @@
 """``PipelineOrchestrator`` -- runs the IDP pipeline as a
 :class:`fireflyframework_agentic.pipeline.PipelineEngine` DAG.
 
-Two input shapes converge onto the same downstream pipeline:
+Every input file (whether the caller submitted ``document`` or
+``documents``) flows through the same stages:
 
-* **single file, single or many DocSpecs** -- the legacy shape. One
-  load + an optional splitter + one extraction per DocSpec.
-* **multi-file** -- ``request.documents = [...]``. Each file is loaded
-  independently and (when no caller pin) classified into one of the
-  declared DocSpecs. One extraction per (file, DocSpec) pair.
+    load -> discover? -> classify? -> plan_tasks -> extract ->
+    bbox_validation -> field_validation? -> visual? -> content? ->
+    judge? -> judge_escalation? -> rules? -> assemble
 
-Internally the orchestrator normalises both shapes into a flat
-``tasks`` list. Every downstream stage (extract, validators,
-authenticity, judge, rules) iterates that list, so the per-stage code
-doesn't care whether the source was one file or many.
+The discover stage (``stages.splitter``) enumerates every distinct
+sub-document inside a file, so a single uploaded PDF that happens to
+contain a deed + a DNI + a utility bill comes out as three segments
+rather than one. The classifier then runs **per segment** and assigns
+each one to a declared ``DocSpec`` (or ``unmatched``). One extraction
+task is produced per matched (segment, DocSpec) pair.
 
-The method is called :py:meth:`execute` rather than ``run`` so it does
-**not** accidentally satisfy pyfly's ``CommandLineRunner`` structural
-protocol (which would auto-invoke ``run(sys.argv[1:])`` at startup).
+Skip rules:
+
+* Files pinned with ``document_type`` skip the splitter and the
+  classifier -- the caller already told us what that file is.
+* Single-page files skip the splitter (one segment is enough).
+* Segments that already have a resolved doctype (pinned, or only one
+  declared DocSpec is on offer) skip the classifier.
+
+The method is called ``execute`` rather than ``run`` so it does **not**
+accidentally satisfy pyfly's ``CommandLineRunner`` structural protocol
+(which would auto-invoke ``run(sys.argv[1:])`` at startup).
 """
 
 from __future__ import annotations
@@ -50,7 +59,7 @@ from flydesk_idp.core.services.extraction.loader import load_document
 from flydesk_idp.core.services.extraction.pdf_slicer import PageRange, slice_pdf
 from flydesk_idp.core.services.judge import Judge
 from flydesk_idp.core.services.rules import RuleEngine
-from flydesk_idp.core.services.splitting import DocumentSplitter, SplitDocument
+from flydesk_idp.core.services.splitting import DiscoveredSegment, DocumentSplitter
 from flydesk_idp.core.services.validation import FieldValidator
 from flydesk_idp.interfaces.dtos.authenticity import (
     ContentAuthenticity,
@@ -86,21 +95,36 @@ class _FileSlot:
     media_type: str
     page_count: int
     document_bytes: bytes
-    declared_doctype: str | None    # pinned by the caller, may be None
-    resolved_doctype: str | None = None    # after classifier; mirrors declared when pinned
-    classification: ClassificationResult | None = None    # null when pinned
+    declared_doctype: str | None   # pinned by the caller, may be None
+    segments: list[_Segment] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class _Segment:
+    """One sub-document inside a file (discovered or implicit)."""
+
+    file_index: int
+    filename: str
+    media_type: str
+    page_start: int          # 1-indexed, inclusive
+    page_end: int            # 1-indexed, inclusive
+    file_page_count: int     # pages in the parent file
+    provisional_type: str = ""   # splitter's free-text hint
+    description: str = ""        # splitter or classifier description
+    segmentation_confidence: float = 1.0
+    # Filled by pin or by the classifier:
+    resolved_doctype: str | None = None
+    classification: ClassificationResult | None = None
+    pinned: bool = False     # True when resolved_doctype came from a caller pin
 
 
 @dataclass(slots=True)
 class _ExtractionTask:
-    """One (file, DocSpec) pair the downstream stages will iterate over."""
+    """One (segment, DocSpec) pair the downstream stages iterate over."""
 
-    task_id: str                        # ``f"file{i}/{doc_type}"`` -- unique
-    file_index: int
-    filename: str
-    media_type: str
+    task_id: str                        # unique: ``f"file{i}/seg{j}/{doc_type}"``
+    segment: _Segment
     doc_spec: DocSpec
-    split: SplitDocument
     slice_bytes: bytes
     slice_pages: int
     extracted_groups: list[ExtractedFieldGroup] = field(default_factory=list)
@@ -121,30 +145,32 @@ class _LoggingEventHandler:
         self._request_id = request_id
 
     async def on_node_start(self, node_id: str, pipeline_name: str) -> None:
-        logger.info("[%s] node_start %s/%s", self._request_id, pipeline_name, node_id)
+        logger.info("Pipeline node started [%s] request_id=%s", node_id, self._request_id)
 
     async def on_node_complete(self, node_id: str, pipeline_name: str, latency_ms: float) -> None:
         logger.info(
-            "[%s] node_done %s/%s latency_ms=%.0f",
-            self._request_id, pipeline_name, node_id, latency_ms,
+            "Pipeline node complete [%s] latency_ms=%.0f request_id=%s",
+            node_id, latency_ms, self._request_id,
         )
 
     async def on_node_error(self, node_id: str, pipeline_name: str, error: str) -> None:
-        logger.warning(
-            "[%s] node_failed %s/%s error=%s", self._request_id, pipeline_name, node_id, error
+        logger.error(
+            "Pipeline node failed [%s] error=%s request_id=%s",
+            node_id, error, self._request_id,
         )
 
     async def on_node_skip(self, node_id: str, pipeline_name: str, reason: str) -> None:
         logger.info(
-            "[%s] node_skipped %s/%s reason=%s", self._request_id, pipeline_name, node_id, reason
+            "Pipeline node skipped [%s] reason=%s request_id=%s",
+            node_id, reason, self._request_id,
         )
 
     async def on_pipeline_complete(
         self, pipeline_name: str, success: bool, duration_ms: float
     ) -> None:
         logger.info(
-            "[%s] pipeline_complete %s success=%s duration_ms=%.0f",
-            self._request_id, pipeline_name, success, duration_ms,
+            "Pipeline complete name=%s success=%s duration_ms=%.0f request_id=%s",
+            pipeline_name, success, duration_ms, self._request_id,
         )
 
 
@@ -198,23 +224,25 @@ class PipelineOrchestrator:
         builder.add_node("load", CallableStep(self._step_load), timeout_seconds=20)
         chain.append("load")
 
-        # Classifier runs only when at least one file lacks a pinned doctype
-        # AND the caller hasn't disabled it. In single-file mode with a
-        # single docSpec, classification is irrelevant.
-        needs_classifier = (
-            stages.classifier and is_multi_file and any(not f.document_type for f in files)
+        # Discover runs when the splitter is on AND at least one file is
+        # unpinned (pinned files skip discovery — the caller already said
+        # what they are) AND that file has more than one page.
+        needs_discover = stages.splitter and any(
+            (not f.document_type) for f in files
         )
-        if needs_classifier:
+        if needs_discover:
             builder.add_node(
-                "classifier", CallableStep(self._step_classifier), timeout_seconds=120
+                "discover", CallableStep(self._step_discover), timeout_seconds=180
             )
-            chain.append("classifier")
+            chain.append("discover")
 
-        # Splitter is single-file only -- in multi-file mode each file
-        # is already one document.
-        if stages.splitter and not is_multi_file and len(request.docs) > 1:
-            builder.add_node("split", CallableStep(self._step_split), timeout_seconds=60)
-            chain.append("split")
+        # Classifier runs per-segment when on. The step itself short-circuits
+        # when there are no segments needing a doctype.
+        if stages.classifier:
+            builder.add_node(
+                "classify", CallableStep(self._step_classifier), timeout_seconds=180
+            )
+            chain.append("classify")
 
         builder.add_node("plan_tasks", CallableStep(self._step_plan_tasks), timeout_seconds=5)
         chain.append("plan_tasks")
@@ -281,7 +309,7 @@ class PipelineOrchestrator:
                 "model_id": model_id,
                 "is_multi_file": is_multi_file,
                 "pipeline_errors": [],
-                "additional_files": [],   # files the classifier marked as unmatched
+                "unmatched_segments": [],   # segments the classifier left without a docType
             },
             correlation_id=str(request.request_id),
         )
@@ -296,6 +324,15 @@ class PipelineOrchestrator:
     # ------------------------------------------------------------------
 
     async def _step_load(self, ctx: PipelineContext, _inputs: dict[str, Any]) -> Any:
+        """Sniff media type + page count for every input file.
+
+        Each file becomes a ``_FileSlot`` carrying one default segment
+        that covers the whole file. The discover stage may replace the
+        segment list with finer-grained ones; the classifier may later
+        fill in each segment's ``resolved_doctype``. Pinned files keep
+        the single default segment with ``resolved_doctype`` set from
+        the pin.
+        """
         request: ExtractionRequest = ctx.metadata["request"]
         files: list[_FileSlot] = []
         for i, file in enumerate(request.files):
@@ -304,192 +341,178 @@ class PipelineOrchestrator:
                 document_bytes,
                 declared_media_type=request.options.declared_media_type or file.content_type,
             )
-            files.append(_FileSlot(
+            slot = _FileSlot(
                 file_index=i,
                 filename=file.filename,
                 media_type=loaded.media_type,
                 page_count=loaded.page_count,
                 document_bytes=document_bytes,
                 declared_doctype=file.document_type,
-                resolved_doctype=file.document_type,    # mirrors declared until classifier runs
-            ))
+            )
+            # Default: one segment per file covering everything. The
+            # discover stage may replace this with finer-grained segments.
+            slot.segments = [_Segment(
+                file_index=i,
+                filename=slot.filename,
+                media_type=slot.media_type,
+                page_start=1,
+                page_end=slot.page_count,
+                file_page_count=slot.page_count,
+                segmentation_confidence=1.0,
+                resolved_doctype=slot.declared_doctype,
+                pinned=slot.declared_doctype is not None,
+            )]
+            files.append(slot)
         ctx.metadata["files_data"] = files
         return {"file_count": len(files), "is_multi_file": ctx.metadata["is_multi_file"]}
 
-    async def _step_classifier(self, ctx: PipelineContext, _inputs: dict[str, Any]) -> Any:
+    async def _step_discover(self, ctx: PipelineContext, _inputs: dict[str, Any]) -> Any:
+        """Per-file splitter: enumerate every distinct sub-document.
+
+        Skipped for pinned files (caller already said what they are)
+        and for single-page files (one segment is enough).
+        """
         request: ExtractionRequest = ctx.metadata["request"]
         files: list[_FileSlot] = ctx.metadata["files_data"]
-        unclassified = [slot for slot in files if not slot.declared_doctype]
-        if not unclassified:
-            return {"classified": 0}
 
-        async def _classify_one(slot: _FileSlot) -> None:
+        async def _discover_one(slot: _FileSlot) -> None:
+            if slot.declared_doctype is not None or slot.page_count <= 1:
+                return
             try:
-                result = await self._classifier.classify(
+                result = await self._splitter.discover(
                     document_bytes=slot.document_bytes,
                     media_type=slot.media_type,
+                    page_count=slot.page_count,
+                    targets=request.docs,
+                    intention=request.intention,
+                    model=ctx.metadata["model_id"],
+                )
+            except Exception as exc:  # noqa: BLE001
+                self._record_error(
+                    ctx, "discover", "SPLITTER_ERROR", exc, doc_type=slot.filename
+                )
+                return
+            slot.segments = [
+                _Segment(
+                    file_index=slot.file_index,
+                    filename=slot.filename,
+                    media_type=slot.media_type,
+                    page_start=seg.page_start,
+                    page_end=seg.page_end,
+                    file_page_count=slot.page_count,
+                    provisional_type=seg.provisional_type,
+                    description=seg.description,
+                    segmentation_confidence=seg.confidence,
+                )
+                for seg in result.segments
+            ] or slot.segments     # keep the default segment if the splitter came back empty
+
+        await asyncio.gather(*(_discover_one(s) for s in files))
+        total = sum(len(s.segments) for s in files)
+        return {"segments": total}
+
+    async def _step_classifier(self, ctx: PipelineContext, _inputs: dict[str, Any]) -> Any:
+        """Per-segment classifier: pick a declared DocSpec for each segment."""
+        request: ExtractionRequest = ctx.metadata["request"]
+        files: list[_FileSlot] = ctx.metadata["files_data"]
+        docs_by_type: dict[str, DocSpec] = {d.docType.documentType: d for d in request.docs}
+
+        # If there's exactly one declared DocSpec, every unpinned, unmatched
+        # segment is implicitly that one -- no LLM call needed.
+        if len(request.docs) == 1:
+            only = request.docs[0].docType.documentType
+            for slot in files:
+                for seg in slot.segments:
+                    if seg.resolved_doctype is None:
+                        seg.resolved_doctype = only
+            return {"classified": 0, "implicit": True}
+
+        # Collect every segment that still needs a doctype (i.e. not pinned).
+        targets: list[tuple[_FileSlot, _Segment]] = []
+        for slot in files:
+            for seg in slot.segments:
+                if seg.resolved_doctype is None:
+                    targets.append((slot, seg))
+        if not targets:
+            return {"classified": 0}
+
+        async def _classify_one(slot: _FileSlot, seg: _Segment) -> None:
+            # Use the segment slice when we have more than one segment in the
+            # file -- otherwise the whole file is fine. Slicing fails closed:
+            # if it raises we fall back to the whole file bytes.
+            bytes_for_seg, media_type = _slice_for_segment(slot, seg, ctx, self)
+            try:
+                result = await self._classifier.classify(
+                    document_bytes=bytes_for_seg,
+                    media_type=media_type,
                     filename=slot.filename,
                     candidates=request.docs,
                     intention=request.intention,
                     model=ctx.metadata["model_id"],
                 )
-                slot.classification = result
-                slot.resolved_doctype = (
-                    result.document_type if result.matched else None
-                )
+                seg.classification = result
+                if result.matched and result.document_type in docs_by_type:
+                    seg.resolved_doctype = result.document_type
+                else:
+                    seg.resolved_doctype = None
             except Exception as exc:  # noqa: BLE001
-                self._record_error(ctx, "classifier", "CLASSIFIER_ERROR", exc, doc_type=slot.filename)
-                slot.classification = ClassificationResult(
+                self._record_error(
+                    ctx, "classify", "CLASSIFIER_ERROR", exc, doc_type=slot.filename,
+                )
+                seg.classification = ClassificationResult(
                     document_type=UNMATCHED, matched=False, notes=str(exc)[:200]
                 )
-                slot.resolved_doctype = None
+                seg.resolved_doctype = None
 
-        await asyncio.gather(*(_classify_one(s) for s in unclassified))
-        matched = sum(1 for s in unclassified if s.resolved_doctype)
-        return {"classified": matched, "unmatched": len(unclassified) - matched}
-
-    async def _step_split(self, ctx: PipelineContext, _inputs: dict[str, Any]) -> Any:
-        request: ExtractionRequest = ctx.metadata["request"]
-        files: list[_FileSlot] = ctx.metadata["files_data"]
-        assert len(files) == 1, "splitter only runs in single-file mode"
-        only = files[0]
-        try:
-            split = await self._splitter.split(
-                document_bytes=only.document_bytes,
-                media_type=only.media_type,
-                page_count=only.page_count,
-                targets=request.docs,
-                intention=request.intention,
-                model=ctx.metadata["model_id"],
-            )
-            ctx.metadata["split_documents"] = split.documents
-            ctx.metadata["additional_splits"] = split.additional_documents
-            return {"split_documents": len(split.documents)}
-        except Exception as exc:  # noqa: BLE001
-            self._record_error(ctx, "splitter", "SPLITTER_ERROR", exc)
-            return {"failed": True}
+        await asyncio.gather(*(_classify_one(slot, seg) for slot, seg in targets))
+        matched = sum(1 for _, s in targets if s.resolved_doctype)
+        return {"classified": matched, "unmatched": len(targets) - matched}
 
     async def _step_plan_tasks(self, ctx: PipelineContext, _inputs: dict[str, Any]) -> Any:
-        """Build the flat list of (file, DocSpec) tasks the rest of the pipeline iterates over."""
+        """Build the flat list of (segment, DocSpec) extraction tasks."""
         request: ExtractionRequest = ctx.metadata["request"]
         files: list[_FileSlot] = ctx.metadata["files_data"]
-        is_multi_file: bool = ctx.metadata["is_multi_file"]
-        doc_spec_by_type = {d.docType.documentType: d for d in request.docs}
+        docs_by_type: dict[str, DocSpec] = {d.docType.documentType: d for d in request.docs}
         tasks: list[_ExtractionTask] = []
-        additional_files: list[dict[str, Any]] = list(ctx.metadata.get("additional_files", []))
+        unmatched_segments: list[_Segment] = list(ctx.metadata.get("unmatched_segments", []))
 
-        if is_multi_file:
-            # One task per file (assigned to its resolved DocSpec).
-            for slot in files:
-                if not slot.resolved_doctype:
-                    additional_files.append({
-                        "file_index": slot.file_index,
-                        "filename": slot.filename,
-                        "reason": "classifier_unmatched",
-                        "notes": slot.classification.notes if slot.classification else "",
-                    })
+        for slot in files:
+            for seg_index, seg in enumerate(slot.segments):
+                # Unresolved segment -> nothing to extract; route to additional.
+                if seg.resolved_doctype is None:
+                    unmatched_segments.append(seg)
                     continue
-                doc_spec = doc_spec_by_type.get(slot.resolved_doctype)
+                doc_spec = docs_by_type.get(seg.resolved_doctype)
                 if doc_spec is None:
-                    additional_files.append({
-                        "file_index": slot.file_index,
-                        "filename": slot.filename,
-                        "reason": "doctype_not_declared",
-                        "resolved_doctype": slot.resolved_doctype,
-                    })
+                    # Caller pinned (or classifier returned) a doctype that
+                    # is not declared in ``docs[]``. The request validator
+                    # rejects unknown pins up-front; this is a safety net.
+                    unmatched_segments.append(seg)
                     continue
+                slice_bytes, slice_pages = self._slice_segment_bytes(slot, seg, ctx)
                 tasks.append(_ExtractionTask(
-                    task_id=f"file{slot.file_index}/{slot.resolved_doctype}",
-                    file_index=slot.file_index,
-                    filename=slot.filename,
-                    media_type=slot.media_type,
+                    task_id=f"file{slot.file_index}/seg{seg_index}/{seg.resolved_doctype}",
+                    segment=seg,
                     doc_spec=doc_spec,
-                    split=SplitDocument(
-                        document_type=slot.resolved_doctype,
-                        page_start=1,
-                        page_end=slot.page_count,
-                        confidence=(
-                            slot.classification.confidence
-                            if slot.classification else 1.0
-                        ),
-                        description=(
-                            slot.classification.description
-                            if slot.classification else ""
-                        ),
-                        missing=False,
-                    ),
-                    slice_bytes=slot.document_bytes,
-                    slice_pages=slot.page_count,
-                ))
-        else:
-            # Single-file legacy: one task per DocSpec, page-ranged by the splitter
-            # (if it ran) or full-range by default.
-            slot = files[0]
-            split_documents: list[SplitDocument] = ctx.metadata.get("split_documents") or [
-                SplitDocument(
-                    document_type=d.docType.documentType,
-                    page_start=1,
-                    page_end=slot.page_count,
-                    confidence=1.0,
-                    description=d.docType.description,
-                    missing=False,
-                )
-                for d in request.docs
-            ]
-            ctx.metadata["split_documents"] = split_documents
-            for doc_spec, split in zip(request.docs, split_documents, strict=True):
-                doc_type = doc_spec.docType.documentType
-                if split.missing:
-                    tasks.append(_ExtractionTask(
-                        task_id=f"file{slot.file_index}/{doc_type}",
-                        file_index=slot.file_index,
-                        filename=slot.filename,
-                        media_type=slot.media_type,
-                        doc_spec=doc_spec,
-                        split=split,
-                        slice_bytes=b"",
-                        slice_pages=0,
-                    ))
-                    continue
-                slice_bytes = slot.document_bytes
-                slice_pages = slot.page_count
-                if slot.media_type == "application/pdf" and (
-                    split.page_start != 1 or (split.page_end or slot.page_count) != slot.page_count
-                ):
-                    try:
-                        slice_bytes = slice_pdf(
-                            slot.document_bytes,
-                            PageRange(start=split.page_start, end=split.page_end or slot.page_count),
-                        )
-                        slice_pages = (split.page_end or slot.page_count) - split.page_start + 1
-                    except Exception as exc:  # noqa: BLE001
-                        self._record_error(ctx, "pdf_slicer", "SLICE_ERROR", exc, doc_type=doc_type)
-                tasks.append(_ExtractionTask(
-                    task_id=f"file{slot.file_index}/{doc_type}",
-                    file_index=slot.file_index,
-                    filename=slot.filename,
-                    media_type=slot.media_type,
-                    doc_spec=doc_spec,
-                    split=split,
                     slice_bytes=slice_bytes,
                     slice_pages=slice_pages,
                 ))
 
         ctx.metadata["tasks"] = tasks
-        ctx.metadata["additional_files"] = additional_files
-        return {"task_count": len(tasks), "additional": len(additional_files)}
+        ctx.metadata["unmatched_segments"] = unmatched_segments
+        return {"task_count": len(tasks), "unmatched": len(unmatched_segments)}
 
     async def _step_extract(self, ctx: PipelineContext, _inputs: dict[str, Any]) -> Any:
         request: ExtractionRequest = ctx.metadata["request"]
         tasks: list[_ExtractionTask] = ctx.metadata["tasks"]
 
         async def _extract_one(task: _ExtractionTask) -> None:
-            if task.split.missing or not task.slice_bytes:
+            if not task.slice_bytes:
                 return
             try:
                 groups, used = await self._extractor.extract(
                     document_bytes=task.slice_bytes,
-                    media_type=task.media_type,
+                    media_type=task.segment.media_type,
                     page_count=task.slice_pages,
                     doc=task.doc_spec,
                     intention=request.intention,
@@ -524,12 +547,12 @@ class PipelineOrchestrator:
         tasks: list[_ExtractionTask] = ctx.metadata["tasks"]
 
         async def _check_one(task: _ExtractionTask) -> None:
-            if task.split.missing or not task.doc_spec.validators.visual or not task.slice_bytes:
+            if not task.doc_spec.validators.visual or not task.slice_bytes:
                 return
             try:
                 outcomes = await self._visual_checker.check(
                     document_bytes=task.slice_bytes,
-                    media_type=task.media_type,
+                    media_type=task.segment.media_type,
                     doc=task.doc_spec,
                     intention=request.intention,
                     model=ctx.metadata["model_id"],
@@ -550,12 +573,12 @@ class PipelineOrchestrator:
         tasks: list[_ExtractionTask] = ctx.metadata["tasks"]
 
         async def _audit_one(task: _ExtractionTask) -> None:
-            if task.split.missing or not task.slice_bytes:
+            if not task.slice_bytes:
                 return
             try:
                 task.content = await self._content_checker.check(
                     document_bytes=task.slice_bytes,
-                    media_type=task.media_type,
+                    media_type=task.segment.media_type,
                     doc=task.doc_spec,
                     intention=request.intention,
                     model=ctx.metadata["model_id"],
@@ -573,12 +596,12 @@ class PipelineOrchestrator:
         tasks: list[_ExtractionTask] = ctx.metadata["tasks"]
 
         async def _judge_one(task: _ExtractionTask) -> None:
-            if task.split.missing or not task.extracted_groups or not task.slice_bytes:
+            if not task.extracted_groups or not task.slice_bytes:
                 return
             try:
                 await self._judge.judge(
                     document_bytes=task.slice_bytes,
-                    media_type=task.media_type,
+                    media_type=task.segment.media_type,
                     doc=task.doc_spec,
                     extracted_groups=task.extracted_groups,
                     intention=request.intention,
@@ -594,12 +617,18 @@ class PipelineOrchestrator:
         self, ctx: PipelineContext, _inputs: dict[str, Any]
     ) -> Any:
         request: ExtractionRequest = ctx.metadata["request"]
-        # Re-shape the task-based state into the per_doc_* maps the escalator
-        # was built against -- it stays orchestrator-agnostic that way.
         tasks: list[_ExtractionTask] = ctx.metadata["tasks"]
+        # The escalator was built around per-doc maps keyed by a stable id.
+        # Use ``task_id`` so each (segment, DocSpec) re-run is independent.
         per_doc_extracted = {t.task_id: t.extracted_groups for t in tasks}
         per_doc_inputs = {
-            t.task_id: (t.slice_bytes, t.media_type, t.slice_pages, t.doc_spec, t.split)
+            t.task_id: (
+                t.slice_bytes,
+                t.segment.media_type,
+                t.slice_pages,
+                t.doc_spec,
+                _segment_as_split(t.segment),
+            )
             for t in tasks
         }
         per_doc_model_used = {t.task_id: t.model_used or ctx.metadata["model_id"] for t in tasks}
@@ -610,12 +639,12 @@ class PipelineOrchestrator:
             info = await self._judge_escalator.maybe_escalate(ctx, request)
             if info is not None:
                 ctx.metadata["escalation"] = info
-                # Mirror the (possibly replaced) extractions back onto tasks.
                 if info.accepted:
                     for t in tasks:
                         t.extracted_groups = ctx.metadata["per_doc_extracted"][t.task_id]
-                        t.model_used = ctx.metadata["per_doc_model_used"].get(t.task_id, t.model_used)
-                    # Re-run bbox validation on the replaced extractions.
+                        t.model_used = ctx.metadata["per_doc_model_used"].get(
+                            t.task_id, t.model_used
+                        )
                     for t in tasks:
                         if t.extracted_groups:
                             self._bbox_validator.validate_groups(t.extracted_groups)
@@ -629,7 +658,9 @@ class PipelineOrchestrator:
         request: ExtractionRequest = ctx.metadata["request"]
         tasks: list[_ExtractionTask] = ctx.metadata["tasks"]
 
-        # The rule engine takes per-doctype maps. Group by doctype across files.
+        # The rule engine takes per-doctype maps. Group by doctype across
+        # files and segments -- multiple segments of the same doctype
+        # contribute their field groups to the same bucket.
         extracted_by_doc: dict[str, list[ExtractedFieldGroup]] = {}
         visual_by_doc: dict[str, list[VisualValidationOutcome]] = {}
         for t in tasks:
@@ -656,6 +687,39 @@ class PipelineOrchestrator:
         return {"assembled": True}
 
     # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _slice_segment_bytes(
+        self,
+        slot: _FileSlot,
+        seg: _Segment,
+        ctx: PipelineContext,
+    ) -> tuple[bytes, int]:
+        """Return the (bytes, page_count) the extractor should see for ``seg``.
+
+        - Whole-file segment -> the full file bytes (no slicing).
+        - Page-range segment on a PDF -> slice with pypdf.
+        - Page-range segment on a non-PDF -> the full bytes (we can't slice
+          a single image into sub-pages).
+
+        Failures are recorded and the caller falls back to the full bytes.
+        """
+        is_whole_file = seg.page_start == 1 and seg.page_end == slot.page_count
+        if is_whole_file or slot.media_type != "application/pdf":
+            return slot.document_bytes, slot.page_count
+        try:
+            sliced = slice_pdf(
+                slot.document_bytes,
+                PageRange(start=seg.page_start, end=seg.page_end),
+            )
+            return sliced, seg.page_end - seg.page_start + 1
+        except Exception as exc:  # noqa: BLE001
+            self._record_error(
+                ctx, "pdf_slicer", "SLICE_ERROR", exc,
+                doc_type=f"{slot.filename}:{seg.page_start}-{seg.page_end}",
+            )
+            return slot.document_bytes, slot.page_count
 
     def _record_error(
         self,
@@ -681,20 +745,10 @@ class PipelineOrchestrator:
         tasks: list[_ExtractionTask] = ctx.metadata.get("tasks", [])
         rule_results = ctx.metadata.get("rule_results", [])
         is_multi_file: bool = ctx.metadata.get("is_multi_file", False)
-        additional_splits = ctx.metadata.get("additional_splits", [])
+        unmatched_segments: list[_Segment] = ctx.metadata.get("unmatched_segments", [])
 
-        files_info = [
-            DocumentInfo(
-                filename=slot.filename,
-                media_type=slot.media_type,
-                page_count=slot.page_count,
-                bytes=len(slot.document_bytes),
-                document_type=slot.resolved_doctype,
-                classification=_classification_info(slot.classification),
-            )
-            for slot in files_data
-        ]
-        # Legacy ``document`` field for single-file requests.
+        files_info = [_file_info(slot) for slot in files_data]
+        # Legacy ``document`` field for the single-file request shape.
         document_info = files_info[0] if (files_info and not is_multi_file) else None
 
         # Resolve the model field by aggregating what the extractor actually
@@ -705,38 +759,39 @@ class PipelineOrchestrator:
                 ",".join(sorted(used_models)) if len(used_models) > 1 else next(iter(used_models))
             )
 
-        documents: list[ExtractedDocument] = []
-        for task in tasks:
-            documents.append(ExtractedDocument(
+        documents: list[ExtractedDocument] = [
+            ExtractedDocument(
                 document_type=task.doc_spec.docType.documentType,
-                missing=task.split.missing,
-                pages=_pages_range(task.split.page_start, task.split.page_end),
-                description=task.split.description or task.doc_spec.docType.description,
-                confidence=task.split.confidence,
+                missing=False,
+                pages=_pages_range(task.segment.page_start, task.segment.page_end),
+                description=_segment_description(task.segment, task.doc_spec),
+                confidence=_segment_confidence(task.segment),
                 fields=task.extracted_groups,
                 authenticity=DocumentAuthenticity(visual=task.visual, content=task.content),
-                source_file=task.filename if is_multi_file else None,
-            ))
+                source_file=task.segment.filename if is_multi_file else None,
+            )
+            for task in tasks
+        ]
 
-        # additional_documents: splitter leftovers + classifier-unmatched files.
+        # Unmatched / unroutable segments
         additional_documents = [
             ExtractedDocument(
-                document_type=s.document_type,
+                document_type=UNMATCHED,
                 missing=False,
-                pages=_pages_range(s.page_start, s.page_end),
-                description=s.description,
-                confidence=s.confidence,
+                pages=_pages_range(seg.page_start, seg.page_end),
+                description=(
+                    seg.classification.description
+                    if seg.classification else seg.description
+                ),
+                confidence=(
+                    seg.classification.confidence
+                    if seg.classification else seg.segmentation_confidence
+                ),
+                notes=(seg.classification.notes if seg.classification else None),
+                source_file=seg.filename if is_multi_file else None,
             )
-            for s in additional_splits
+            for seg in unmatched_segments
         ]
-        for entry in ctx.metadata.get("additional_files", []):
-            additional_documents.append(ExtractedDocument(
-                document_type="unmatched",
-                missing=True,
-                description=entry.get("notes") or entry.get("reason", ""),
-                confidence=0.0,
-                source_file=entry.get("filename"),
-            ))
 
         escalation: EscalationInfo | None = ctx.metadata.get("escalation")
         return ExtractionResult(
@@ -753,10 +808,31 @@ class PipelineOrchestrator:
         )
 
 
+# ---------------------------------------------------------------------------
+# Stateless helpers
+# ---------------------------------------------------------------------------
+
+
 def _pages_range(start: int | None, end: int | None) -> list[int]:
     if start is None or end is None or end < start:
         return []
     return list(range(start, end + 1))
+
+
+def _segment_description(seg: _Segment, doc_spec: DocSpec) -> str:
+    if seg.classification and seg.classification.description:
+        return seg.classification.description
+    if seg.description:
+        return seg.description
+    return doc_spec.docType.description or ""
+
+
+def _segment_confidence(seg: _Segment) -> float:
+    if seg.classification and seg.classification.matched:
+        return seg.classification.confidence
+    if seg.pinned:
+        return 1.0
+    return seg.segmentation_confidence
 
 
 def _classification_info(result: ClassificationResult | None) -> ClassificationInfo | None:
@@ -769,3 +845,57 @@ def _classification_info(result: ClassificationResult | None) -> ClassificationI
         description=result.description,
         notes=result.notes,
     )
+
+
+def _file_info(slot: _FileSlot) -> DocumentInfo:
+    """Top-level ``DocumentInfo`` summary for the per-file response field.
+
+    For files with a single segment we surface the segment's classifier
+    verdict directly. For files split into multiple segments,
+    ``document_type`` is left ``null`` and ``classification`` is null --
+    the per-segment outcomes live on ``documents[]`` and
+    ``additional_documents[]``.
+    """
+    one_segment = len(slot.segments) == 1
+    doc_type = slot.segments[0].resolved_doctype if one_segment else None
+    classification = (
+        _classification_info(slot.segments[0].classification)
+        if one_segment else None
+    )
+    return DocumentInfo(
+        filename=slot.filename,
+        media_type=slot.media_type,
+        page_count=slot.page_count,
+        bytes=len(slot.document_bytes),
+        document_type=doc_type,
+        classification=classification,
+    )
+
+
+def _segment_as_split(seg: _Segment) -> DiscoveredSegment:
+    """Adapter so the legacy JudgeEscalator input tuple keeps working."""
+    return DiscoveredSegment(
+        page_start=seg.page_start,
+        page_end=seg.page_end,
+        provisional_type=seg.provisional_type,
+        description=seg.description,
+        confidence=seg.segmentation_confidence,
+    )
+
+
+def _slice_for_segment(
+    slot: _FileSlot,
+    seg: _Segment,
+    ctx: PipelineContext,
+    orchestrator: PipelineOrchestrator,
+) -> tuple[bytes, str]:
+    """Return (bytes, media_type) for the classifier of ``seg``.
+
+    When the file has only one segment we pass the original bytes; for
+    multi-segment files we slice the PDF down to the segment's pages so
+    the classifier sees only that document.
+    """
+    if len(slot.segments) <= 1:
+        return slot.document_bytes, slot.media_type
+    bytes_for_seg, _pages = orchestrator._slice_segment_bytes(slot, seg, ctx)  # noqa: SLF001
+    return bytes_for_seg, slot.media_type
