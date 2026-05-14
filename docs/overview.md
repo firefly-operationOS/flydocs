@@ -1,0 +1,188 @@
+# flydesk-idp — Overview
+
+A guided tour for someone landing on this codebase for the first time.
+By the end you should know **what the service does for the business**,
+**how a request travels through it**, and **where to look in the
+source** when you need to change something.
+
+---
+
+## 1. The product, in plain language
+
+flydesk-idp turns documents into structured, validated, audit-ready
+decisions. A single HTTP call does five things that operations teams
+normally have to glue together themselves:
+
+1. **Read** the document — any layout, any of the formats a multimodal
+   LLM accepts (PDF, PNG, JPEG, WebP, TIFF, …).
+2. **Extract** the fields you asked for — each one with a value, a
+   page number, a normalised bounding box, and a confidence score.
+3. **Validate** every field with deterministic checkers (IBAN
+   checksum, NIF/NIE, Luhn, phone E.164, country-aware postal codes,
+   and a few dozen others).
+4. **Audit** the document with a separate LLM pass — visual checks
+   (signature present, stamp present, photo present, …), content
+   coherence (dates agree, totals tally, no obvious tampering), and a
+   "judge" that re-grades every extracted value against the source.
+5. **Decide** with a business-rule engine — caller-defined predicates
+   over the extracted data, evaluated as a DAG. Outputs feed back into
+   the workflow that called us.
+
+The same call works synchronously (blocking, sub-minute) or as a
+queue-backed async job with an HMAC-signed webhook.
+
+---
+
+## 2. Who it's for
+
+- **Operations engineers** wiring a KYC, claims, or onboarding flow
+  that needs structured data + decisions out of unstructured
+  documents.
+- **Product owners** who want to deprecate hand-coded extraction rules
+  whenever a vendor changes a form layout.
+- **Backend developers** who want the freedom of a multimodal LLM
+  with the discipline of a typed API contract.
+
+The audit fields (`request_id`, `pipeline_errors`, per-stage latency,
+per-doc model used) are first-class so the service plays nicely with
+compliance teams and incident reviews.
+
+---
+
+## 3. Mental model
+
+Three concepts unlock the rest of the codebase.
+
+### 3a. The `ExtractionRequest`
+
+The single payload for both APIs. Three required pieces:
+
+- **`document`** — base64 content + filename + optional declared
+  media type.
+- **`docs[]`** — one `DocSpec` per document type you expect in the
+  source. Each contains the field schema you want extracted, plus any
+  visual / content validators and `standard_validators` per field.
+- **`rules[]`** — optional business rules, each declaring its
+  dependencies (`parents`) on fields, validators, or other rules.
+
+Plus `options` (which pipeline stages to run, language hint, model
+override) and `intention` (a one-paragraph description of why you're
+extracting — the LLM reads it).
+
+### 3b. The pipeline
+
+```
+load → split? → extract → field_validation? → visual_authenticity?
+     → content_authenticity? → judge? → rules? → assemble
+```
+
+The extractor is always on. The rest are caller-toggled through
+`ExtractionOptions.stages`. The DAG is built fresh per request from
+`agentic.PipelineEngine`, so the trace mirrors exactly what ran.
+
+### 3c. The `ExtractionResult`
+
+Mirror image of the request. Per-document blocks of extracted fields
+with their validation and judge verdicts; per-document visual + content
+audits; the resolved rule outputs; an `audit` block with the request
+id, latency, model id, and any per-stage errors.
+
+A failed _stage_ doesn't fail the whole call — the error is recorded
+in `pipeline_errors[]` and the rest of the pipeline keeps running.
+
+---
+
+## 4. Walking a real request through the service
+
+```
+HTTP POST /api/v1/extract
+      │
+      ▼
+ExtractController     ← @rest_controller, RFC 7807 on validation error
+      │
+      ▼  CommandBus.send(ExtractCommand)
+      ▼
+ExtractHandler        ← @command_handler. asyncio.wait_for(SYNC_TIMEOUT_S).
+      │
+      ▼
+PipelineOrchestrator  ← builds an agentic.PipelineEngine DAG
+      │
+      ├──▶ load           DocumentLoader: sniff media_type + page count
+      ├──▶ split?         DocumentSplitter (LLM): pages per docType
+      ├──▶ extract        MultimodalExtractor (LLM): fields + bbox
+      ├──▶ validate?      FieldValidator: pure-Python, regex/enum/range + StandardValidators
+      ├──▶ visual?        VisualAuthenticityChecker (LLM): caller-defined yes/no checks
+      ├──▶ content?       ContentAuthenticityChecker (LLM): integrity audit
+      ├──▶ judge?         Judge (LLM): re-grade every extracted value
+      └──▶ rules?         RuleEngine (LLM): DAG of caller predicates
+      │
+      ▼
+ExtractionResult      ← serialised back through ExtractController
+      │
+      ▼
+HTTP 200 application/json
+```
+
+Async path (`POST /api/v1/jobs`):
+
+```
+JobsController → SubmitJobCommand → SubmitJobHandler → ExtractionJob table
+                                                      └──▶ JobQueue.publish(job_id)
+                                                              │
+                                                              ▼  (Redis Streams in prod)
+                                                          JobWorker.consume()
+                                                              │
+                                                              ▼  same orchestrator
+                                                          mark_succeeded(job_id)
+                                                              │
+                                                              ▼
+                                                          WebhookPublisher (HMAC + retries)
+```
+
+---
+
+## 5. Where things live
+
+| You want to…                                      | Look here                                                                |
+| ------------------------------------------------- | ------------------------------------------------------------------------ |
+| Change the HTTP contract                          | `interfaces/dtos/extract.py`, `interfaces/dtos/job.py`                   |
+| Add a new pipeline stage                          | `core/services/<stage>/` + register a `@bean` in `core/configuration.py` |
+| Edit a prompt                                     | `resources/prompts/<stage>.yaml`                                         |
+| Add a new built-in validator                      | `interfaces/enums/standard_validator.py` + `core/services/validation/standard_validator_registry.py` |
+| Tune timeouts / limits                            | `config.py` (`IDPSettings`) — driven by env vars                         |
+| Wire a new bean                                   | `core/configuration.py` (`@bean`) or decorate the class with `@service` |
+| Diagnose a request                                | Grep the structured logs by `request_id` (UUID stamped in the response) |
+| Run only the unit tests                           | `task test`                                                              |
+| Run the real-LLM smoke test                       | `ANTHROPIC_API_KEY=… task test:llm`                                      |
+
+---
+
+## 6. Building blocks
+
+| Block                              | Purpose                                                              | Default                                          |
+| ---------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------ |
+| **PyFly application**              | Spring-Boot-style framework: DI, CQRS, web, EDA, actuator, security  | `flydesk_idp.app.FlydeskIDPApplication`         |
+| **Configuration**                  | Single `@configuration` declaring every cross-cutting bean           | `core/configuration.py::IDPCoreConfiguration`   |
+| **PromptCatalog**                  | Loads YAML prompts at boot, registers them with the agentic registry | `core/services/extraction/prompts.py`           |
+| **Pipeline orchestrator**          | Builds + runs an `agentic.PipelineEngine` per request                | `core/services/pipeline/orchestrator.py`        |
+| **JobQueue**                       | In-memory or Redis Streams                                           | `core/services/queue/job_queue.py`              |
+| **WebhookPublisher**               | HMAC-SHA256 signed, retries on 5xx / 429 with `tenacity`             | `core/services/webhook/webhook_publisher.py`    |
+| **Database**                       | Async SQLAlchemy + Alembic                                           | `models/repositories/extraction_job_repository.py` |
+| **Settings**                       | Pydantic settings; every knob is a `FLYDESK_IDP_*` env var           | `config.py`                                      |
+
+---
+
+## 7. What's coming next in the docs
+
+- [architecture.md](architecture.md) — Firefly Framework deep dive: how
+  pyfly resolves the bean graph and how agentic builds the pipeline.
+- [pipeline.md](pipeline.md) — every stage in detail, with timeouts,
+  concurrency, and debugging recipes.
+- [api-reference.md](api-reference.md) — full request/response schemas.
+- [standard-validators.md](standard-validators.md) — every built-in
+  checker with parameter docs.
+- [rule-engine.md](rule-engine.md) — DAG mechanics + a worked KYC
+  example.
+- [prompts.md](prompts.md) — YAML prompt format and how to edit safely.
+- [deployment.md](deployment.md) — topology, env vars, scaling, cost.
+- [troubleshooting.md](troubleshooting.md) — failure modes and fixes.
