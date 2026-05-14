@@ -127,10 +127,14 @@ Async path (`POST /api/v1/jobs`):
 
 ```
 JobsController → SubmitJobCommand → SubmitJobHandler → ExtractionJob table
-                                                      └──▶ JobQueue.publish(job_id)
+                                                      └──▶ pyfly EventPublisher.publish
+                                                            (IDPJobSubmitted event)
                                                               │
-                                                              ▼  (Redis Streams in prod)
-                                                          JobWorker.consume()
+                                                              ▼  durable outbox in Postgres
+                                                            pyfly_eda_outbox row
+                                                              │
+                                                              ▼  pg_notify + LISTEN
+                                                          JobWorker subscribe handler
                                                               │
                                                               ▼  same orchestrator
                                                           mark_succeeded(job_id)
@@ -138,6 +142,10 @@ JobsController → SubmitJobCommand → SubmitJobHandler → ExtractionJob table
                                                               ▼
                                                           WebhookPublisher (HMAC + retries)
 ```
+
+Switch broker by flipping `FLYDESK_IDP_EDA_ADAPTER` to `memory`,
+`redis` (Streams), or `kafka` — the orchestrator and the worker don't
+care; only the bus implementation changes.
 
 ---
 
@@ -165,7 +173,7 @@ JobsController → SubmitJobCommand → SubmitJobHandler → ExtractionJob table
 | **Configuration**                  | Single `@configuration` declaring every cross-cutting bean           | `core/configuration.py::IDPCoreConfiguration`   |
 | **PromptCatalog**                  | Loads YAML prompts at boot, registers them with the agentic registry | `core/services/extraction/prompts.py`           |
 | **Pipeline orchestrator**          | Builds + runs an `agentic.PipelineEngine` per request                | `core/services/pipeline/orchestrator.py`        |
-| **JobQueue**                       | In-memory or Redis Streams                                           | `core/services/queue/job_queue.py`              |
+| **Event bus**                      | `pyfly.eda.EventPublisher` — default Postgres outbox + LISTEN/NOTIFY; swap to Redis Streams / Kafka via `FLYDESK_IDP_EDA_ADAPTER` | injected by `pyfly.eda.auto_configuration.EdaAutoConfiguration` |
 | **WebhookPublisher**               | HMAC-SHA256 signed, retries on 5xx / 429 with `tenacity`             | `core/services/webhook/webhook_publisher.py`    |
 | **Database**                       | Async SQLAlchemy + Alembic                                           | `models/repositories/extraction_job_repository.py` |
 | **Settings**                       | Pydantic settings; every knob is a `FLYDESK_IDP_*` env var           | `config.py`                                      |

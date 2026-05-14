@@ -7,31 +7,35 @@ environment — topology, configuration, scaling, security, and cost.
 
 ## 1. Topology
 
-A production deployment has four moving parts:
+A production deployment has three moving parts:
 
 ```
-                ┌──────────────┐
-   client ─────▶│ API (uvicorn)│──── publish ────▶ ┌──────────────┐
-                │ /api/v1/...  │                   │ Redis Streams│
-                │ /actuator/...│                   └──────┬───────┘
-                └──────┬───────┘                          │ consume
-                       │                                   ▼
-                       │                          ┌──────────────┐
-                       │ persists                 │ JobWorker(s) │
-                       ▼                          └──────┬───────┘
-                ┌──────────────┐                          │
-                │ Postgres     │ ◀────── reads/writes ────┘
-                └──────────────┘
+                ┌──────────────┐                  ┌────────────────────────────┐
+   client ─────▶│ API (uvicorn)│── INSERT + NOTIFY ▶│ Postgres                   │
+                │ /api/v1/...  │                  │   extraction_jobs          │
+                │ /actuator/...│                  │   pyfly_eda_outbox         │
+                └──────────────┘                  │   pyfly_eda_offsets        │
+                                                  └──────────┬─────────────────┘
+                                                             │ LISTEN
+                                                             ▼
+                                                  ┌─────────────────────────┐
+                                                  │ JobWorker(s) (uvicorn)  │
+                                                  │  pyfly.eda subscribe    │
+                                                  └─────────────────────────┘
 ```
 
-| Component   | Role                                                                                          |
-| ----------- | --------------------------------------------------------------------------------------------- |
-| **API**     | One or more uvicorn workers behind a load balancer. Stateless; sticky sessions not required.   |
-| **Worker**  | One or more processes that consume the job stream. Each Redis consumer-group message goes to one worker. |
-| **Postgres**| Holds `extraction_jobs`. Idempotency, status, and results live here.                          |
-| **Redis**   | The job queue. Streams persist messages so a worker restart never loses a job.                |
+| Component    | Role |
+| ------------ | ---- |
+| **API**      | One or more uvicorn workers behind a load balancer. Stateless; no sticky sessions. Publishes ``IDPJobSubmitted`` events on the EDA bus. |
+| **Worker**   | One or more processes that subscribe to the EDA bus via `pyfly.eda.EventPublisher.subscribe`. Each event is delivered to exactly one consumer in the `flydesk-idp-workers` consumer group. |
+| **Postgres** | Holds `extraction_jobs` *and* the EDA outbox (`pyfly_eda_outbox` + `pyfly_eda_offsets`). With the Postgres EDA adapter you no longer need a separate broker. |
 
-The API and the worker share the same wheel; the difference is which
+Redis or Kafka are still supported brokers — see §3 — but the default
+posture is **Postgres-only**: the service already runs Postgres for
+persistence, so reusing it as a durable event bus removes one
+operational dependency.
+
+The API and the worker share the same image; the difference is which
 CLI subcommand starts them (`flydesk-idp serve` vs.
 `flydesk-idp worker`).
 
@@ -48,9 +52,14 @@ FLYDESK_IDP_LOG_LEVEL=INFO
 
 FLYDESK_IDP_DATABASE_URL=postgresql+asyncpg://idp:s3cret@db:5432/flydesk_idp
 
-# In-memory is fine for single-process dev; use Redis in production.
-FLYDESK_IDP_EDA_ADAPTER=redis
-FLYDESK_IDP_REDIS_URL=redis://redis:6379/0
+# EDA backend. ``postgres`` is the default and uses LISTEN/NOTIFY +
+# a durable outbox in the same Postgres the service already owns.
+# Other options: ``memory`` (single-process dev), ``redis`` (Redis
+# Streams), ``kafka`` (aiokafka). The auto-configuration is in
+# pyfly.eda.auto_configuration:EdaAutoConfiguration; ``pyfly.yaml``
+# plumbs the env var into ``pyfly.eda.provider``.
+FLYDESK_IDP_EDA_ADAPTER=postgres
+FLYDESK_IDP_REDIS_URL=redis://redis:6379/0   # only used when adapter=redis
 FLYDESK_IDP_JOBS_TOPIC=flydesk.idp.jobs
 
 # Models — Anthropic first, OpenAI as a fallback when the primary errors out.
@@ -94,6 +103,32 @@ OPENAI_API_KEY=...
 
 ## 3. Building the image
 
+### 3.1 From the registry (recommended)
+
+Production deploys should pull the prebuilt **multi-arch** image
+published by `.github/workflows/docker-publish.yaml`:
+
+```bash
+docker pull ghcr.io/firefly-operationos/flydesk-idp:latest      # arm64 + amd64 manifest
+docker pull ghcr.io/firefly-operationos/flydesk-idp:v0.1.0       # SemVer pin
+docker pull --platform linux/arm64 ghcr.io/firefly-operationos/flydesk-idp:latest
+```
+
+Available tag schemas:
+
+| Source                | Tags written                                              |
+| --------------------- | --------------------------------------------------------- |
+| `push` to `main`      | `main`, `sha-<short>`, `latest`                           |
+| `push` of `vX.Y.Z` tag | `vX.Y.Z`, `vX.Y`, `vX`, `sha-<short>`, `latest` (on main head) |
+| `workflow_dispatch`   | `manual-<run_id>`                                          |
+
+Every tag carries a multi-arch manifest covering **linux/amd64** and
+**linux/arm64**, plus SLSA build provenance and a CycloneDX SBOM
+verifiable via `cosign verify-attestation`. See
+[`docs/cicd.md`](cicd.md) for the workflow internals.
+
+### 3.2 Local builds
+
 ```bash
 task docker:build
 ```
@@ -112,6 +147,10 @@ The two `--build-context` references stage the sibling Firefly
 libraries as named contexts; the `Dockerfile` rewrites the
 `pyproject.toml` source paths so `uv sync` resolves them inside the
 container.
+
+To build for a different arch (e.g. arm64 on an amd64 host) add
+`--platform linux/arm64`. The CI workflow does this for both arches in
+parallel via QEMU; on a workstation a single arch is usually enough.
 
 ---
 
@@ -146,12 +185,39 @@ readinessProbe:
   periodSeconds: 5
 ```
 
-The composite includes:
+The composite always includes:
 
-- DB connectivity (`pyfly.data.relational` health indicator).
-- Redis connectivity (when `FLYDESK_IDP_EDA_ADAPTER=redis`).
-- A custom indicator can be added by registering a
-  `pyfly.actuator.health.HealthIndicator` bean.
+- **`database_health`** — `pyfly.data.relational.health.SqlAlchemyHealthIndicator`
+  pings the async engine with `SELECT 1` and surfaces the dialect on
+  the response.
+- **`eda_health`** — `pyfly.eda.health.EventPublisherHealthIndicator`
+  is auto-registered by `pyfly.eda.auto_configuration.EdaHealthAutoConfiguration`
+  whenever the actuator subsystem is on. It reports the active adapter
+  (`PostgresEventBus`, `RedisStreamsEventBus`, `KafkaEventBus`, or
+  `InMemoryEventBus`).
+
+A response from a healthy stack:
+
+```json
+{
+  "status": "UP",
+  "components": {
+    "database_health": { "status": "UP", "details": { "database": "postgresql" } },
+    "eda_health":      { "status": "UP", "details": { "adapter":  "PostgresEventBus" } }
+  }
+}
+```
+
+When any indicator is `DOWN`, the endpoint returns `503` so the
+load-balancer / kubelet stops routing traffic. Add a service-specific
+probe by registering another `pyfly.actuator.health.HealthIndicator`
+bean in `core/configuration.py` — the lifespan rescan picks it up
+automatically.
+
+> **W3C trace context** is propagated by pyfly's default
+> `CorrelationFilter`: every response echoes back `X-Correlation-Id`,
+> `X-Request-Id`, `traceparent`, `tracestate`, and `X-Tenant-Id` when
+> the request carried them. No middleware to wire locally.
 
 ---
 
