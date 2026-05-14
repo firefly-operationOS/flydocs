@@ -16,8 +16,8 @@ flydesk-idp builds on two complementary Firefly Framework libraries.
 | `fireflyframework-pyfly`      | Application lifecycle, dependency injection, CQRS, REST controllers, EDA, observability, security, actuator. |
 | `fireflyframework-agentic`    | Multimodal LLM agents (`FireflyAgent`), prompt templates + registry, pipeline DAG runtime (`PipelineEngine`), tool registry. |
 
-Pyfly owns the **service runtime** (boot, DI, HTTP, queues, health).
-Agentic owns the **AI runtime** (prompts, agents, pipeline). flydesk-idp
+Pyfly owns the **service runtime** (boot, DI, HTTP, EDA, health,
+W3C trace context). Agentic owns the **AI runtime** (prompts, agents, pipeline). flydesk-idp
 is the glue that turns a `POST /api/v1/extract` into a pipeline of
 multimodal LLM calls, with the results validated, judged, and rule-checked
 on the way out.
@@ -43,9 +43,11 @@ uvicorn flydesk_idp.main:app
          │                      @query_handler, @rest_controller, @controller_advice
          │
          ├─▶ build DI graph   – resolves every @bean in IDPCoreConfiguration
-         │                      (settings → repository, queue, webhook,
-         │                       prompt_catalog → extractor, splitter,
-         │                       judge, rule_engine, …, orchestrator, job_worker)
+         │                      (settings → repository, webhook,
+         │                       database_health, prompt_catalog →
+         │                       extractor, splitter, judge, rule_engine,
+         │                       …, orchestrator). The EDA EventPublisher
+         │                       is provided by pyfly's EdaAutoConfiguration.
          │
          ├─▶ register routes  – pyfly mounts every @rest_controller on FastAPI
          │
@@ -68,9 +70,12 @@ flydesk-idp uses all four, and the choice is significant.
 ### 3a. `@configuration` + `@bean`
 
 Used for everything that is **not a domain object** — repositories,
-queues, the prompt catalog, the LLM stages, the orchestrator, the
-worker. Each `@bean` method becomes a singleton; its parameter
-annotations are how the container injects dependencies.
+the prompt catalog, the LLM stages, the orchestrator, the health
+indicators. Each `@bean` method becomes a singleton; its parameter
+annotations are how the container injects dependencies. (The EDA
+`EventPublisher` is provided by `pyfly.eda.auto_configuration.EdaAutoConfiguration`
+upstream; flydesk-idp just declares it as a constructor parameter
+where needed.)
 
 ```python
 # core/configuration.py
