@@ -128,4 +128,29 @@ select = ["E", "F", "I", "N", "UP", "B", "SIM"]
 pythonVersion = "3.13"
 typeCheckingMode = "basic"
 include = ["src/flydesk_idp"]
-exclude = ["tests/**", "**/__pycache__/**"]
+exclude = ["tests/**", "**/__pycache__/**", "vendor/**"]
+
+# Two execution-environment overrides silence false positives that come
+# from framework-level metaprogramming that pyright can't follow:
+#
+# * ``web/controllers``: pyfly's ``Body[T]`` / ``Valid[T]`` / ``Header[T]`` /
+#   ``PathVar[T]`` are runtime ``Generic[T]`` classes the framework
+#   strips at injection time. Statically they look like opaque wrappers
+#   around T, so pyright rejects every call site that passes the
+#   unwrapped value through. Suppress ``reportArgumentType`` until
+#   pyfly publishes proper type stubs (or switches the markers to
+#   ``Annotated[T, …]``).
+# * ``core/services/extraction/postprocess``: pydantic v2's
+#   ``populate_by_name=True`` lets us construct DTOs with either the
+#   Python field name (``fieldName=``) or the alias (``name=``).
+#   Pyright tracks the alias only, so it flags every construction
+#   that uses the Python name. The runtime accepts both; suppress
+#   ``reportCallIssue`` here.
+
+[[tool.pyright.executionEnvironments]]
+root = "src/flydesk_idp/web/controllers"
+reportArgumentType = "none"
+
+[[tool.pyright.executionEnvironments]]
+root = "src/flydesk_idp/core/services/extraction"
+reportCallIssue = "none"

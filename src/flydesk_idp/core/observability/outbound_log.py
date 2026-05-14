@@ -179,7 +179,14 @@ def _extract_usage_fields(result: Any, model: str) -> dict[str, Any]:
     if cache_read:
         fields["cache_read"] = cache_read
     try:
-        from fireflyframework_agentic.observability.cost import get_cost_calculator
+        # ImportError-tolerant: the cost resolver is an optional surface
+        # in fireflyframework-agentic. Older / unreleased refs export it
+        # under a different module path; we keep the call lazy and
+        # swallow every failure mode so missing pricing data degrades
+        # to a zero-cost log line instead of a hard error.
+        from fireflyframework_agentic.observability.cost import (  # pyright: ignore[reportMissingImports]
+            get_cost_calculator,  # pyright: ignore[reportAttributeAccessIssue]
+        )
 
         calc = get_cost_calculator("auto")
         cost = calc.estimate(model, input_tokens, output_tokens)

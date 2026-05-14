@@ -240,9 +240,14 @@ def _serialise_field_value(field: ExtractedField) -> Any:
         return [
             {
                 "rowName": row.fieldName,
+                # Nested ``fieldValueFound`` only carries a row of
+                # sub-fields for array-typed parents; for scalar leaves
+                # it is the value itself, which we skip here. The
+                # isinstance guard also satisfies pyright -- without it
+                # the iterator type is the full union (str / int / …).
                 "row": [
                     {"fieldName": sub.fieldName, "value": sub.fieldValueFound}
-                    for sub in row.fieldValueFound
+                    for sub in (row.fieldValueFound if isinstance(row.fieldValueFound, list) else [])
                     if isinstance(sub, ExtractedField)
                 ],
             }
