@@ -24,9 +24,7 @@ def _eml_with_attachment() -> bytes:
 
 
 def test_eml_yields_attachment_and_text_body() -> None:
-    items = EmailUnpacker().unpack(
-        _eml_with_attachment(), media_type="message/rfc822"
-    )
+    items = EmailUnpacker().unpack(_eml_with_attachment(), media_type="message/rfc822")
     by_name = {name: payload for name, payload in items}
     assert "passport.pdf" in by_name
     assert by_name["passport.pdf"].startswith(b"%PDF-")

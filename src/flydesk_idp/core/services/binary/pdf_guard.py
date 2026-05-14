@@ -37,13 +37,9 @@ class PdfGuard:
         try:
             reader = pypdf.PdfReader(io.BytesIO(data), strict=False)
         except PdfReadError as exc:
-            raise BinaryNormalizationError(
-                f"PDF cannot be parsed: {exc}", filename=filename
-            ) from exc
+            raise BinaryNormalizationError(f"PDF cannot be parsed: {exc}", filename=filename) from exc
         except Exception as exc:  # noqa: BLE001
-            raise BinaryNormalizationError(
-                f"PDF cannot be parsed: {exc}", filename=filename
-            ) from exc
+            raise BinaryNormalizationError(f"PDF cannot be parsed: {exc}", filename=filename) from exc
 
         if reader.is_encrypted:
             # We never attempt empty-password decrypt -- if the document
@@ -59,10 +55,6 @@ class PdfGuard:
         try:
             page_count = len(reader.pages)
         except Exception as exc:  # noqa: BLE001
-            raise BinaryNormalizationError(
-                f"PDF page tree is corrupt: {exc}", filename=filename
-            ) from exc
+            raise BinaryNormalizationError(f"PDF page tree is corrupt: {exc}", filename=filename) from exc
         if page_count <= 0:
-            raise BinaryNormalizationError(
-                "PDF reports zero pages.", filename=filename
-            )
+            raise BinaryNormalizationError("PDF reports zero pages.", filename=filename)

@@ -40,9 +40,7 @@ class _StubOffice(OfficeConverter):
     def supports(media_type: str) -> bool:
         return media_type in OFFICE_MEDIA_TYPES
 
-    async def convert(
-        self, data: bytes, *, media_type: str, filename: str | None = None
-    ) -> bytes:
+    async def convert(self, data: bytes, *, media_type: str, filename: str | None = None) -> bytes:
         self.calls.append((media_type, filename))
         if self.fail:
             raise OfficeConversionError("stub failure", filename=filename)

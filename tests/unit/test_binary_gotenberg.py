@@ -51,19 +51,13 @@ async def test_4xx_raises_typed_error() -> None:
         return_value=httpx.Response(400, text="bad input")
     )
     with pytest.raises(OfficeConversionError) as ei:
-        await GotenbergConverter(_settings()).convert(
-            b"x", media_type=_DOCX, filename="r.docx"
-        )
+        await GotenbergConverter(_settings()).convert(b"x", media_type=_DOCX, filename="r.docx")
     assert "400" in str(ei.value)
 
 
 @pytest.mark.asyncio
 @respx.mock
 async def test_network_error_raises_typed_error() -> None:
-    respx.post("http://gotenberg:3000/forms/libreoffice/convert").mock(
-        side_effect=httpx.ConnectError("nope")
-    )
+    respx.post("http://gotenberg:3000/forms/libreoffice/convert").mock(side_effect=httpx.ConnectError("nope"))
     with pytest.raises(OfficeConversionError):
-        await GotenbergConverter(_settings()).convert(
-            b"x", media_type=_DOCX, filename="r.docx"
-        )
+        await GotenbergConverter(_settings()).convert(b"x", media_type=_DOCX, filename="r.docx")

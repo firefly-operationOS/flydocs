@@ -101,9 +101,7 @@ class GotenbergConverter(OfficeConverter):
             async with httpx.AsyncClient(timeout=self._timeout_s) as client:
                 resp = await client.post(url, files=files)
         except httpx.HTTPError as exc:
-            raise OfficeConversionError(
-                f"Gotenberg request failed: {exc}", filename=filename
-            ) from exc
+            raise OfficeConversionError(f"Gotenberg request failed: {exc}", filename=filename) from exc
         latency_ms = (time.monotonic() - started) * 1000
         if resp.status_code >= 400:
             err = resp.text[:500]

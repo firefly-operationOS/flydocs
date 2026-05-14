@@ -73,9 +73,7 @@ class ArchiveUnpacker:
         except ArchiveExtractionError:
             raise
         except Exception as exc:  # noqa: BLE001
-            raise ArchiveExtractionError(
-                f"archive could not be opened: {exc}", filename=filename
-            ) from exc
+            raise ArchiveExtractionError(f"archive could not be opened: {exc}", filename=filename) from exc
         log_outbound(
             "archive",
             op=f"unpack.{media_type.split('/')[-1]}",
@@ -102,9 +100,7 @@ class ArchiveUnpacker:
         elif media_type == "application/gzip":
             yield from self._iter_gz(data, filename)
         else:
-            raise ArchiveExtractionError(
-                f"unsupported archive type: {media_type}", filename=filename
-            )
+            raise ArchiveExtractionError(f"unsupported archive type: {media_type}", filename=filename)
 
     def _iter_zip(self, data: bytes, filename: str | None) -> Iterator[tuple[str, bytes]]:
         try:
@@ -140,15 +136,11 @@ class ArchiveUnpacker:
         try:
             import py7zr  # pyright: ignore[reportMissingImports]
         except ImportError as exc:  # pragma: no cover -- runtime dep guard
-            raise ArchiveExtractionError(
-                "py7zr is required for 7-Zip input", filename=filename
-            ) from exc
+            raise ArchiveExtractionError("py7zr is required for 7-Zip input", filename=filename) from exc
         try:
             with py7zr.SevenZipFile(io.BytesIO(data), mode="r") as sf:
                 if sf.needs_password():
-                    raise ArchiveExtractionError(
-                        "7z archive is password-protected", filename=filename
-                    )
+                    raise ArchiveExtractionError("7z archive is password-protected", filename=filename)
                 # py7zr returns a dict[str, BytesIO]; ``readall`` is the
                 # documented API, type stubs in some releases miss it.
                 contents: dict[str, io.BytesIO] = sf.readall() or {}  # pyright: ignore[reportAttributeAccessIssue]
@@ -159,12 +151,8 @@ class ArchiveUnpacker:
             # ``py7zr.exceptions``; fall back to substring check on the
             # exception message which is stable across releases.
             if "password" in str(exc).lower():
-                raise ArchiveExtractionError(
-                    "7z archive is password-protected", filename=filename
-                ) from exc
-            raise ArchiveExtractionError(
-                f"7z extraction failed: {exc}", filename=filename
-            ) from exc
+                raise ArchiveExtractionError("7z archive is password-protected", filename=filename) from exc
+            raise ArchiveExtractionError(f"7z extraction failed: {exc}", filename=filename) from exc
 
         total_bytes = 0
         yielded = 0
@@ -202,9 +190,7 @@ class ArchiveUnpacker:
         try:
             decoded = gzip.decompress(data)
         except OSError as exc:
-            raise ArchiveExtractionError(
-                f"gzip decompression failed: {exc}", filename=filename
-            ) from exc
+            raise ArchiveExtractionError(f"gzip decompression failed: {exc}", filename=filename) from exc
         if len(decoded) > _MAX_UNCOMPRESSED_BYTES:
             raise ArchiveExtractionError(
                 f"gzip exceeds {_MAX_UNCOMPRESSED_BYTES} byte ceiling",

@@ -30,8 +30,17 @@ _TAR_USTAR = b"ustar"  # at offset 257
 _OLE_CFB = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"  # legacy .doc/.xls/.ppt and .msg
 _HEIF_FTYP_OFFSET = 4
 _HEIF_BRANDS = {
-    b"heic", b"heix", b"hevc", b"hevx", b"heim", b"heis", b"hevm", b"hevs",
-    b"mif1", b"msf1", b"avif",
+    b"heic",
+    b"heix",
+    b"hevc",
+    b"hevx",
+    b"heim",
+    b"heis",
+    b"hevm",
+    b"hevs",
+    b"mif1",
+    b"msf1",
+    b"avif",
 }
 # Plain-text-ish formats sniffed by content rather than magic.
 _SVG_HINTS = (b"<svg", b"<?xml")
@@ -71,7 +80,7 @@ def sniff_media_type(data: bytes, *, default: str | None = None, filename: str |
         return "application/x-7z-compressed"
     if data.startswith(_GZ):
         return "application/gzip"
-    if len(data) >= 12 and data[_HEIF_FTYP_OFFSET:_HEIF_FTYP_OFFSET + 4] == b"ftyp":
+    if len(data) >= 12 and data[_HEIF_FTYP_OFFSET : _HEIF_FTYP_OFFSET + 4] == b"ftyp":
         brand = data[8:12].lower()
         if brand in _HEIF_BRANDS:
             return "image/avif" if brand == b"avif" else "image/heic"

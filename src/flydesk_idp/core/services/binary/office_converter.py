@@ -26,20 +26,22 @@ from typing import Protocol, runtime_checkable
 
 # Re-export the supported MIME set so the normalizer's ``supports`` check
 # stays adapter-agnostic.
-OFFICE_MEDIA_TYPES: frozenset[str] = frozenset({
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    "application/msword",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    "application/vnd.ms-excel",
-    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-    "application/vnd.ms-powerpoint",
-    "application/vnd.oasis.opendocument.text",
-    "application/vnd.oasis.opendocument.spreadsheet",
-    "application/vnd.oasis.opendocument.presentation",
-    "application/rtf",
-    "text/rtf",
-    "text/html",
-})
+OFFICE_MEDIA_TYPES: frozenset[str] = frozenset(
+    {
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/msword",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.ms-excel",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "application/vnd.ms-powerpoint",
+        "application/vnd.oasis.opendocument.text",
+        "application/vnd.oasis.opendocument.spreadsheet",
+        "application/vnd.oasis.opendocument.presentation",
+        "application/rtf",
+        "text/rtf",
+        "text/html",
+    }
+)
 
 
 @runtime_checkable
@@ -52,8 +54,7 @@ class OfficeConverter(Protocol):
     """
 
     @staticmethod
-    def supports(media_type: str) -> bool:
-        ...
+    def supports(media_type: str) -> bool: ...
 
     async def convert(
         self,
@@ -61,8 +62,7 @@ class OfficeConverter(Protocol):
         *,
         media_type: str,
         filename: str | None = None,
-    ) -> bytes:
-        ...
+    ) -> bytes: ...
 
 
 def _supports(media_type: str) -> bool:

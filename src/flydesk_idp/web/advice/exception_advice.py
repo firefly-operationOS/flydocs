@@ -44,9 +44,7 @@ class ExceptionAdvice:
         return problem.model_dump(exclude_none=True)
 
     @exception_handler(BinaryNormalizationError)
-    async def binary_normalization_failed(
-        self, exc: BinaryNormalizationError
-    ) -> dict[str, Any]:
+    async def binary_normalization_failed(self, exc: BinaryNormalizationError) -> dict[str, Any]:
         """Map every BinaryNormalizationError subclass to a 422 problem-detail.
 
         ``code`` carries the subclass-specific stable identifier

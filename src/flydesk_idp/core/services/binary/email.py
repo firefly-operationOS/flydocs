@@ -63,9 +63,7 @@ class EmailUnpacker:
         except BinaryNormalizationError:
             raise
         except Exception as exc:  # noqa: BLE001
-            raise BinaryNormalizationError(
-                f"email could not be parsed: {exc}", filename=filename
-            ) from exc
+            raise BinaryNormalizationError(f"email could not be parsed: {exc}", filename=filename) from exc
         log_outbound(
             "email",
             op=f"unpack.{media_type.split('/')[-1]}",
@@ -117,9 +115,7 @@ class EmailUnpacker:
         try:
             msg = extract_msg.openMsg(io.BytesIO(data))
         except Exception as exc:  # noqa: BLE001
-            raise BinaryNormalizationError(
-                f"MSG could not be opened: {exc}", filename=filename
-            ) from exc
+            raise BinaryNormalizationError(f"MSG could not be opened: {exc}", filename=filename) from exc
 
         try:
             for att in msg.attachments:
@@ -132,11 +128,15 @@ class EmailUnpacker:
             # extract-msg's type stubs miss them in the version we ship.
             raw_body: object = getattr(msg, "body", None)
             raw_html: object = getattr(msg, "htmlBody", None)
-            body = (raw_body or "").encode("utf-8", errors="replace") if isinstance(raw_body, str) else (
-                bytes(raw_body) if isinstance(raw_body, (bytes, bytearray)) else b""
+            body = (
+                (raw_body or "").encode("utf-8", errors="replace")
+                if isinstance(raw_body, str)
+                else (bytes(raw_body) if isinstance(raw_body, (bytes, bytearray)) else b"")
             )
-            html = raw_html if isinstance(raw_html, bytes) else (
-                raw_html.encode("utf-8", errors="replace") if isinstance(raw_html, str) else b""
+            html = (
+                raw_html
+                if isinstance(raw_html, bytes)
+                else (raw_html.encode("utf-8", errors="replace") if isinstance(raw_html, str) else b"")
             )
             if body.strip():
                 yield "body.txt", body

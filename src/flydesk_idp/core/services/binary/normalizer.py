@@ -181,8 +181,12 @@ class BinaryNormalizer:
 
         # --- Image conversions ---
         if media_type in {
-            "image/heic", "image/heif", "image/avif",
-            "image/tiff", "image/bmp", "image/svg+xml",
+            "image/heic",
+            "image/heif",
+            "image/avif",
+            "image/tiff",
+            "image/bmp",
+            "image/svg+xml",
         }:
             converted = self._image.convert(data, media_type=media_type, filename=filename)
             new_name = _swap_extension(filename, converted.media_type)
@@ -254,9 +258,7 @@ class BinaryNormalizer:
         # --- Plain-text-ish: wrap in <pre> + go through OfficeConverter ---
         if media_type in _TEXT_WRAPPED:
             wrapped = _wrap_text_as_html(data, media_type)
-            pdf_bytes = await self._office.convert(
-                wrapped, media_type="text/html", filename=filename
-            )
+            pdf_bytes = await self._office.convert(wrapped, media_type="text/html", filename=filename)
             return [
                 NormalisedBinary(
                     bytes=pdf_bytes,
@@ -275,8 +277,7 @@ class BinaryNormalizer:
     def _enforce_total(self, rows: list[NormalisedBinary], filename: str) -> None:
         if len(rows) > self._settings.binary_max_expanded_files:
             raise ArchiveExtractionError(
-                f"expansion of {filename!r} exceeds max "
-                f"{self._settings.binary_max_expanded_files} files",
+                f"expansion of {filename!r} exceeds max {self._settings.binary_max_expanded_files} files",
                 filename=filename,
             )
 
@@ -334,9 +335,5 @@ def _wrap_text_as_html(data: bytes, media_type: str) -> bytes:
         body = f"<pre>{body}</pre>"
     else:
         body = f"<pre>{body}</pre>"
-    html = (
-        "<!DOCTYPE html>\n"
-        "<html><head><meta charset=\"utf-8\"></head>"
-        f"<body>{body}</body></html>"
-    )
+    html = f'<!DOCTYPE html>\n<html><head><meta charset="utf-8"></head><body>{body}</body></html>'
     return html.encode("utf-8")

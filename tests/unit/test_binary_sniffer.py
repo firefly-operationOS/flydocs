@@ -86,13 +86,7 @@ def test_sniffs_html_by_content() -> None:
 
 
 def test_sniffs_eml_by_headers() -> None:
-    eml = (
-        b"Return-Path: <a@b.com>\n"
-        b"From: a@b.com\n"
-        b"To: c@d.com\n"
-        b"Subject: hi\n\n"
-        b"body"
-    )
+    eml = b"Return-Path: <a@b.com>\nFrom: a@b.com\nTo: c@d.com\nSubject: hi\n\nbody"
     assert sniff_media_type(eml) == "message/rfc822"
 
 

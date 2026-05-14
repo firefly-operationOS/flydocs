@@ -116,8 +116,7 @@ class IDPSettings(BaseSettings):
     gotenberg_url: str = Field(
         default="http://gotenberg:3000",
         description=(
-            "Base URL of the Gotenberg sidecar. Used only when "
-            "``office_converter == 'gotenberg'``."
+            "Base URL of the Gotenberg sidecar. Used only when ``office_converter == 'gotenberg'``."
         ),
     )
     gotenberg_timeout_s: int = Field(
@@ -128,17 +127,13 @@ class IDPSettings(BaseSettings):
     binary_libreoffice_path: str = Field(
         default="soffice",
         description=(
-            "Path to the headless LibreOffice binary. Used only when "
-            "``office_converter == 'libreoffice'``."
+            "Path to the headless LibreOffice binary. Used only when ``office_converter == 'libreoffice'``."
         ),
     )
     binary_libreoffice_timeout_s: int = Field(
         default=60,
         ge=1,
-        description=(
-            "Per-call subprocess timeout when ``office_converter == "
-            "'libreoffice'``."
-        ),
+        description=("Per-call subprocess timeout when ``office_converter == 'libreoffice'``."),
     )
 
     # -- Security -------------------------------------------------------

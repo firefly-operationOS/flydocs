@@ -95,7 +95,5 @@ def test_zip_corrupt_raises() -> None:
 def test_zip_fan_out_limit_enforced() -> None:
     members = {f"f{i}.txt": b"x" for i in range(10)}
     with pytest.raises(ArchiveExtractionError) as ei:
-        ArchiveUnpacker(_settings(max_files=3)).unpack(
-            _zip(members), media_type="application/zip"
-        )
+        ArchiveUnpacker(_settings(max_files=3)).unpack(_zip(members), media_type="application/zip")
     assert "max" in str(ei.value)

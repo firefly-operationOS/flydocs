@@ -122,9 +122,7 @@ class ImageNormalizer:
                 filename=filename,
             ) from exc
         except Exception as exc:  # noqa: BLE001
-            raise ImageConversionError(
-                f"image conversion failed: {exc}", filename=filename
-            ) from exc
+            raise ImageConversionError(f"image conversion failed: {exc}", filename=filename) from exc
         log_outbound(
             library,
             op="image.png",
@@ -154,13 +152,9 @@ class ImageNormalizer:
                 except EOFError:
                     pass
         except UnidentifiedImageError as exc:
-            raise ImageConversionError(
-                f"TIFF bytes are not parseable: {exc}", filename=filename
-            ) from exc
+            raise ImageConversionError(f"TIFF bytes are not parseable: {exc}", filename=filename) from exc
         except Exception as exc:  # noqa: BLE001
-            raise ImageConversionError(
-                f"TIFF conversion failed: {exc}", filename=filename
-            ) from exc
+            raise ImageConversionError(f"TIFF conversion failed: {exc}", filename=filename) from exc
 
         if not frames:
             raise ImageConversionError("TIFF contains no frames", filename=filename)
@@ -176,9 +170,7 @@ class ImageNormalizer:
                 frames=1,
                 out_bytes=buf.tell(),
             )
-            return NormalisedImage(
-                bytes=buf.getvalue(), media_type="image/png", page_count=1
-            )
+            return NormalisedImage(bytes=buf.getvalue(), media_type="image/png", page_count=1)
 
         buf = io.BytesIO()
         frames[0].save(
@@ -206,21 +198,15 @@ class ImageNormalizer:
         try:
             import cairosvg  # pyright: ignore[reportMissingImports]
         except ImportError as exc:  # pragma: no cover -- runtime dep guard
-            raise ImageConversionError(
-                "cairosvg is required for SVG input", filename=filename
-            ) from exc
+            raise ImageConversionError("cairosvg is required for SVG input", filename=filename) from exc
 
         started = time.monotonic()
         try:
             raw = cairosvg.svg2png(bytestring=data, output_width=2048)
         except Exception as exc:  # noqa: BLE001
-            raise ImageConversionError(
-                f"SVG rasterisation failed: {exc}", filename=filename
-            ) from exc
+            raise ImageConversionError(f"SVG rasterisation failed: {exc}", filename=filename) from exc
         if not raw:
-            raise ImageConversionError(
-                "SVG rasterisation produced no output", filename=filename
-            )
+            raise ImageConversionError("SVG rasterisation produced no output", filename=filename)
         png_bytes: bytes = raw if isinstance(raw, bytes) else bytes(raw)
         log_outbound(
             "cairosvg",
@@ -230,6 +216,4 @@ class ImageNormalizer:
             in_bytes=len(data),
             out_bytes=len(png_bytes),
         )
-        return NormalisedImage(
-            bytes=png_bytes, media_type="image/png", page_count=1
-        )
+        return NormalisedImage(bytes=png_bytes, media_type="image/png", page_count=1)
