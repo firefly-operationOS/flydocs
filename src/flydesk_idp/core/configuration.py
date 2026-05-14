@@ -12,8 +12,12 @@ that is not picked up by a stereotype decorator
 (``@service``/``@rest_controller``/``@command_handler``/``@query_handler``):
 
 * Configuration: :class:`IDPSettings`
-* Infrastructure: :class:`ExtractionJobRepository`, :class:`JobQueue`,
-  :class:`WebhookPublisher`
+* Infrastructure: :class:`ExtractionJobRepository`, :class:`WebhookPublisher`.
+  The :class:`pyfly.eda.EventPublisher` is provided upstream by
+  :class:`pyfly.eda.auto_configuration.EdaAutoConfiguration` (Postgres
+  outbox by default; see ``pyfly.yaml``).
+* Health: SQLAlchemy + EDA indicators wired into pyfly's
+  :class:`~pyfly.actuator.health.HealthAggregator`
 * Prompt management: :class:`PromptCatalog`
 * LLM stages: extractor, splitter, field validator, visual / content
   authenticity, judge, rule engine
@@ -24,6 +28,8 @@ that is not picked up by a stereotype decorator
 from __future__ import annotations
 
 from pyfly.container import bean, configuration
+from pyfly.data.relational.health import SqlAlchemyHealthIndicator
+from pyfly.eda import EventPublisher
 
 from flydesk_idp.config import IDPSettings, get_settings
 from flydesk_idp.core.services.authenticity import (
@@ -37,7 +43,6 @@ from flydesk_idp.core.services.extraction.extractor import MultimodalExtractor
 from flydesk_idp.core.services.extraction.prompts import PromptCatalog
 from flydesk_idp.core.services.judge import Judge
 from flydesk_idp.core.services.pipeline import PipelineOrchestrator
-from flydesk_idp.core.services.queue import JobQueue, create_job_queue
 from flydesk_idp.core.services.rules import RuleEngine
 from flydesk_idp.core.services.splitting import DocumentSplitter
 from flydesk_idp.core.services.validation import FieldValidator, RequestValidator
@@ -63,20 +68,28 @@ class IDPCoreConfiguration:
         return ExtractionJobRepository.from_url(settings.database_url)
 
     @bean
-    def queue(self, settings: IDPSettings) -> JobQueue:
-        return create_job_queue(
-            settings.eda_adapter,
-            redis_url=settings.redis_url,
-            stream_key=settings.jobs_topic.replace(".", ":"),
-        )
-
-    @bean
     def webhook(self, settings: IDPSettings) -> WebhookPublisher:
         return WebhookPublisher(
             timeout_s=settings.webhook_timeout_s,
             max_attempts=settings.webhook_max_attempts,
             hmac_secret=settings.webhook_hmac_secret,
         )
+
+    # ------------------------------------------------------------------
+    # Health indicators -- wired into pyfly's actuator so /actuator/health
+    # actually reflects what the service can talk to.
+    #
+    # The EventPublisher indicator is registered upstream by pyfly's
+    # ``EdaHealthAutoConfiguration``; this configuration only adds the
+    # database probe so it can use the repository's engine without
+    # pulling SQLAlchemy plumbing into the actuator module.
+    # ------------------------------------------------------------------
+
+    @bean(name="database_health")
+    def database_health(
+        self, repository: ExtractionJobRepository
+    ) -> SqlAlchemyHealthIndicator:
+        return SqlAlchemyHealthIndicator(repository.engine)
 
     # ------------------------------------------------------------------
     # Prompt management -- one catalog, every LLM stage takes a template
@@ -193,19 +206,24 @@ class IDPCoreConfiguration:
             default_model=settings.model,
         )
 
-    @bean
-    def job_worker(
+    # ``JobWorker`` is NOT a bean. It depends on the
+    # :class:`EventPublisher` produced by pyfly's auto-configuration,
+    # which is registered AFTER user @configuration classes are
+    # processed. The CLI's ``flydesk-idp worker`` command builds the
+    # worker manually post-startup so the ordering is correct.
+
+    def _build_job_worker(  # noqa: PLR0913 - explicit injection for the CLI helper
         self,
         orchestrator: PipelineOrchestrator,
         repository: ExtractionJobRepository,
-        queue: JobQueue,
+        event_publisher: EventPublisher,
         webhook: WebhookPublisher,
         settings: IDPSettings,
     ) -> JobWorker:
         return JobWorker(
             orchestrator=orchestrator,
             repository=repository,
-            queue=queue,
+            event_publisher=event_publisher,
             webhook=webhook,
             settings=settings,
         )

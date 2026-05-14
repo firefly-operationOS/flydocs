@@ -23,10 +23,12 @@ RUN_MIGRATIONS=true
 # ----------------------------------------------------------------------------
 # Queue / async jobs
 # ----------------------------------------------------------------------------
-# Choose ``memory`` (default), ``redis``, ``kafka``, or ``rabbitmq``. The
-# in-memory adapter is fine for single-process dev; for production async
-# throughput, pick redis or kafka.
-FLYDESK_IDP_EDA_ADAPTER=redis
+# Choose ``memory`` (single-process dev), ``postgres`` (default — durable
+# outbox + LISTEN/NOTIFY, no extra broker needed since the service already
+# runs Postgres), ``redis`` (Redis Streams), or ``kafka`` (production
+# fan-out). All adapters live in ``pyfly.eda.adapters``; the picker is
+# pyfly's :class:`EdaAutoConfiguration` driven from ``pyfly.yaml``.
+FLYDESK_IDP_EDA_ADAPTER=postgres
 FLYDESK_IDP_REDIS_URL=redis://localhost:6379/0
 
 # Topic / stream name for job-submitted events.

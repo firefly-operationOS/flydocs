@@ -23,8 +23,19 @@ from flydesk_idp.models.entities.extraction_job import ExtractionJob
 class ExtractionJobRepository:
     """Async repository for ``extraction_jobs``."""
 
-    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
+    def __init__(
+        self,
+        session_factory: async_sessionmaker[AsyncSession],
+        *,
+        engine: Any = None,
+    ) -> None:
         self._session_factory = session_factory
+        self._engine = engine
+
+    @property
+    def engine(self) -> Any:
+        """Underlying ``AsyncEngine``. Used by the actuator health probe."""
+        return self._engine
 
     # -- factories -----------------------------------------------------
 
@@ -32,7 +43,7 @@ class ExtractionJobRepository:
     def from_url(cls, database_url: str, *, echo: bool = False) -> ExtractionJobRepository:
         engine = create_async_engine(database_url, echo=echo, future=True, pool_pre_ping=True)
         factory = async_sessionmaker(engine, expire_on_commit=False)
-        return cls(factory)
+        return cls(factory, engine=engine)
 
     @asynccontextmanager
     async def session(self):
