@@ -1,0 +1,70 @@
+# Copyright 2026 Firefly Software Solutions Inc
+#
+# Overlay used by integration tests. Adds:
+#
+#   - mock-llm        -- OpenAI-compatible canned responder for deterministic tests
+#   - webhook-sink    -- catches outbound webhook deliveries for assertion
+#
+# Both API and worker are pointed at the mock LLM via OPENAI_BASE_URL +
+# the test's chosen FLYDESK_IDP_MODEL.
+
+services:
+  mock-llm:
+    build:
+      context: tests/fixtures/mock_llm
+      dockerfile: Dockerfile
+    container_name: flydesk-idp-mock-llm
+    ports:
+      - "${MOCK_LLM_PORT:-8500}:8500"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8500/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  webhook-sink:
+    image: python:3.13-slim
+    container_name: flydesk-idp-webhook-sink
+    working_dir: /app
+    command: ["python", "-u", "/app/webhook_sink.py"]
+    volumes:
+      - ./tests/fixtures/webhook_sink:/app:ro
+      - webhook_sink_data:/data
+    ports:
+      - "${WEBHOOK_SINK_PORT:-8600}:8600"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8600/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    environment:
+      FLYDESK_IDP_MODEL: "openai:flydesk-mock"
+      FLYDESK_IDP_FALLBACK_MODEL: ""
+      OPENAI_API_KEY: "mock-key"
+      OPENAI_BASE_URL: "http://mock-llm:8500/v1"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mock-llm:
+        condition: service_healthy
+
+  worker:
+    environment:
+      FLYDESK_IDP_MODEL: "openai:flydesk-mock"
+      FLYDESK_IDP_FALLBACK_MODEL: ""
+      OPENAI_API_KEY: "mock-key"
+      OPENAI_BASE_URL: "http://mock-llm:8500/v1"
+    depends_on:
+      api:
+        condition: service_healthy
+      mock-llm:
+        condition: service_healthy
+      webhook-sink:
+        condition: service_healthy
+
+volumes:
+  webhook_sink_data:

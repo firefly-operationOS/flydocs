@@ -1,0 +1,104 @@
+[project]
+name = "flydesk-idp"
+version = "0.1.0"
+description = "Firefly Desk -- Intelligent Document Processing service. Pure multimodal extraction with bounding boxes, sync + async (queue-backed) APIs, built on pyfly + fireflyframework-agentic."
+readme = "README.md"
+requires-python = ">=3.13"
+license = { text = "Apache-2.0" }
+authors = [
+    { name = "Firefly Software Solutions Inc" },
+]
+
+dependencies = [
+    # Firefly Framework runtime (DI, CQRS, EDA, web, observability, resilience,
+    # actuator, data-relational, security). Pulled in with the extras we use
+    # so a fresh ``uv sync`` is enough to boot the full stack.
+    "pyfly[fastapi,observability,security,data-relational,postgresql,eda,redis,client,scheduling,cli]>=26.5.4",
+
+    # GenAI metaframework -- FireflyAgent with multimodal content (BinaryContent/ImageUrl)
+    # over pydantic-ai. Pulls in the OpenAI / Anthropic / Bedrock providers via pydantic-ai-slim.
+    "fireflyframework-agentic[rest,security,redis]>=26.5.11",
+
+    # Document handling -- pypdf only for cheap page counting; the document
+    # bytes themselves are shipped straight to the multimodal LLM (no local
+    # rasterisation, no Pillow), so we stay format-agnostic (PDF, PNG, JPEG,
+    # WebP, TIFF, DOCX, ...).
+    "pypdf>=4.3.0",
+
+    # Pydantic AI models for multimodal/vision LLMs.
+    "pydantic-ai-slim[anthropic,openai,bedrock]>=1.56.0",
+
+    # HTTP/Webhook + outbound clients.
+    "httpx>=0.28.0",
+    "tenacity>=9.0.0",
+
+    # Configuration.
+    "pydantic>=2.10.0",
+    "pydantic-settings>=2.7.0",
+
+    # Persistence stack. asyncpg drives the runtime (async engine); psycopg
+    # is the sync sibling used by Alembic for migrations (env.py rewrites
+    # ``+asyncpg`` → ``+psycopg`` so a single DATABASE_URL covers both).
+    "sqlalchemy[asyncio]>=2.0",
+    "asyncpg>=0.30",
+    "psycopg[binary]>=3.2",
+    "aiosqlite>=0.22",
+    "alembic>=1.14",
+    "redis>=5.2",
+
+    # Structured logging + tracing.
+    "structlog>=25.5.0",
+]
+
+[project.scripts]
+flydesk-idp = "flydesk_idp.cli:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "pytest-cov>=5.0",
+    "pytest-timeout>=2.3",
+    "ruff>=0.8",
+    "pyright>=1.1",
+    "testcontainers[postgres,redis]>=4.0",
+    "respx>=0.21",
+    "httpx>=0.28",
+    "reportlab>=4.2",  # synthesise sample PDFs in fixtures
+]
+
+[build-system]
+requires = ["hatchling>=1.18"]
+build-backend = "hatchling.build"
+
+[tool.uv.sources]
+# Sibling-repo path sources -- mirror what flydesk-agent does so both
+# services boot from a fresh local checkout without needing the registry.
+pyfly = { path = "../../fireflyframework/fireflyframework-pyfly", editable = true }
+fireflyframework-agentic = { path = "../../fireflyframework/fireflyframework-agentic", editable = true }
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/flydesk_idp"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["src"]
+markers = [
+    "integration: requires docker compose stack (real Postgres / Redis / mock LLM)",
+    "llm: requires a real LLM provider (OPENAI_API_KEY/ANTHROPIC_API_KEY/...). Skipped by default.",
+]
+addopts = "-v --tb=short -m 'not llm'"
+
+[tool.ruff]
+target-version = "py313"
+line-length = 110
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "SIM"]
+
+[tool.pyright]
+pythonVersion = "3.13"
+typeCheckingMode = "basic"
+include = ["src/flydesk_idp"]
+exclude = ["tests/**", "**/__pycache__/**"]

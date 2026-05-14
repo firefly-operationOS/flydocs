@@ -1,0 +1,82 @@
+# Copyright 2026 Firefly Software Solutions Inc
+#
+# Copy to .env (this file is the canonical reference; .env is gitignored).
+# All keys are prefixed with FLYDESK_IDP_ so they are easy to grep for and
+# easy to scope per service.
+
+# ----------------------------------------------------------------------------
+# Service
+# ----------------------------------------------------------------------------
+FLYDESK_IDP_LOG_LEVEL=INFO
+FLYDESK_IDP_PORT=8400
+
+# ----------------------------------------------------------------------------
+# Persistence
+# ----------------------------------------------------------------------------
+# Async-SQLAlchemy URL. asyncpg for Postgres, aiosqlite for SQLite (tests).
+FLYDESK_IDP_DATABASE_URL=postgresql+asyncpg://idp:idp@localhost:5432/flydesk_idp
+
+# Run alembic upgrade head on startup (set to "false" in production deploys
+# that prefer migrating as a separate step).
+RUN_MIGRATIONS=true
+
+# ----------------------------------------------------------------------------
+# Queue / async jobs
+# ----------------------------------------------------------------------------
+# Choose ``memory`` (default), ``redis``, ``kafka``, or ``rabbitmq``. The
+# in-memory adapter is fine for single-process dev; for production async
+# throughput, pick redis or kafka.
+FLYDESK_IDP_EDA_ADAPTER=redis
+FLYDESK_IDP_REDIS_URL=redis://localhost:6379/0
+
+# Topic / stream name for job-submitted events.
+FLYDESK_IDP_JOBS_TOPIC=flydesk.idp.jobs
+
+# ----------------------------------------------------------------------------
+# Multimodal extraction
+# ----------------------------------------------------------------------------
+# Provider routing for FireflyAgent. Override at deploy time; supports any
+# pydantic-ai provider (``openai:gpt-4o``, ``anthropic:claude-sonnet-4-6``,
+# ``bedrock:eu.anthropic.claude-sonnet-4-6-v1``, ``openai:gpt-4o@http://mock-llm:8500``).
+FLYDESK_IDP_MODEL=anthropic:claude-sonnet-4-6
+FLYDESK_IDP_FALLBACK_MODEL=openai:gpt-4o
+
+# Maximum pages per single extraction request. Documents above this go through
+# the async API only. The document bytes are sent directly to the multimodal
+# LLM -- no local rasterisation, so format is whatever the provider accepts
+# (Anthropic supports PDF natively; OpenAI accepts images).
+FLYDESK_IDP_MAX_SYNC_PAGES=10
+# Cap on total bytes accepted (after base64-decode) in a single submission.
+FLYDESK_IDP_MAX_BYTES=33554432
+
+# Per-call timeouts (seconds). Sync requests get the shorter one; async jobs
+# retry up to ``JOB_MAX_ATTEMPTS`` times on timeout.
+FLYDESK_IDP_SYNC_TIMEOUT_S=60
+FLYDESK_IDP_ASYNC_TIMEOUT_S=300
+FLYDESK_IDP_JOB_MAX_ATTEMPTS=3
+
+# Provider credentials are picked up from the standard env vars (OPENAI_API_KEY,
+# ANTHROPIC_API_KEY, AWS_*). Set only the ones you need.
+# OPENAI_API_KEY=
+# ANTHROPIC_API_KEY=
+# AWS_REGION=eu-west-1
+
+# When using a self-hosted / mock OpenAI-compatible endpoint (for tests):
+# OPENAI_BASE_URL=http://mock-llm:8500/v1
+
+# ----------------------------------------------------------------------------
+# Webhook delivery
+# ----------------------------------------------------------------------------
+# Outbound webhook delivery from the job worker uses these defaults.
+FLYDESK_IDP_WEBHOOK_TIMEOUT_S=15
+FLYDESK_IDP_WEBHOOK_MAX_ATTEMPTS=5
+
+# Optional shared-secret HMAC signing of webhooks (X-Flydesk-Signature header).
+# Leave blank to disable.
+FLYDESK_IDP_WEBHOOK_HMAC_SECRET=
+
+# ----------------------------------------------------------------------------
+# Security (optional -- only used if you front the service with an auth gate)
+# ----------------------------------------------------------------------------
+# Static API keys that grant access. Comma-separated.
+FLYDESK_IDP_API_KEYS=

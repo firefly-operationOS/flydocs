@@ -1,0 +1,73 @@
+# Copyright 2026 Firefly Software Solutions Inc
+#
+# PyFly application configuration. Values override the property-driven defaults
+# activated by ``enable_core_stack``. Anything in the environment (FLYDESK_IDP_*)
+# wins over this file because pydantic-settings is loaded after pyfly merges its
+# config sources.
+
+pyfly:
+  # Web tier -- FastAPI adapter, default ASGI server, /api as base.
+  web:
+    enabled: true
+    base-path: /api
+  server:
+    enabled: true
+    host: 0.0.0.0
+    port: 8400
+
+  # Observability -- Prometheus metrics + OpenTelemetry tracing.
+  observability:
+    enabled: true
+  metrics:
+    enabled: true
+  tracing:
+    enabled: true
+    service-name: flydesk-idp
+
+  # Actuator -- /actuator/health, /actuator/info, /actuator/metrics
+  actuator:
+    enabled: true
+    metrics:
+      enabled: true
+
+  # Admin dashboard -- embedded management UI at /admin/. Wires up the
+  # standard pyfly providers (beans, health, env, config, loggers, metrics,
+  # scheduled tasks, mappings, caches, cqrs, transactions, traces, runtime,
+  # server, overview). Read-only by default; toggle ``require-auth: true``
+  # before exposing it to the public internet.
+  admin:
+    enabled: true
+    path: /admin
+    title: "flydesk-idp -- PyFly Admin"
+    theme: auto
+    require-auth: false
+    refresh-interval: 5000
+
+  # AOP -- required for @authorize / @cacheable / @retry decorators.
+  aop:
+    enabled: true
+
+  # Resilience -- circuit breaker + retry for outbound LLM and webhook calls.
+  resilience:
+    enabled: true
+
+  # CQRS -- CommandBus + QueryBus + handler scan.
+  cqrs:
+    enabled: true
+
+  # Cache -- Redis-backed (falls back to in-memory if Redis URL is unset).
+  cache:
+    enabled: true
+
+  # EDA -- job queue. Defaults to in-memory; production sets
+  # ``pyfly.eda.adapter: redis`` (or kafka / rabbitmq).
+  eda:
+    enabled: true
+    adapter: ${FLYDESK_IDP_EDA_ADAPTER:memory}
+
+  # Persistence -- async SQLAlchemy with Alembic migrations on startup if
+  # ``RUN_MIGRATIONS=true``.
+  data:
+    relational:
+      enabled: true
+      url: ${FLYDESK_IDP_DATABASE_URL:postgresql+asyncpg://idp:idp@localhost:5432/flydesk_idp}
