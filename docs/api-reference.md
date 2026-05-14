@@ -11,6 +11,7 @@ machine-readable OpenAPI 3.1 spec from the same DTOs.
 | Method   | Path                            | Purpose                                                    |
 | -------- | ------------------------------- | ---------------------------------------------------------- |
 | `POST`   | `/api/v1/extract`               | Synchronous extraction. Blocks until pipeline finishes.    |
+| `POST`   | `/api/v1/extract:validate`      | Dry-run the semantic validator (no LLM call, no DB write). |
 | `POST`   | `/api/v1/jobs`                  | Submit a queued extraction. Returns `202` + job id.         |
 | `GET`    | `/api/v1/jobs/{id}`             | Current status of a job.                                    |
 | `GET`    | `/api/v1/jobs/{id}/result`      | Final `ExtractionResult` (when `SUCCEEDED`).               |

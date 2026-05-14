@@ -184,6 +184,7 @@ src/flydesk_idp/
 | Endpoint                                  | Purpose                                                |
 | ----------------------------------------- | ------------------------------------------------------ |
 | `POST   /api/v1/extract`                  | Synchronous extraction. Blocks until done.             |
+| `POST   /api/v1/extract:validate`         | Dry-run the semantic validator on a payload (no LLM).  |
 | `POST   /api/v1/jobs`                     | Submit an async extraction. Returns `202` + job id.    |
 | `GET    /api/v1/jobs/{id}`                | Status of an async job.                                |
 | `GET    /api/v1/jobs/{id}/result`         | Final `ExtractionResult` (when `SUCCEEDED`).           |

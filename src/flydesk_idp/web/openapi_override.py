@@ -34,9 +34,11 @@ logger = logging.getLogger(__name__)
 #: Per-tag descriptions shown on the Swagger landing page.
 TAG_DESCRIPTIONS: dict[str, str] = {
     "Extract": (
-        "Synchronous extraction. One HTTP call runs the full multimodal "
-        "pipeline (extract + validate + judge + business rules) and "
-        "returns the assembled ExtractionResult."
+        "Synchronous extraction + payload validator. One HTTP call runs "
+        "the full multimodal pipeline (extract + validate + judge + "
+        "business rules) and returns the assembled ExtractionResult; "
+        "the sibling ``:validate`` endpoint dry-runs the semantic "
+        "validator without any LLM call."
     ),
     "Jobs": (
         "Asynchronous, queue-backed extraction. Submit a job, poll its "

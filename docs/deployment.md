@@ -62,6 +62,17 @@ FLYDESK_IDP_SYNC_TIMEOUT_S=60
 FLYDESK_IDP_ASYNC_TIMEOUT_S=300
 FLYDESK_IDP_JOB_MAX_ATTEMPTS=3
 
+# Retry backoff bounds. The worker schedules each retry at
+# min(retry_max_delay_s, retry_base_delay_s * 2^(attempt-1)) plus 20% jitter.
+FLYDESK_IDP_RETRY_BASE_DELAY_S=5
+FLYDESK_IDP_RETRY_MAX_DELAY_S=300
+
+# Judge-driven escalation. When the judge fails more than this fraction
+# of fields, the orchestrator re-runs extract + judge with the escalation
+# model and keeps the better result. 0.0 disables (default).
+FLYDESK_IDP_ESCALATION_THRESHOLD=0.0
+FLYDESK_IDP_ESCALATION_MODEL=anthropic:claude-opus-4-7
+
 # Document size / page caps.
 FLYDESK_IDP_MAX_BYTES=33554432       # 32 MiB
 FLYDESK_IDP_MAX_SYNC_PAGES=10
@@ -161,6 +172,19 @@ A typical investigation flow:
 3. Grep the JSON logs for that `request_id`. Every pipeline node
    stamps its `node_start` / `node_done` / `node_failed` line.
 4. Cross-reference with the trace span tree to find the slowest stage.
+
+Every call the service makes to an external system (LLM provider,
+webhook receiver, queue broker, worker job lifecycle) emits a single
+`outbound_call` line. Grep for `outbound_call target=<system>` to
+trace external spend or correlate a slow request to its slowest
+external call:
+
+```text
+outbound_call target=anthropic op=extract        status=ok  latency_ms=12879 model=anthropic:claude-opus-4-7
+outbound_call target=anthropic op=judge          status=ok  latency_ms=15162 model=anthropic:claude-opus-4-7
+outbound_call target=webhook   op=deliver        status=ok  latency_ms=12    url=... attempt=1 http_status=200 correlation_id=...
+outbound_call target=worker    op=job.run        status=ok  latency_ms=42557 job_id=... attempt=1
+```
 
 ---
 

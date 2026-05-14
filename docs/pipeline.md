@@ -38,12 +38,14 @@ exactly what executed.
 |     5 | `visual_authenticity` | no       | LLM evaluates caller-defined visual validators (signature present, stamp present, …).              | 180 s           |
 |     6 | `content_authenticity` | no      | LLM audit: dates consistent, totals add up, expected boilerplate, tampering signals.               | 180 s           |
 |     7 | `judge`             | no         | Second LLM pass re-grades every extracted value against the source.                                 | 180 s           |
-|     8 | `rules`             | no         | LLM evaluates the business-rule DAG, level by level.                                                | 180 s           |
-|     9 | `assemble`          | yes        | Pure Python: compose the `ExtractionResult`.                                                       | 5 s             |
+|     8 | `judge_escalation`  | no         | When the judge's failure rate exceeds `escalation_threshold`, re-run extract + judge with `escalation_model` and keep the better result. | 300 s |
+|     9 | `rules`             | no         | LLM evaluates the business-rule DAG, level by level.                                                | 180 s           |
+|    10 | `assemble`          | yes        | Pure Python: compose the `ExtractionResult`.                                                       | 5 s             |
 
-Stages 2–8 are caller-toggled through `ExtractionOptions.stages`. The
+Stages 2–9 are caller-toggled through `ExtractionOptions.stages`. The
 splitter is additionally short-circuited when there's only one
 document type (no need to split) or the source is a single page.
+`judge_escalation` is silently skipped when `judge` is off.
 
 ---
 
@@ -196,7 +198,32 @@ The judge is **strict**: a value that's plausible but unsupported by
 the document gets `status=FAIL`. This is the cheapest defence against
 LLM hallucinations.
 
-### 4h. `rules`
+### 4h. `judge_escalation`
+
+`core/services/escalation/judge_escalator.py`. Implements the
+"cheap-by-default + escalate-on-uncertainty" policy: when the judge
+flags too many fields as `FAIL` or `flag_for_review`, the orchestrator
+re-runs the extractor and the judge with a stronger model and keeps
+whichever result has the lower failure rate.
+
+- The trigger threshold is `options.escalation_threshold` (per-request)
+  or `FLYDESK_IDP_ESCALATION_THRESHOLD` (default `0.0` = disabled).
+- The escalation model is `options.escalation_model` or
+  `FLYDESK_IDP_ESCALATION_MODEL`. Same model as the primary disables
+  the stage (no point re-running with the same engine).
+- The new run is per-doc fan-out via `asyncio.gather` — same shape as
+  `extract`, so latency stays bounded.
+- The accepted/rejected outcome lands on `result.escalation`, an audit
+  block with `primary_model`, `escalation_model`, `primary_fail_rate`,
+  `escalation_fail_rate`, and `accepted` (true if the new fields
+  replaced the originals).
+
+Pattern in production: primary `claude-haiku` / `gpt-4o-mini`,
+escalation `claude-opus` / `gpt-4o`. The cheap model handles ~80% of
+traffic; the expensive one only kicks in on documents where the cheap
+model misled the judge.
+
+### 4i. `rules`
 
 `core/services/rules/rule_engine.py`. The business-rule DAG.
 
@@ -211,7 +238,7 @@ LLM hallucinations.
 
 See [rule-engine.md](rule-engine.md) for the full mechanics.
 
-### 4i. `assemble`
+### 4j. `assemble`
 
 Pure Python. A no-op node; the actual result composition happens in
 `PipelineOrchestrator._build_result` after the engine completes. The
@@ -261,7 +288,61 @@ results — the field extraction succeeded, only the judge bailed.
 
 ---
 
-## 7. Adding a new stage
+## 7. Outbound call logging
+
+Every call the service makes outside its own process emits a single
+structured `outbound_call` log line via
+`core/observability/outbound_log.py::log_outbound`. The format is
+log-line-oriented (key=value), so a single grep surfaces the entire
+external-call footprint:
+
+```text
+outbound_call target=anthropic op=extract status=ok latency_ms=12879 model=anthropic:claude-opus-4-7
+outbound_call target=anthropic op=visual_auth status=ok latency_ms=7433 model=anthropic:claude-opus-4-7
+outbound_call target=anthropic op=judge status=ok latency_ms=15162 model=anthropic:claude-opus-4-7
+outbound_call target=anthropic op=rules.level.1 status=ok latency_ms=10666 model=anthropic:claude-opus-4-7
+outbound_call target=webhook op=deliver status=ok latency_ms=12 url=https://... attempt=1 http_status=200 job_id=39e0... correlation_id=e2e-corr-001
+outbound_call target=worker op=job.run status=ok latency_ms=42557 job_id=39e0... attempt=1
+```
+
+Targets currently emitted:
+
+- `anthropic` / `openai` -- LLM provider, one line per stage call
+  (`op=extract`, `op=split`, `op=visual_auth`, `op=content_auth`,
+  `op=judge`, `op=rules.level.<n>`).
+- `webhook` -- one line per delivery attempt (`op=deliver`).
+- `worker` -- one line per job start and per terminal outcome
+  (`op=job.run`).
+- `queue` -- one line per delayed re-publish during a retry.
+
+Use these for spend tracing (sum `latency_ms` by model), SLO
+monitoring, and forensic analysis when a request behaves oddly.
+
+---
+
+## 8. Retry policy (async)
+
+Async jobs that fail get classified into one of two buckets in
+`core/services/workers/job_worker.py`:
+
+| Classification | Examples                                                                 | Worker action |
+| -------------- | ------------------------------------------------------------------------ | ------------- |
+| **permanent**  | `ValueError` from the validator, content-policy / moderation rejections, invalid API key, unsupported model | `mark_failed(code=PERMANENT_ERROR)` immediately. Webhook fires with the failure detail. |
+| **retryable**  | Timeouts, network errors, transient 5xx from the LLM provider, generic `RuntimeError` | Re-queue with exponential backoff: `min(retry_max_delay_s, retry_base_delay_s * 2^(attempt-1))` plus 20% jitter. |
+
+The `attempts` counter is persisted atomically by
+`ExtractionJobRepository.mark_running`. When `attempts ==
+FLYDESK_IDP_JOB_MAX_ATTEMPTS`, the job goes to `FAILED` even if the
+last error was retryable.
+
+A delayed re-publish runs as a background `asyncio.create_task` so the
+worker keeps draining the stream while the failed message waits its
+backoff window. The re-publish is itself logged as
+`outbound_call target=queue op=republish`.
+
+---
+
+## 9. Adding a new stage
 
 Six steps:
 
@@ -287,7 +368,7 @@ the right slice when a single source contains multiple target docs.
 
 ---
 
-## 8. Debugging recipes
+## 10. Debugging recipes
 
 | Symptom                                                          | Where to look                                                                                                                          |
 | ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |

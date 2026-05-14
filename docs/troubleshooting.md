@@ -137,6 +137,31 @@ The job has already started. Cancellation is only allowed while
 worker process; the orchestrator does not yet support mid-flight
 cancellation.
 
+### Job fails immediately with `PERMANENT_ERROR` instead of retrying
+
+The worker classifies the exception as permanent (content-policy,
+invalid API key, unsupported model, validator error from the request
+body). Permanent errors skip the retry budget on purpose -- retrying
+won't help. Inspect `error_message` for the provider's reason and fix
+the input. Override by widening `_PERMANENT_ERROR_HINTS` only if you
+have evidence the LLM provider's transient errors are landing in this
+bucket by accident.
+
+### Job retries too quickly / too slowly
+
+The backoff is `min(retry_max_delay_s, retry_base_delay_s * 2^(attempt-1))`
+plus 20% jitter. Tune via `FLYDESK_IDP_RETRY_BASE_DELAY_S` and
+`FLYDESK_IDP_RETRY_MAX_DELAY_S` (seconds). Backoff applies only to
+retryable errors -- permanent ones never re-queue.
+
+### Escalation re-runs every request
+
+`FLYDESK_IDP_ESCALATION_THRESHOLD` is set too low (or 0.0 means
+disabled, but anything > 0 starts evaluating it). Raise the threshold
+or unset both threshold and `options.escalation_threshold` to disable.
+Look for `judge_escalation triggered` log lines to see the failure
+rate the orchestrator measured.
+
 ---
 
 ## Validation

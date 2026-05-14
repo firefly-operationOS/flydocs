@@ -7,6 +7,8 @@ import asyncio
 import base64
 import logging
 
+from pydantic import BaseModel, Field
+
 from pyfly.container import rest_controller
 # Depend on the concrete bus class -- pyfly's container resolves by exact
 # type and the CQRS auto-config registers ``DefaultCommandBus``, not the
@@ -18,6 +20,22 @@ from flydesk_idp.config import IDPSettings
 from flydesk_idp.core.services.extract import ExtractCommand
 from flydesk_idp.core.services.validation import RequestValidator, ValidationReport
 from flydesk_idp.interfaces.dtos.extract import ExtractionRequest, ExtractionResult
+
+
+class ValidationResponse(BaseModel):
+    """Dry-run result of :class:`RequestValidator`.
+
+    Returned by ``POST /api/v1/extract:validate`` -- always status 200,
+    even when errors are present. The caller inspects ``ok`` to decide
+    whether to submit the payload to the real ``POST /api/v1/extract``
+    or ``POST /api/v1/jobs`` endpoints.
+    """
+
+    ok: bool = Field(description="True when the report has zero errors.")
+    error_count: int = 0
+    warning_count: int = 0
+    errors: list[dict[str, str]] = Field(default_factory=list)
+    warnings: list[dict[str, str]] = Field(default_factory=list)
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +70,29 @@ class ExtractController:
         self._commands = commands
         self._settings = settings
         self._validator = validator
+
+    @post_mapping("/extract:validate")
+    async def validate(self, request: Valid[Body[ExtractionRequest]]) -> ValidationResponse:
+        """Dry-run the semantic validator without executing the pipeline.
+
+        Use this to check a payload from a CI pipeline, a UI before
+        submit, or while iterating on rule definitions -- it costs
+        nothing (no LLM call, no document load) and returns the same
+        error / warning shape that ``POST /api/v1/extract`` would emit
+        in a 422.
+
+        Always returns ``200``; the caller inspects ``ok`` to decide
+        whether to proceed. Identical schema for both errors and
+        warnings: ``[{severity, code, message, path}]``.
+        """
+        report = self._validator.validate(request)
+        return ValidationResponse(
+            ok=not report.has_errors,
+            error_count=len(report.errors),
+            warning_count=len(report.warnings),
+            errors=[i.to_dict() for i in report.errors],
+            warnings=[i.to_dict() for i in report.warnings],
+        )
 
     @post_mapping("/extract")
     async def extract(self, request: Valid[Body[ExtractionRequest]]) -> ExtractionResult:
