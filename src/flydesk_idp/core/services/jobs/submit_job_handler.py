@@ -1,11 +1,11 @@
 # Copyright 2026 Firefly Software Solutions Inc
-"""``SubmitJobHandler`` -- persist the job + publish it to the queue.
+"""``SubmitJobHandler`` -- persist the job + publish it on the EDA bus.
 
-Before anything is written to Postgres or Redis, the handler runs the
-same :class:`RequestValidator` the sync controller uses. A semantic
-mismatch (rule pointing at a non-existent docType, cycles in the rule
-DAG, duplicate rule ids, ...) raises :class:`InvalidRequestError` so
-the REST layer can return a ``422 invalid_request`` problem-detail
+Before anything is written to Postgres or the EDA outbox, the handler
+runs the same :class:`RequestValidator` the sync controller uses. A
+semantic mismatch (rule pointing at a non-existent docType, cycles in
+the rule DAG, duplicate rule ids, ...) raises :class:`InvalidRequestError`
+so the REST layer can return a ``422 invalid_request`` problem-detail
 with every issue surfaced -- without persisting an unrunnable job.
 """
 
@@ -18,15 +18,16 @@ from datetime import datetime, timezone
 
 from pyfly.container import service
 from pyfly.cqrs import Command, CommandHandler, command_handler
+from pyfly.eda import EventPublisher
+from pyfly.observability.correlation import current_correlation_context
 
-from flydesk_idp.core.services.queue import JobQueue
+from flydesk_idp.config import IDPSettings
 from flydesk_idp.core.services.validation import RequestValidator, ValidationReport
 from flydesk_idp.interfaces.dtos.extract import ExtractionRequest
 from flydesk_idp.interfaces.dtos.job import SubmitJobRequest, SubmitJobResponse
 from flydesk_idp.interfaces.enums.job_status import JobStatus
 from flydesk_idp.models.entities.extraction_job import ExtractionJob
 from flydesk_idp.models.repositories import ExtractionJobRepository
-from flydesk_idp.web.correlation_filter import current_correlation_context
 
 logger = logging.getLogger(__name__)
 
@@ -55,13 +56,15 @@ class SubmitJobHandler(CommandHandler[SubmitJobCommand, SubmitJobResponse]):
     def __init__(
         self,
         repository: ExtractionJobRepository,
-        queue: JobQueue,
+        event_publisher: EventPublisher,
         validator: RequestValidator,
+        settings: IDPSettings,
     ) -> None:
         super().__init__()
         self._repository = repository
-        self._queue = queue
+        self._publisher = event_publisher
         self._validator = validator
+        self._settings = settings
 
     async def do_handle(self, command: SubmitJobCommand) -> SubmitJobResponse:
         if command.idempotency_key:
@@ -122,7 +125,12 @@ class SubmitJobHandler(CommandHandler[SubmitJobCommand, SubmitJobResponse]):
             metadata_json=metadata,
         )
         job = await self._repository.add(job)
-        await self._queue.publish(job.id)
+        await self._publisher.publish(
+            destination=self._settings.jobs_topic,
+            event_type=self._settings.jobs_event_type,
+            payload={"job_id": job.id},
+            headers=ctx,
+        )
 
         return SubmitJobResponse(
             job_id=job.id,

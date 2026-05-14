@@ -110,7 +110,7 @@ async def timed_agent_run(agent: Any, content: Any, *, op: str, model: str) -> A
     """
     from fireflyframework_agentic.agents.context import AgentContext
 
-    from flydesk_idp.core.observability.correlation import get_correlation_id
+    from pyfly.observability.correlation import get_correlation_id
 
     target = model.split(":", 1)[0] if ":" in model else "llm"
     correlation_id = get_correlation_id()

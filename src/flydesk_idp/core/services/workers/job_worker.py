@@ -1,11 +1,11 @@
 # Copyright 2026 Firefly Software Solutions Inc
-"""``JobWorker`` -- consumes the queue and dispatches into the pipeline.
+"""``JobWorker`` -- subscribes to the EDA bus and dispatches into the pipeline.
 
-The worker is built around dependencies injected by the pyfly DI
-container (orchestrator, queue, repository, webhook, settings). It is
-NOT a stereotyped bean because we want the CLI to start it explicitly:
-``flydesk-idp worker`` boots a minimal pyfly application and pulls the
-worker out of the context.
+The worker registers an :func:`event_listener` handler on the configured
+``jobs_event_type`` against the pyfly :class:`EventPublisher` bean (the
+underlying broker is picked by :class:`pyfly.eda.EdaAutoConfiguration` --
+Postgres outbox + LISTEN/NOTIFY by default, but it can be Redis Streams
+or Kafka by flipping ``FLYDESK_IDP_EDA_ADAPTER``).
 
 Retry policy
 ============
@@ -16,10 +16,11 @@ A failed attempt is classified into one of two buckets:
   (content policy, unsupported model). The job goes straight to
   ``FAILED`` so the caller can fix the input.
 * ``retryable`` -- a timeout, a 5xx from the LLM provider, a transient
-  network glitch. The worker schedules the next attempt at
-  ``min(retry_max_delay_s, retry_base_delay_s * 2^(attempt-1))`` plus
-  jitter and lets the queue redeliver. The ``attempts`` counter is
-  persisted in Postgres so the budget survives worker restarts.
+  network glitch. The worker re-publishes the same ``IDPJobSubmitted``
+  event on the same bus after a capped-exponential backoff with jitter,
+  so the next worker (or this one, after re-delivery) picks it up. The
+  ``attempts`` counter is persisted in Postgres so the budget survives
+  worker restarts.
 """
 
 from __future__ import annotations
@@ -32,10 +33,11 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
+from pyfly.eda import EventEnvelope, EventPublisher
+
 from flydesk_idp.config import IDPSettings
 from flydesk_idp.core.observability import log_outbound
 from flydesk_idp.core.services.pipeline import PipelineOrchestrator
-from flydesk_idp.core.services.queue import JobQueue, JobQueueMessage
 from flydesk_idp.core.services.webhook import WebhookPublisher
 from flydesk_idp.interfaces.dtos.doc import DocSpec
 from flydesk_idp.interfaces.dtos.extract import (
@@ -84,48 +86,57 @@ class JobWorker:
         *,
         orchestrator: PipelineOrchestrator,
         repository: ExtractionJobRepository,
-        queue: JobQueue,
+        event_publisher: EventPublisher,
         webhook: WebhookPublisher,
         settings: IDPSettings,
         consumer_id: str | None = None,
     ) -> None:
         self._orchestrator = orchestrator
         self._repository = repository
-        self._queue = queue
+        self._publisher = event_publisher
         self._webhook = webhook
         self._settings = settings
         self._consumer_id = consumer_id or f"worker-{socket.gethostname()}"
         self._stop = asyncio.Event()
 
     async def run_forever(self) -> None:
-        await self._queue.start()
+        # Subscribe BEFORE starting the bus -- the EDA adapters spin up
+        # consumer loops at ``start()`` time, and they only do so when at
+        # least one handler is registered.
+        self._publisher.subscribe(self._settings.jobs_event_type, self._on_event)
+        await self._publisher.start()
         logger.info(
-            "JobWorker %s started (adapter=%s)", self._consumer_id, self._settings.eda_adapter
+            "JobWorker %s started (adapter=%s, destination=%s, event_type=%s)",
+            self._consumer_id, self._settings.eda_adapter,
+            self._settings.jobs_topic, self._settings.jobs_event_type,
         )
         try:
-            async for message in self._queue.consume(self._consumer_id):
-                if self._stop.is_set():
-                    break
-                await self._process(message)
+            await self._stop.wait()
         finally:
-            await self._queue.stop()
+            await self._publisher.stop()
 
     def stop(self) -> None:
         self._stop.set()
 
     # ------------------------------------------------------------------
 
-    async def _process(self, message: JobQueueMessage) -> None:
-        job = await self._repository.get(message.job_id)
-        if job is None:
+    async def _on_event(self, envelope: EventEnvelope) -> None:
+        job_id = envelope.payload.get("job_id") if isinstance(envelope.payload, dict) else None
+        if not job_id:
             logger.warning(
-                "Queue delivered unknown job %s -- acking and skipping", message.job_id
+                "Received %s event without job_id: %r -- dropping",
+                envelope.event_type, envelope.payload,
             )
-            await self._queue.ack(message)
+            return
+        await self._process(str(job_id))
+
+    async def _process(self, job_id: str) -> None:
+        job = await self._repository.get(job_id)
+        if job is None:
+            logger.warning("EDA delivered unknown job %s -- dropping", job_id)
             return
         if JobStatus(job.status) in (JobStatus.SUCCEEDED, JobStatus.CANCELLED):
             logger.info("Job %s already in terminal status %s -- skipping", job.id, job.status)
-            await self._queue.ack(message)
             return
 
         # mark_running increments attempts atomically in Postgres.
@@ -185,16 +196,13 @@ class JobWorker:
             else:
                 delay = self._backoff_delay(attempts)
                 logger.warning(
-                    "Job %s failed attempt %d (%s); re-queueing in %.1fs",
+                    "Job %s failed attempt %d (%s); re-publishing in %.1fs",
                     job.id, attempts, exc, delay,
                 )
                 # Mark QUEUED again so the API surface reflects the retry,
-                # then schedule the re-publish without blocking the worker
-                # (the consumer keeps draining the stream meanwhile).
+                # then schedule the re-publish without blocking the handler.
                 await self._repository.update(job.id, status=JobStatus.QUEUED.value)
                 asyncio.create_task(self._delayed_publish(job.id, delay))
-        finally:
-            await self._queue.ack(message)
 
     def _backoff_delay(self, attempts: int) -> float:
         """Capped exponential backoff with a 20% jitter."""
@@ -208,9 +216,13 @@ class JobWorker:
     async def _delayed_publish(self, job_id: str, delay_s: float) -> None:
         try:
             await asyncio.sleep(delay_s)
-            await self._queue.publish(job_id)
+            await self._publisher.publish(
+                destination=self._settings.jobs_topic,
+                event_type=self._settings.jobs_event_type,
+                payload={"job_id": job_id},
+            )
             log_outbound(
-                "queue", op="republish", status="ok",
+                "eda", op="republish", status="ok",
                 latency_ms=delay_s * 1000, job_id=job_id,
             )
         except Exception as exc:  # noqa: BLE001
