@@ -30,6 +30,8 @@ from flydesk_idp.core.services.authenticity import (
     ContentAuthenticityChecker,
     VisualAuthenticityChecker,
 )
+from flydesk_idp.core.services.bbox import BboxValidator
+from flydesk_idp.core.services.classification import DocumentClassifier
 from flydesk_idp.core.services.escalation import JudgeEscalator
 from flydesk_idp.core.services.extraction.extractor import MultimodalExtractor
 from flydesk_idp.core.services.extraction.prompts import PromptCatalog
@@ -102,8 +104,17 @@ class IDPCoreConfiguration:
         return DocumentSplitter(template=prompts.splitter, model=settings.model)
 
     @bean
+    def classifier(self, settings: IDPSettings, prompts: PromptCatalog) -> DocumentClassifier:
+        return DocumentClassifier(template=prompts.classifier, model=settings.model)
+
+    @bean
     def field_validator(self) -> FieldValidator:
         return FieldValidator()
+
+    @bean
+    def bbox_validator(self) -> BboxValidator:
+        """Geometric bbox hallucination check -- runs after extraction."""
+        return BboxValidator()
 
     @bean
     def request_validator(self) -> RequestValidator:
@@ -158,7 +169,9 @@ class IDPCoreConfiguration:
         self,
         extractor: MultimodalExtractor,
         splitter: DocumentSplitter,
+        classifier: DocumentClassifier,
         field_validator: FieldValidator,
+        bbox_validator: BboxValidator,
         visual_checker: VisualAuthenticityChecker,
         content_checker: ContentAuthenticityChecker,
         judge: Judge,
@@ -169,7 +182,9 @@ class IDPCoreConfiguration:
         return PipelineOrchestrator(
             extractor=extractor,
             splitter=splitter,
+            classifier=classifier,
             field_validator=field_validator,
+            bbox_validator=bbox_validator,
             visual_checker=visual_checker,
             content_checker=content_checker,
             judge=judge,

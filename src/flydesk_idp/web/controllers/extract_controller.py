@@ -125,19 +125,23 @@ class ExtractController:
 
 
 def _enforce_size_limits(request: ExtractionRequest, *, max_bytes: int) -> None:
-    encoded = request.document.content_base64
-    decoded_size = (len(encoded) * 3) // 4
-    if decoded_size > max_bytes:
-        raise _http_problem(
-            413,
-            "document_too_large",
-            "Document too large",
-            f"document is {decoded_size} bytes (max {max_bytes})",
-        )
-    try:
-        base64.b64decode(encoded, validate=True)
-    except Exception as exc:  # noqa: BLE001
-        raise _http_problem(422, "invalid_base64", "Invalid base64 content", str(exc)) from exc
+    """Per-file size + base64 sanity. Works for both single- and multi-file requests."""
+    for file in request.files:
+        encoded = file.content_base64
+        decoded_size = (len(encoded) * 3) // 4
+        if decoded_size > max_bytes:
+            raise _http_problem(
+                413,
+                "document_too_large",
+                "Document too large",
+                f"{file.filename} is {decoded_size} bytes (max {max_bytes})",
+            )
+        try:
+            base64.b64decode(encoded, validate=True)
+        except Exception as exc:  # noqa: BLE001
+            raise _http_problem(
+                422, "invalid_base64", "Invalid base64 content", f"{file.filename}: {exc}"
+            ) from exc
 
 
 def _enforce_semantic_validation(

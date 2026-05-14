@@ -90,11 +90,31 @@ class RequestValidator:
 
     def validate(self, request: ExtractionRequest) -> ValidationReport:
         report = ValidationReport()
+        self._check_files(request, report)
         self._check_docs(request, report)
         self._check_rule_references(request, report)
         self._check_rule_dag(request, report)
         self._check_stage_consistency(request, report)
         return report
+
+    # -- file-level checks (multi-file shape) ----------------------------
+
+    def _check_files(self, request: ExtractionRequest, report: ValidationReport) -> None:
+        known_types = {d.docType.documentType for d in request.docs}
+        for f_index, file in enumerate(request.documents):
+            if not file.document_type:
+                continue
+            if file.document_type not in known_types:
+                report.issues.append(ValidationIssue(
+                    severity="error",
+                    code="document_type_unknown",
+                    message=(
+                        f"File {file.filename!r} pins document_type "
+                        f"{file.document_type!r} which is not declared in "
+                        "docs[]."
+                    ),
+                    path=f"documents[{f_index}].document_type",
+                ))
 
     # -- doc-level checks ------------------------------------------------
 
