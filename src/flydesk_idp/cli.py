@@ -53,14 +53,26 @@ def cmd_worker(_: argparse.Namespace) -> int:
 
     async def _run() -> None:
         from pyfly.core import PyFlyApplication
+        from pyfly.eda import EventPublisher
 
         from flydesk_idp.app import FlydeskIDPApplication
+        from flydesk_idp.config import IDPSettings
+        from flydesk_idp.core.services.pipeline import PipelineOrchestrator
+        from flydesk_idp.core.services.webhook import WebhookPublisher
         from flydesk_idp.core.services.workers.job_worker import JobWorker
+        from flydesk_idp.models.repositories import ExtractionJobRepository
 
         pyfly_app = PyFlyApplication(FlydeskIDPApplication)
         await pyfly_app.startup()
         try:
-            worker = pyfly_app.context.container.resolve(JobWorker)
+            container = pyfly_app.context.container
+            worker = JobWorker(
+                orchestrator=container.resolve(PipelineOrchestrator),
+                repository=container.resolve(ExtractionJobRepository),
+                event_publisher=container.resolve(EventPublisher),
+                webhook=container.resolve(WebhookPublisher),
+                settings=container.resolve(IDPSettings),
+            )
             await worker.run_forever()
         finally:
             await pyfly_app.shutdown()

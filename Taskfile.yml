@@ -174,6 +174,31 @@ tasks:
     cmds:
       - 'curl -fsS http://localhost:{{.PORT}}/actuator/health | jq .'
 
+  health:readiness:
+    desc: Curl /actuator/health/readiness -- shows the database + EDA components.
+    cmds:
+      - 'curl -fsS http://localhost:{{.PORT}}/actuator/health/readiness | jq .'
+
+  health:liveness:
+    desc: Curl /actuator/health/liveness -- cheap, no broker pings.
+    cmds:
+      - 'curl -fsS http://localhost:{{.PORT}}/actuator/health/liveness | jq .'
+
+  eda:outbox:
+    desc: |
+      Dump the latest entries in the pyfly_eda_outbox table. Quick way to
+      see what's been published from the API to the Postgres-backed EDA
+      bus and what's been consumed by the worker. Reads the live container's
+      Postgres.
+    cmds:
+      - |
+        docker compose exec -T postgres psql -U idp -d flydesk_idp -c "
+          SELECT id, destination, event_type, payload, created_at
+          FROM pyfly_eda_outbox
+          ORDER BY id DESC
+          LIMIT 10;
+        "
+
   version:
     desc: Curl the /api/v1/version endpoint of the running API.
     cmds:

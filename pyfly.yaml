@@ -59,11 +59,23 @@ pyfly:
   cache:
     enabled: true
 
-  # EDA -- job queue. Defaults to in-memory; production sets
-  # ``pyfly.eda.adapter: redis`` (or kafka / rabbitmq).
+  # EDA -- async-jobs event bus, wired by pyfly's EdaAutoConfiguration.
+  # Default provider is ``postgres`` which uses LISTEN/NOTIFY + the
+  # durable ``pyfly_eda_outbox`` table; flydesk-idp already runs Postgres
+  # so no extra broker is required. Override with
+  # ``FLYDESK_IDP_EDA_ADAPTER`` (memory | postgres | redis | kafka).
   eda:
     enabled: true
-    adapter: ${FLYDESK_IDP_EDA_ADAPTER:memory}
+    provider: ${FLYDESK_IDP_EDA_ADAPTER:postgres}
+    destinations: flydesk.idp.jobs
+    group: flydesk-idp-workers
+    postgres:
+      dsn: ${FLYDESK_IDP_DATABASE_URL:postgresql+asyncpg://idp:idp@localhost:5432/flydesk_idp}
+      channel: flydesk_idp_eda
+    redis:
+      url: ${FLYDESK_IDP_REDIS_URL:redis://localhost:6379/0}
+    kafka:
+      bootstrap-servers: ${FLYDESK_IDP_KAFKA_BOOTSTRAP:localhost:9092}
 
   # Persistence -- async SQLAlchemy with Alembic migrations on startup if
   # ``RUN_MIGRATIONS=true``.

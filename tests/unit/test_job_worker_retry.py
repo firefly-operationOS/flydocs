@@ -58,7 +58,7 @@ def _worker_with(base: float, ceiling: float) -> JobWorker:
     return JobWorker(
         orchestrator=MagicMock(),
         repository=MagicMock(),
-        queue=MagicMock(),
+        event_publisher=MagicMock(),
         webhook=MagicMock(),
         settings=settings,
         consumer_id="test-worker",

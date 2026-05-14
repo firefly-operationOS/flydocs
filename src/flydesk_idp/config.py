@@ -34,7 +34,12 @@ class IDPSettings(BaseSettings):
     database_url: str = "postgresql+asyncpg://idp:idp@localhost:5432/flydesk_idp"
 
     # -- Queue / EDA ----------------------------------------------------
-    eda_adapter: str = Field(default="memory", description="memory | redis | kafka | rabbitmq")
+    # The actual EventPublisher is built by pyfly's EdaAutoConfiguration
+    # from ``pyfly.eda.*`` properties (see ``pyfly.yaml``). The value here
+    # only drives ``${FLYDESK_IDP_EDA_ADAPTER}`` interpolation in that
+    # file. Default ``postgres`` because the service already runs
+    # Postgres for persistence — no extra broker is required.
+    eda_adapter: str = Field(default="postgres", description="memory | postgres | redis | kafka")
     redis_url: str = "redis://localhost:6379/0"
     jobs_topic: str = "flydesk.idp.jobs"
     jobs_event_type: str = "IDPJobSubmitted"

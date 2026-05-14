@@ -21,7 +21,6 @@ from pyfly.web.adapters.fastapi.app import create_app
 
 from flydesk_idp import __version__
 from flydesk_idp.app import FlydeskIDPApplication
-from flydesk_idp.web.correlation_filter import CorrelationHeadersMiddleware
 from flydesk_idp.web.openapi_override import install_openapi
 
 _TITLE = "flydesk-idp"
@@ -51,6 +50,13 @@ async def _lifespan(app: Any):
     _pyfly._host = str(_pyfly.config.get("pyfly.web.host", "0.0.0.0"))
     _pyfly._port = int(_pyfly.config.get("pyfly.server.port", 8400))
     await _pyfly.startup()
+    # Re-scan HealthIndicator beans now that the container has built
+    # every singleton (the eager scan inside ``create_app`` runs BEFORE
+    # context startup and would otherwise miss every indicator wired
+    # through @auto_configuration). Exposed on app.state by pyfly.
+    rescan = getattr(app.state, "pyfly_install_health_indicators", None)
+    if callable(rescan):
+        rescan()
     install_openapi(
         app,
         _pyfly.context,
@@ -71,9 +77,8 @@ app = create_app(
     actuator_enabled=True,
     lifespan=_lifespan,
 )
-# Correlation surface (X-Correlation-Id / X-Request-Id / X-Tenant-Id /
-# W3C traceparent / tracestate). Registered AFTER create_app so it sits
-# in front of pyfly's WebFilterChainMiddleware -- the inbound request
-# hits the correlation middleware first, gets stamped, then enters the
-# pyfly chain (TransactionIdFilter, request logging, etc.).
-app.add_middleware(CorrelationHeadersMiddleware)
+# The W3C correlation surface (X-Correlation-Id / X-Request-Id /
+# X-Tenant-Id / traceparent / tracestate) is wired into pyfly's default
+# WebFilter chain since pyfly 26.5.5 via
+# ``pyfly.web.adapters.starlette.filters.CorrelationFilter`` -- no
+# extra middleware to register here.
