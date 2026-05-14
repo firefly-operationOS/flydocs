@@ -20,6 +20,7 @@ from fireflyframework_agentic.prompts import PromptTemplate
 from fireflyframework_agentic.types import BinaryContent
 from pydantic import BaseModel, Field
 
+from flydesk_idp.core.observability import timed_agent_run
 from flydesk_idp.interfaces.dtos.doc import DocSpec
 from flydesk_idp.interfaces.dtos.field import (
     ExtractedField,
@@ -101,7 +102,9 @@ class Judge:
             prompt.user,
             BinaryContent(data=document_bytes, media_type=media_type),
         ]
-        run_result = await agent.run(content)
+        run_result = await timed_agent_run(
+            agent, content, op="judge", model=model or self._model
+        )
         judge_by_group: dict[str, dict[str, _RawJudgeField]] = {
             g.fieldGroupName: {f.fieldName: f for f in g.fieldGroupFields}
             for g in run_result.output.fields

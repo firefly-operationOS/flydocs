@@ -18,6 +18,7 @@ from fireflyframework_agentic.prompts import PromptTemplate
 from fireflyframework_agentic.types import BinaryContent
 from pydantic import BaseModel, Field
 
+from flydesk_idp.core.observability import timed_agent_run
 from flydesk_idp.interfaces.dtos.authenticity import VisualValidationOutcome
 from flydesk_idp.interfaces.dtos.doc import DocSpec
 
@@ -83,7 +84,9 @@ class VisualAuthenticityChecker:
             prompt.user,
             BinaryContent(data=document_bytes, media_type=media_type),
         ]
-        run_result = await agent.run(content)
+        run_result = await timed_agent_run(
+            agent, content, op="visual_auth", model=model or self._model
+        )
         raw_by_name = {v.name: v for v in run_result.output.validations}
         outcomes: list[VisualValidationOutcome] = []
         for spec in doc.validators.visual:

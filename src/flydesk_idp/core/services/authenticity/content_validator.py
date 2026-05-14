@@ -16,6 +16,7 @@ from fireflyframework_agentic.prompts import PromptTemplate
 from fireflyframework_agentic.types import BinaryContent
 from pydantic import BaseModel, Field
 
+from flydesk_idp.core.observability import timed_agent_run
 from flydesk_idp.interfaces.dtos.authenticity import (
     ContentAuthenticity,
     ContentCoherenceCheck,
@@ -79,7 +80,9 @@ class ContentAuthenticityChecker:
             prompt.user,
             BinaryContent(data=document_bytes, media_type=media_type),
         ]
-        run_result = await agent.run(content)
+        run_result = await timed_agent_run(
+            agent, content, op="content_auth", model=model or self._model
+        )
         raw = run_result.output
         return ContentAuthenticity(
             overall_integrity_status=raw.overall_integrity_status,

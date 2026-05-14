@@ -23,6 +23,7 @@ from fireflyframework_agentic.agents import FireflyAgent
 from fireflyframework_agentic.prompts import PromptTemplate
 from fireflyframework_agentic.types import BinaryContent
 
+from flydesk_idp.core.observability import timed_agent_run
 from flydesk_idp.core.services.extraction.postprocess import normalise_doc
 from flydesk_idp.core.services.extraction.schema import build_extraction_output_model
 from flydesk_idp.interfaces.dtos.doc import DocSpec
@@ -76,21 +77,21 @@ class MultimodalExtractor:
             BinaryContent(data=document_bytes, media_type=media_type),
         ]
         try:
-            result = await agent.run(content)
+            result = await timed_agent_run(agent, content, op="extract", model=model_id)
             return normalise_doc(result.output, doc), model_id
         except Exception as exc:  # noqa: BLE001
             if not self._fallback_model or self._fallback_model == model_id:
                 raise
             logger.warning(
                 "Primary model %s failed (%s); retrying on fallback %s",
-                model_id,
-                exc,
-                self._fallback_model,
+                model_id, exc, self._fallback_model,
             )
             fallback_agent = self._build_agent(
                 self._fallback_model, output_model, instructions=prompt.system
             )
-            result = await fallback_agent.run(content)
+            result = await timed_agent_run(
+                fallback_agent, content, op="extract.fallback", model=self._fallback_model
+            )
             return normalise_doc(result.output, doc), self._fallback_model
 
     # ------------------------------------------------------------------

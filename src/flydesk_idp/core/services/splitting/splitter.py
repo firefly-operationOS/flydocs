@@ -21,6 +21,7 @@ from fireflyframework_agentic.prompts import PromptTemplate
 from fireflyframework_agentic.types import BinaryContent
 from pydantic import BaseModel, Field
 
+from flydesk_idp.core.observability import timed_agent_run
 from flydesk_idp.interfaces.dtos.doc import DocSpec
 
 logger = logging.getLogger(__name__)
@@ -131,7 +132,9 @@ class DocumentSplitter:
             prompt.user,
             BinaryContent(data=document_bytes, media_type=media_type),
         ]
-        run_result = await agent.run(content)
+        run_result = await timed_agent_run(
+            agent, content, op="split", model=model or self._model
+        )
         raw = run_result.output
 
         # Align by document type and clamp pages to the actual range.

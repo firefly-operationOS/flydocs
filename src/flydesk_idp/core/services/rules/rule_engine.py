@@ -21,6 +21,7 @@ from fireflyframework_agentic.agents import FireflyAgent
 from fireflyframework_agentic.prompts import PromptTemplate
 from pydantic import BaseModel, Field
 
+from flydesk_idp.core.observability import timed_agent_run
 from flydesk_idp.interfaces.dtos.authenticity import VisualValidationOutcome
 from flydesk_idp.interfaces.dtos.doc import DocSpec
 from flydesk_idp.interfaces.dtos.field import ExtractedField, ExtractedFieldGroup
@@ -137,7 +138,10 @@ class RuleEngine:
                 ),
                 intention=intention,
             )
-            run_result = await agent.run(prompt.user)
+            run_result = await timed_agent_run(
+                agent, prompt.user, op=f"rules.level.{level_index}",
+                model=model or self._model,
+            )
             for raw in run_result.output.rule_results:
                 results.append(
                     RuleResult(
