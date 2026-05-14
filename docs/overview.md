@@ -13,8 +13,14 @@ flydesk-idp turns documents into structured, validated, audit-ready
 decisions. A single HTTP call does five things that operations teams
 normally have to glue together themselves:
 
-1. **Read** the document — any layout, any of the formats a multimodal
-   LLM accepts (PDF, PNG, JPEG, WebP, TIFF, …).
+1. **Read** the document — any layout, any binary the **binary
+   normalizer** can resolve to LLM-renderable bytes: PDFs and provider-
+   native rasters (PNG, JPEG, GIF, WebP) pass straight through; Office
+   docs (DOCX/XLSX/PPTX/RTF/ODT/HTML) go to PDF via a Gotenberg sidecar
+   (or in-container LibreOffice as fallback); images the providers
+   don't read (HEIC/HEIF/AVIF, multi-frame TIFF, SVG, BMP) convert via
+   Pillow + cairosvg; archives + email bundles (ZIP/7z/TAR/EML/MSG)
+   fan out into multiple per-attachment requests.
 2. **Extract** the fields you asked for — each one with a value, a
    page number, a normalised bounding box, and a confidence score.
 3. **Validate** every field with deterministic checkers (IBAN

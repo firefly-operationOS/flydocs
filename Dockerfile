@@ -76,8 +76,25 @@ ENV PYTHONUNBUFFERED=1 \
     UV_PROJECT_ENVIRONMENT=/app/.venv \
     PATH="/app/.venv/bin:${PATH}"
 
+# System libs required by the binary normalizer's image adapters:
+# * ``libheif1``                                -- pillow-heif (HEIC / HEIF / AVIF)
+# * ``libcairo2`` / ``libpango*`` / ``libgdk-pixbuf-2.0-0`` -- cairosvg (SVG)
+#
+# Office conversion (DOCX/XLSX/PPTX/RTF/HTML) goes through the Gotenberg
+# sidecar by default (``FLYDESK_IDP_OFFICE_CONVERTER=gotenberg``), so
+# ``soffice`` is intentionally NOT installed here -- it would bloat the
+# image by ~700MB and is not needed when running against the canonical
+# compose stack. Operators who want the in-container subprocess path
+# (``FLYDESK_IDP_OFFICE_CONVERTER=libreoffice``) extend this Dockerfile
+# with ``libreoffice-core`` + ``fonts-noto-cjk`` etc. on their side.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl \
+    && apt-get install -y --no-install-recommends \
+        curl \
+        libheif1 \
+        libcairo2 \
+        libpango-1.0-0 \
+        libpangocairo-1.0-0 \
+        libgdk-pixbuf-2.0-0 \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --uid 10001 --shell /usr/sbin/nologin --no-create-home idp
 

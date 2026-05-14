@@ -52,6 +52,7 @@ from flydesk_idp.core.services.authenticity import (
     VisualAuthenticityChecker,
 )
 from flydesk_idp.core.services.bbox import BboxValidator
+from flydesk_idp.core.services.binary import BinaryNormalizer
 from flydesk_idp.core.services.classification import (
     UNMATCHED,
     ClassificationResult,
@@ -59,7 +60,6 @@ from flydesk_idp.core.services.classification import (
 )
 from flydesk_idp.core.services.escalation import JudgeEscalator
 from flydesk_idp.core.services.extraction.extractor import MultimodalExtractor
-from flydesk_idp.core.services.extraction.loader import load_document
 from flydesk_idp.core.services.extraction.pdf_slicer import PageRange, slice_pdf
 from flydesk_idp.core.services.judge import Judge
 from flydesk_idp.core.services.rules import RuleEngine
@@ -204,6 +204,7 @@ class PipelineOrchestrator:
         classifier: DocumentClassifier,
         field_validator: FieldValidator,
         bbox_validator: BboxValidator,
+        binary_normalizer: BinaryNormalizer,
         visual_checker: VisualAuthenticityChecker,
         content_checker: ContentAuthenticityChecker,
         judge: Judge,
@@ -216,6 +217,7 @@ class PipelineOrchestrator:
         self._classifier = classifier
         self._field_validator = field_validator
         self._bbox_validator = bbox_validator
+        self._binary_normalizer = binary_normalizer
         self._visual_checker = visual_checker
         self._content_checker = content_checker
         self._judge = judge
@@ -339,49 +341,67 @@ class PipelineOrchestrator:
     # ------------------------------------------------------------------
 
     async def _step_load(self, ctx: PipelineContext, _inputs: dict[str, Any]) -> Any:
-        """Sniff media type + page count for every input file.
+        """Normalise every input binary and emit one ``_FileSlot`` per row.
 
-        Each file becomes a ``_FileSlot`` carrying one default segment
-        that covers the whole file. The discover stage may replace the
-        segment list with finer-grained ones; the classifier may later
-        fill in each segment's ``resolved_doctype``. Pinned files keep
-        the single default segment with ``resolved_doctype`` set from
-        the pin.
+        Each inbound :class:`DocumentInput` flows through
+        :class:`BinaryNormalizer`. A born-digital PDF or a clean PNG
+        passes through 1:1; a DOCX is converted to PDF; a HEIC photo
+        becomes PNG; a multi-frame TIFF becomes a multi-page PDF; a ZIP
+        / EML+attachments fan out into multiple slots. ``derived_from``
+        chains let the response trace each output back to the original
+        upload.
+
+        The doctype pin survives only when normalisation produced
+        exactly one row -- a multi-row expansion (ZIP, email) makes the
+        original pin ambiguous, so the classifier is asked to decide
+        per-row.
         """
         request: ExtractionRequest = ctx.metadata["request"]
         files: list[_FileSlot] = []
-        for i, file in enumerate(request.files):
+        # Slot index is monotonic across the expansion of all inputs.
+        slot_index = 0
+        for file in request.files:
             document_bytes = file.decoded_bytes()
-            loaded = load_document(
+            normalised = await self._binary_normalizer.normalise(
                 document_bytes,
                 declared_media_type=request.options.declared_media_type or file.content_type,
-            )
-            slot = _FileSlot(
-                file_index=i,
                 filename=file.filename,
-                media_type=loaded.media_type,
-                page_count=loaded.page_count,
-                document_bytes=document_bytes,
-                declared_doctype=file.document_type,
             )
-            # Default: one segment per file covering everything. The
-            # discover stage may replace this with finer-grained segments.
-            slot.segments = [
-                _Segment(
-                    file_index=i,
-                    filename=slot.filename,
-                    media_type=slot.media_type,
-                    page_start=1,
-                    page_end=slot.page_count,
-                    file_page_count=slot.page_count,
-                    segmentation_confidence=1.0,
-                    resolved_doctype=slot.declared_doctype,
-                    pinned=slot.declared_doctype is not None,
+            multi_row = len(normalised) > 1
+            for row in normalised:
+                effective_doctype = file.document_type if not multi_row else None
+                slot_filename = (
+                    "/".join((*row.derived_from, row.filename)) if row.derived_from else row.filename
                 )
-            ]
-            files.append(slot)
+                slot = _FileSlot(
+                    file_index=slot_index,
+                    filename=slot_filename,
+                    media_type=row.media_type,
+                    page_count=row.page_count,
+                    document_bytes=row.bytes,
+                    declared_doctype=effective_doctype,
+                )
+                slot.segments = [
+                    _Segment(
+                        file_index=slot_index,
+                        filename=slot.filename,
+                        media_type=slot.media_type,
+                        page_start=1,
+                        page_end=slot.page_count,
+                        file_page_count=slot.page_count,
+                        segmentation_confidence=1.0,
+                        resolved_doctype=slot.declared_doctype,
+                        pinned=slot.declared_doctype is not None,
+                    )
+                ]
+                files.append(slot)
+                slot_index += 1
+        # ``is_multi_file`` is recomputed after expansion so a single
+        # uploaded ZIP that fans out to N members surfaces as multi-file.
+        is_multi_file = len(files) > 1 or any(s.declared_doctype for s in files)
+        ctx.metadata["is_multi_file"] = is_multi_file
         ctx.metadata["files_data"] = files
-        return {"file_count": len(files), "is_multi_file": ctx.metadata["is_multi_file"]}
+        return {"file_count": len(files), "is_multi_file": is_multi_file}
 
     async def _step_discover(self, ctx: PipelineContext, _inputs: dict[str, Any]) -> Any:
         """Per-file splitter: enumerate every distinct sub-document.

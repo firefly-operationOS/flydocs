@@ -76,6 +76,71 @@ class IDPSettings(BaseSettings):
     webhook_max_attempts: int = 5
     webhook_hmac_secret: str | None = None
 
+    # -- Binary normalization ------------------------------------------
+    # The binary normalizer (``core/services/binary``) turns any caller-
+    # supplied binary into one or more LLM-renderable inputs (PDF or
+    # PNG/JPG/GIF/WebP). It expands archives + email attachments,
+    # converts Office docs via headless LibreOffice, rasterises HEIC /
+    # multi-frame TIFF / SVG via Pillow + cairosvg, and rejects
+    # encrypted / corrupt PDFs with a typed error.
+    binary_normalize_enabled: bool = Field(
+        default=True,
+        description=(
+            "Master kill-switch for the binary normalizer. When False the "
+            "loader passes raw bytes through as before — useful for debugging "
+            "or for deployments that pre-normalise upstream."
+        ),
+    )
+    binary_max_recursion_depth: int = Field(
+        default=3,
+        ge=0,
+        description=(
+            "Max nesting depth for archives / emails. A ZIP containing a ZIP "
+            "containing a PDF is depth 3. Prevents zip-bomb style recursion."
+        ),
+    )
+    binary_max_expanded_files: int = Field(
+        default=50,
+        ge=1,
+        description="Hard cap on expanded files per inbound binary.",
+    )
+    office_converter: str = Field(
+        default="gotenberg",
+        description=(
+            "Adapter used by the binary normalizer for Office → PDF "
+            "conversion. ``gotenberg`` (HTTP sidecar, distroless-friendly, "
+            "default) or ``libreoffice`` (in-container subprocess; requires "
+            "``soffice`` + multilingual font packs in the runtime image)."
+        ),
+    )
+    gotenberg_url: str = Field(
+        default="http://gotenberg:3000",
+        description=(
+            "Base URL of the Gotenberg sidecar. Used only when "
+            "``office_converter == 'gotenberg'``."
+        ),
+    )
+    gotenberg_timeout_s: int = Field(
+        default=60,
+        ge=1,
+        description="Per-call HTTP timeout against the Gotenberg sidecar.",
+    )
+    binary_libreoffice_path: str = Field(
+        default="soffice",
+        description=(
+            "Path to the headless LibreOffice binary. Used only when "
+            "``office_converter == 'libreoffice'``."
+        ),
+    )
+    binary_libreoffice_timeout_s: int = Field(
+        default=60,
+        ge=1,
+        description=(
+            "Per-call subprocess timeout when ``office_converter == "
+            "'libreoffice'``."
+        ),
+    )
+
     # -- Security -------------------------------------------------------
     api_keys: str | None = Field(
         default=None,

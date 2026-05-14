@@ -12,6 +12,7 @@ from typing import Any
 
 from pyfly.web import controller_advice, exception_handler
 
+from flydesk_idp.core.services.binary import BinaryNormalizationError
 from flydesk_idp.core.services.jobs.cancel_job_handler import JobNotCancellable
 from flydesk_idp.core.services.jobs.get_job_result_handler import JobNotReady
 from flydesk_idp.interfaces.dtos.error import ProblemDetails
@@ -39,6 +40,31 @@ class ExceptionAdvice:
             status=409,
             code="job_not_cancellable",
             detail=str(exc),
+        )
+        return problem.model_dump(exclude_none=True)
+
+    @exception_handler(BinaryNormalizationError)
+    async def binary_normalization_failed(
+        self, exc: BinaryNormalizationError
+    ) -> dict[str, Any]:
+        """Map every BinaryNormalizationError subclass to a 422 problem-detail.
+
+        ``code`` carries the subclass-specific stable identifier
+        (``encrypted_pdf``, ``office_conversion_failed``, ...) so callers
+        can branch on the failure mode without parsing ``detail``.
+        Registered BEFORE the generic ``ValueError`` handler so the more
+        specific one wins.
+        """
+        extensions: dict[str, Any] = {}
+        if getattr(exc, "filename", None):
+            extensions["filename"] = exc.filename
+        problem = ProblemDetails(
+            type=f"https://flydesk.dev/problems/{exc.code.replace('_', '-')}",
+            title="Binary could not be normalised",
+            status=exc.http_status,
+            code=exc.code,
+            detail=str(exc),
+            extensions=extensions or None,
         )
         return problem.model_dump(exclude_none=True)
 
