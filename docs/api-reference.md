@@ -194,9 +194,84 @@ is documented in [§ 2a](#2a-multi-file-extraction).
   ],
   "model": "anthropic:claude-opus-4-7",
   "latency_ms": 43580,
-  "pipeline_errors": []
+  "pipeline_errors": [],
+  "usage": {
+    "total_input_tokens": 162109,
+    "total_output_tokens": 22218,
+    "total_tokens": 184327,
+    "total_cost_usd": 3.0651,
+    "total_requests": 0,
+    "total_latency_ms": 96739.0,
+    "record_count": 27,
+    "cache_creation_tokens": 0,
+    "cache_read_tokens": 0,
+    "by_agent": {
+      "flydesk-idp-splitter":   {"input_tokens": 48598, "output_tokens": 746,  "total_tokens": 49344, "cost_usd": 0.785},
+      "flydesk-idp-classifier": {"input_tokens": 63325, "output_tokens": 2307, "total_tokens": 65632, "cost_usd": 1.123},
+      "flydesk-idp-extractor":  {"input_tokens": 78936, "output_tokens": 6057, "total_tokens": 84993, "cost_usd": 1.638},
+      "flydesk-idp-judge":      {"input_tokens": 73023, "output_tokens": 5719, "total_tokens": 78742, "cost_usd": 1.524},
+      "flydesk-idp-visual-auth":{"input_tokens": 40847, "output_tokens": 642,  "total_tokens": 41489, "cost_usd": 0.661},
+      "flydesk-idp-rule-engine":{"input_tokens": 13609, "output_tokens": 2326, "total_tokens": 15935, "cost_usd": 0.379}
+    },
+    "by_model": {
+      "anthropic:claude-opus-4-7": {"input_tokens": 318338, "output_tokens": 17797, "total_tokens": 336135, "cost_usd": 6.110}
+    }
+  },
+  "trace": [
+    {"node": "load",            "started_at": "...", "completed_at": "...", "latency_ms": 173.16,   "status": "success"},
+    {"node": "discover",        "started_at": "...", "completed_at": "...", "latency_ms": 14725.81, "status": "success"},
+    {"node": "classify",        "started_at": "...", "completed_at": "...", "latency_ms": 12474.10, "status": "success"},
+    {"node": "plan_tasks",      "started_at": "...", "completed_at": "...", "latency_ms": 234.83,   "status": "success"},
+    {"node": "extract",         "started_at": "...", "completed_at": "...", "latency_ms": 21352.88, "status": "success"},
+    {"node": "bbox_validation", "started_at": "...", "completed_at": "...", "latency_ms": 0.43,     "status": "success"},
+    {"node": "field_validation","started_at": "...", "completed_at": "...", "latency_ms": 0.79,     "status": "success"},
+    {"node": "visual_authenticity","started_at": "...", "completed_at": "...", "latency_ms": 7385.81,  "status": "success"},
+    {"node": "judge",           "started_at": "...", "completed_at": "...", "latency_ms": 20721.86, "status": "success"},
+    {"node": "rules",           "started_at": "...", "completed_at": "...", "latency_ms": 26099.84, "status": "success"},
+    {"node": "assemble",        "started_at": "...", "completed_at": "...", "latency_ms": 0.05,     "status": "success"}
+  ]
 }
 ```
+
+#### `usage` block
+
+Aggregated token counts and estimated USD cost across every LLM call
+the request made. Scoped to the request via the framework's
+``correlation_id``: each call records a :class:`UsageRecord` keyed by
+``request_id``, and the orchestrator queries the tracker for this
+request when assembling the response.
+
+| Field                    | Meaning                                                                                                  |
+|--------------------------|----------------------------------------------------------------------------------------------------------|
+| `total_input_tokens`     | Sum of prompt tokens across all calls.                                                                   |
+| `total_output_tokens`    | Sum of completion tokens.                                                                                |
+| `total_tokens`           | Sum of input + output.                                                                                   |
+| `total_cost_usd`         | Estimated USD cost using the configured price table (see operational notes below).                       |
+| `record_count`           | Number of distinct LLM calls behind this request.                                                        |
+| `total_latency_ms`       | Sum of per-call wall-clock times (with `asyncio.gather` parallelism this can exceed `latency_ms`).       |
+| `cache_creation_tokens`  | Prompt tokens written to Anthropic's prompt cache (currently always 0 — caching not yet enabled).        |
+| `cache_read_tokens`      | Prompt tokens served from cache (currently always 0).                                                    |
+| `by_agent`               | Per-agent breakdown (extractor, classifier, splitter, judge, visual, content, rule-engine).             |
+| `by_model`               | Per-model breakdown — useful when fallback or escalation switched models mid-request.                   |
+
+`null` when cost tracking is disabled or no LLM call fired.
+
+#### `trace` block
+
+One entry per executed pipeline node, ordered as the DAG ran them. Each
+entry has `node`, `started_at`, `completed_at`, `latency_ms`, and a
+`status` of `success` | `failed` | `skipped`. Useful for spotting which
+stages dominate a request's latency.
+
+#### Operational notes
+
+The cost number is an **estimate** based on a static price table; for
+the Claude 4 family (`opus-4-*`, `sonnet-4-*`, `haiku-4-*`) we maintain
+overrides in `core/observability/pricing.py`. Update there when prices
+change. The same per-call data is also emitted on the
+``outbound_call`` log lines (one per LLM call, with `correlation_id`,
+`in_tokens`, `out_tokens`, `cost_usd`), so spend forensics work even
+without parsing the response.
 
 ### Error responses
 

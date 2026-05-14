@@ -422,35 +422,70 @@ results — the field extraction succeeded, only the judge bailed.
 
 ---
 
-## 7. Outbound call logging
+## 7. Outbound call logging + cost telemetry
+
+### 7a. Log line shape
 
 Every call the service makes outside its own process emits a single
 structured `outbound_call` log line via
 `core/observability/outbound_log.py::log_outbound`. The format is
 log-line-oriented (key=value), so a single grep surfaces the entire
-external-call footprint:
+external-call footprint with full per-call cost data:
 
 ```text
-outbound_call target=anthropic op=extract status=ok latency_ms=12879 model=anthropic:claude-opus-4-7
-outbound_call target=anthropic op=visual_auth status=ok latency_ms=7433 model=anthropic:claude-opus-4-7
-outbound_call target=anthropic op=judge status=ok latency_ms=15162 model=anthropic:claude-opus-4-7
-outbound_call target=anthropic op=rules.level.1 status=ok latency_ms=10666 model=anthropic:claude-opus-4-7
-outbound_call target=webhook op=deliver status=ok latency_ms=12 url=https://... attempt=1 http_status=200 job_id=39e0... correlation_id=e2e-corr-001
+outbound_call target=anthropic op=split status=ok latency_ms=14418 model=anthropic:claude-opus-4-7 correlation_id=3d530f07-... in_tokens=48598 out_tokens=746 total_tokens=49344 cost_usd=0.784920
+outbound_call target=anthropic op=extract status=ok latency_ms=21352 model=anthropic:claude-opus-4-7 correlation_id=3d530f07-... in_tokens=12500 out_tokens=850 total_tokens=13350 cost_usd=0.251250
+outbound_call target=anthropic op=judge status=ok latency_ms=15162 model=anthropic:claude-opus-4-7 correlation_id=3d530f07-... in_tokens=11200 out_tokens=820 total_tokens=12020 cost_usd=0.229500
+outbound_call target=webhook op=deliver status=ok latency_ms=12 url=https://... attempt=1 http_status=200 job_id=39e0...
 outbound_call target=worker op=job.run status=ok latency_ms=42557 job_id=39e0... attempt=1
 ```
 
 Targets currently emitted:
 
 - `anthropic` / `openai` -- LLM provider, one line per stage call
-  (`op=extract`, `op=split`, `op=visual_auth`, `op=content_auth`,
-  `op=judge`, `op=rules.level.<n>`).
+  (`op=split`, `op=classifier`, `op=extract`, `op=visual_auth`,
+  `op=content_auth`, `op=judge`, `op=rules.level.<n>`). Includes
+  `correlation_id`, `in_tokens`, `out_tokens`, `total_tokens`, and the
+  estimated `cost_usd` for each call.
 - `webhook` -- one line per delivery attempt (`op=deliver`).
 - `worker` -- one line per job start and per terminal outcome
   (`op=job.run`).
 - `queue` -- one line per delayed re-publish during a retry.
 
-Use these for spend tracing (sum `latency_ms` by model), SLO
-monitoring, and forensic analysis when a request behaves oddly.
+Use these for spend tracing (sum `cost_usd` by model or per request),
+SLO monitoring, and forensic analysis when a request behaves oddly.
+
+### 7b. How cost surfaces in the response
+
+The framework's `fireflyframework_agentic.observability.usage`
+subsystem records a `UsageRecord` for every `FireflyAgent.run` call
+(tokens, cost in USD, latency, model, agent name, `correlation_id`).
+The orchestrator binds the request id to a `ContextVar` at the start
+of `execute()`, and `timed_agent_run` (`core/observability/outbound_log.py`)
+reads it and threads it into the agent's `AgentContext` so every record
+the framework writes carries the right `correlation_id`. When the
+engine returns its `PipelineResult`, `usage` is already aggregated for
+that correlation id; the orchestrator maps it into the
+`ExtractionResult.usage` field (`UsageBreakdown` -- `total_*`,
+`by_agent`, `by_model`) and `PipelineResult.execution_trace` into
+`ExtractionResult.trace`. See `docs/api-reference.md` for the exact
+response shape.
+
+### 7c. Price table overrides
+
+The framework ships a `StaticPriceCostCalculator` with prices for the
+common model families but does not yet include the Claude 4 line. We
+patch the framework's `_DEFAULT_PRICES` table at boot from
+`core/observability/pricing.py::install_price_overrides()` (called as
+a side effect of importing `core/configuration.py`). Update the dict
+there when Anthropic changes their tariffs.
+
+The framework's `GenAIPricesCostCalculator` (a wrapper around the
+`genai-prices` package for live pricing) is currently inactive because
+the `genai-prices` library renamed its API between releases -- the
+framework still imports `find_model` which no longer exists. Fixing
+this upstream is tracked but not on the critical path: the static
+table is enough for our model set.
 
 ---
 

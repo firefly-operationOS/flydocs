@@ -57,6 +57,7 @@ object containing, for every document you asked about:
 | **Judge**                   | A second LLM pass re-checks each extracted value against the document and stamps PASS / FAIL / UNCERTAIN with evidence. |
 | **Business rules**          | Boolean / categorical decisions over the data, evaluated as a DAG — _"is this KYC-complete?"_, _"escalate to manual review?"_, _"approve / reject"_. |
 | **Audit trail**             | Request id, per-stage latencies, per-doc model used, structured logs.                          |
+| **Cost telemetry**          | Aggregated `usage` block in every response: input/output tokens + estimated USD cost, broken down by agent (extractor, classifier, judge, ...) and by model. Plus a per-call `cost_usd` on every `outbound_call` log line. |
 
 A single request can carry **one file or many**. Submit
 `documents: [...]` to ship several at once: pin each file's
