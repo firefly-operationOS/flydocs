@@ -13,6 +13,9 @@ asynchronous APIs.
 [![pyfly](https://img.shields.io/badge/runtime-fireflyframework--pyfly-orange)](https://github.com/fireflyframework/fireflyframework-pyfly)
 [![agentic](https://img.shields.io/badge/genai-fireflyframework--agentic-purple)](https://github.com/fireflyframework/fireflyframework-agentic)
 [![OpenAPI](https://img.shields.io/badge/api-openapi%203.1-green)](docs/api-reference.md)
+[![PR gate](https://github.com/firefly-operationOS/flydesk-idp/actions/workflows/pr-gate.yaml/badge.svg)](https://github.com/firefly-operationOS/flydesk-idp/actions/workflows/pr-gate.yaml)
+[![Docker publish](https://github.com/firefly-operationOS/flydesk-idp/actions/workflows/docker-publish.yaml/badge.svg)](https://github.com/firefly-operationOS/flydesk-idp/actions/workflows/docker-publish.yaml)
+[![Image](https://img.shields.io/badge/ghcr-flydesk--idp-blue)](https://github.com/firefly-operationOS/flydesk-idp/pkgs/container/flydesk-idp)
 
 </div>
 
@@ -87,7 +90,7 @@ task env:init            # copy env_template -> .env
 task dev:db              # bring up Postgres + Redis in Docker
 task dev:migrate         # alembic upgrade head
 task dev:serve           # API on http://localhost:8400/docs
-task dev:worker          # in another terminal — consumes the job queue
+task dev:worker          # in another terminal — subscribes to the EDA bus
 ```
 
 Or just the container stack:
@@ -155,15 +158,18 @@ business logic stays small.
 | Async pipeline DAG               | `fireflyframework-agentic` `PipelineEngine` / `PipelineBuilder` |
 | Prompt management                | `fireflyframework-agentic` `PromptTemplate` + `PromptRegistry` (YAML-backed) |
 | LLM agents (multimodal)          | `fireflyframework-agentic` `FireflyAgent` over `pydantic-ai` |
-| EDA / job queue                  | pyfly EDA — in-memory for dev, Redis Streams for prod   |
+| EDA / async jobs                 | pyfly `EventPublisher` — default `postgres` (durable outbox + LISTEN/NOTIFY); flip `FLYDESK_IDP_EDA_ADAPTER` to `memory` / `redis` / `kafka` |
+| W3C trace context                | pyfly `CorrelationFilter` (default web filter) + `pyfly.observability.correlation` |
+| K8s probes                       | `/actuator/health/liveness` + `/actuator/health/readiness` with `database_health` + `eda_health` indicators |
+| Multi-arch container             | `ghcr.io/firefly-operationos/flydesk-idp:latest` — linux/amd64 + linux/arm64 manifest |
 | Observability                    | structlog JSON, OTLP tracing, Prometheus metrics, actuator |
 | Persistence                      | SQLAlchemy async, Alembic, Postgres (SQLite for tests)  |
 | RFC 7807 error responses         | `@controller_advice` exception handler                  |
 
 Everything is wired through pyfly's container — including the prompt
-catalog, the queue, the webhook publisher, and the async worker — so
-the application has **no manually-constructed singletons** outside the
-DI graph.
+catalog, the EDA event publisher, the webhook publisher, and the async
+worker — so the application has **no manually-constructed singletons**
+outside the DI graph.
 
 ---
 
@@ -185,9 +191,8 @@ src/flydesk_idp/
 │       ├── judge/           LLM judge / re-evaluator
 │       ├── rules/           DAG-based business rule engine
 │       ├── pipeline/        PipelineOrchestrator (agentic PipelineEngine)
-│       ├── queue/           JobQueue (in-memory + Redis Streams)
 │       ├── webhook/         Outbound webhook publisher with HMAC
-│       └── workers/         JobWorker (consumes the queue)
+│       └── workers/         JobWorker (subscribes to pyfly.eda)
 ├── resources/
 │   └── prompts/             YAML prompt templates (one per LLM stage)
 └── web/
