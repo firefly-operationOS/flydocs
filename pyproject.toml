@@ -53,6 +53,15 @@ dependencies = [
     "pymupdf>=1.24",
     "rapidfuzz>=3.10",
 
+    # OCR engine for image-only PDFs and rasters consumed by the bbox
+    # refiner. ``pytesseract`` is a thin wrapper around the ``tesseract``
+    # binary; the binary + language packs (``tesseract-ocr-spa``,
+    # ``tesseract-ocr-eng``, ...) are installed by the runtime Dockerfile.
+    # Multilingual: each language pack is a separate apt package that the
+    # operator can add without code changes -- the adapter passes the
+    # composed lang string straight to tesseract.
+    "pytesseract>=0.3.13",
+
     # Pydantic AI models for multimodal/vision LLMs.
     "pydantic-ai-slim[anthropic,openai,bedrock]>=1.56.0",
 

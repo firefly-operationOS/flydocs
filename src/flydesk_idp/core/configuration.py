@@ -39,8 +39,12 @@ from flydesk_idp.core.services.authenticity import (
 from flydesk_idp.core.services.bbox import (
     BboxRefiner,
     BboxValidator,
+    BboxValueMatcher,
+    LlmValueMatcher,
     NoneOcrEngine,
     OcrEngine,
+    TesseractOcrEngine,
+    ValueMatcher,
 )
 from flydesk_idp.core.services.binary import (
     ArchiveUnpacker,
@@ -153,13 +157,38 @@ class IDPCoreConfiguration:
 
     @bean
     def ocr_engine(self, settings: IDPSettings) -> OcrEngine:
-        kind = (settings.bbox_refine_ocr_engine or "none").lower()
+        kind = (settings.bbox_refine_ocr_engine or "tesseract").lower()
+        if kind == "tesseract":
+            return TesseractOcrEngine(settings=settings)
         if kind == "none":
             return NoneOcrEngine()
-        # Future: paddle / mistral / tesseract adapters route here.
+        # Future: ``paddle`` / ``mistral`` adapters route here.
         raise ValueError(
             f"unknown FLYDESK_IDP_BBOX_REFINE_OCR_ENGINE={settings.bbox_refine_ocr_engine!r}; "
-            "expected 'none' (paddle / mistral adapters not yet bundled)"
+            "expected 'tesseract' or 'none' (paddle / mistral adapters not yet bundled)"
+        )
+
+    @bean
+    def bbox_value_matcher(self, settings: IDPSettings, prompts: PromptCatalog) -> BboxValueMatcher:
+        """Strategy that grounds extracted values against the word stream.
+
+        Defaults to the LLM-driven matcher (``llm``) -- generic,
+        multilingual, no hardcoded variants. ``fuzzy`` selects the
+        deterministic rapidfuzz fallback for callers that want zero
+        LLM cost on the refine path.
+        """
+        kind = (settings.bbox_refine_matcher or "llm").lower()
+        if kind == "llm":
+            return LlmValueMatcher(
+                template=prompts.bbox_matcher,
+                model=settings.model,
+                threshold=settings.bbox_refine_threshold,
+            )
+        if kind == "fuzzy":
+            return ValueMatcher(settings=settings)
+        raise ValueError(
+            f"unknown FLYDESK_IDP_BBOX_REFINE_MATCHER={settings.bbox_refine_matcher!r}; "
+            "expected 'llm' or 'fuzzy'"
         )
 
     @bean

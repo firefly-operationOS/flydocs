@@ -174,13 +174,44 @@ class IDPSettings(BaseSettings):
         ),
     )
     bbox_refine_ocr_engine: str = Field(
-        default="none",
+        default="tesseract",
         description=(
-            "OCR engine used for image-PDFs and raster inputs. ``none`` "
-            "(default) skips OCR -- LLM bboxes are kept for image pages. "
-            "``paddle`` / ``mistral`` adapters land in a follow-up; selecting "
-            "them here when the adapter ships will route image pages through "
-            "the engine."
+            "OCR engine used for image-PDFs and raster inputs. ``tesseract`` "
+            "(default) shells out to the local ``tesseract`` binary -- the "
+            "runtime Dockerfile installs it plus the most common European "
+            "language packs (spa/eng/fra/deu/ita/por). ``none`` skips OCR "
+            "entirely (image pages keep the LLM bbox); ``paddle`` / "
+            "``mistral`` adapters land in follow-ups and slot in here."
+        ),
+    )
+    bbox_refine_ocr_dpi: int = Field(
+        default=200,
+        ge=72,
+        le=600,
+        description=(
+            "DPI at which PDF pages are rasterised before being shipped to "
+            "the OCR engine. Higher = more accurate but slower; 200 is a "
+            "good balance for printed text. Ignored for raster inputs."
+        ),
+    )
+    bbox_refine_tesseract_lang: str = Field(
+        default="spa+eng",
+        description=(
+            "Default tesseract ``-l`` argument (``+``-joined ISO 639-2/B "
+            "language codes). Overridden per-request by mapping the public "
+            "``ExtractionOptions.language_hint`` (ISO 639-1, e.g. ``es``) "
+            "to its 3-letter equivalent."
+        ),
+    )
+    bbox_refine_matcher: str = Field(
+        default="llm",
+        description=(
+            "Strategy that maps each extracted value to OCR / text-layer "
+            "word indices. ``llm`` (default) is generic + multilingual + "
+            "format-agnostic -- one focused LLM call per page handles every "
+            "field at once. ``fuzzy`` is the deterministic rapidfuzz "
+            "fallback for callers that want zero per-request LLM cost on "
+            "the refine path."
         ),
     )
     bbox_refine_max_text_pages: int = Field(

@@ -26,6 +26,7 @@ from pyfly.container import service
 
 from flydesk_idp.config import IDPSettings
 from flydesk_idp.core.services.bbox.word_extractor import PageWords, Word
+from flydesk_idp.interfaces.dtos.bbox import BboxSource
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +101,7 @@ class PyMuPDFWordExtractor:
                         height=height,
                         words=words,
                         has_text_layer=len(words) >= self._min_words_for_text_layer,
+                        source=BboxSource.PDF_TEXT,
                     )
                 )
         finally:
