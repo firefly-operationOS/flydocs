@@ -18,6 +18,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
+from flydesk_idp.interfaces.dtos.bbox import BboxSource
+
 
 @dataclass(slots=True, frozen=True)
 class Word:
@@ -44,6 +46,11 @@ class PageWords:
     ``none``. Downstream code distinguishes between "no page in scope"
     (no entry) and "scanned page, no OCR available" (entry with empty
     ``words``) by checking ``has_text_layer``.
+
+    ``source`` records which extractor produced these words -- the
+    refiner carries it through to the response's ``BoundingBox.source``
+    field so callers can distinguish grounded-via-PDF-text from
+    grounded-via-OCR coordinates.
     """
 
     page: int
@@ -51,6 +58,7 @@ class PageWords:
     height: float
     words: list[Word]
     has_text_layer: bool
+    source: BboxSource = BboxSource.PDF_TEXT
 
 
 @runtime_checkable
