@@ -267,9 +267,7 @@ def _dni_request(pdf_bytes: bytes, filename: str) -> dict[str, Any]:
                             },
                             {
                                 "fieldName": "padre_nombre",
-                                "fieldDescription": (
-                                    "Nombre del padre (HIJO/A DE), reverso de la tarjeta."
-                                ),
+                                "fieldDescription": ("Nombre del padre (HIJO/A DE), reverso de la tarjeta."),
                                 "fieldType": "string",
                             },
                             {
@@ -281,9 +279,7 @@ def _dni_request(pdf_bytes: bytes, filename: str) -> dict[str, Any]:
                             },
                             {
                                 "fieldName": "equipo",
-                                "fieldDescription": (
-                                    "Codigo del equipo emisor (EQUIPO), letras y digitos."
-                                ),
+                                "fieldDescription": ("Codigo del equipo emisor (EQUIPO), letras y digitos."),
                                 "fieldType": "string",
                             },
                         ],
