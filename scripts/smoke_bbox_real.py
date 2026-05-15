@@ -148,9 +148,13 @@ def _escritura_request(pdf_bytes: bytes, filename: str) -> dict[str, Any]:
 
 
 def _dni_request(pdf_bytes: bytes, filename: str) -> dict[str, Any]:
-    """Spanish national ID card schema."""
+    """Spanish national ID card schema -- front (page 1) + back (page 2)."""
     return {
-        "intention": "Extract the canonical fields from a Spanish DNI for KYC.",
+        "intention": (
+            "Extract every printed field from a Spanish DNI/eID for KYC. "
+            "Both sides of the card are present: front carries identity, "
+            "back carries domicile, place of birth, parents, equipo, MRZ."
+        ),
         "document": {
             "filename": filename,
             "content_base64": base64.b64encode(pdf_bytes).decode(),
@@ -202,14 +206,88 @@ def _dni_request(pdf_bytes: bytes, filename: str) -> dict[str, Any]:
                                 "fieldDescription": "Nacionalidad (codigo o nombre).",
                                 "fieldType": "string",
                             },
+                        ],
+                    },
+                    {
+                        "fieldGroupName": "vigencia",
+                        "fieldGroupFields": [
                             {
-                                "fieldName": "fecha_caducidad",
-                                "fieldDescription": "Fecha de caducidad (ISO YYYY-MM-DD).",
+                                "fieldName": "fecha_emision",
+                                "fieldDescription": (
+                                    "Fecha de emision / issuing date (ISO YYYY-MM-DD). "
+                                    "Aparece bajo el campo 'EMISION' o 'IDESP' en el anverso."
+                                ),
                                 "fieldType": "string",
                                 "standard_validators": [{"type": "date"}],
                             },
+                            {
+                                "fieldName": "fecha_caducidad",
+                                "fieldDescription": (
+                                    "Fecha de caducidad / expiration date (ISO YYYY-MM-DD). "
+                                    "Aparece bajo el campo 'VALIDEZ'."
+                                ),
+                                "fieldType": "string",
+                                "standard_validators": [{"type": "date"}],
+                            },
+                            {
+                                "fieldName": "numero_soporte",
+                                "fieldDescription": (
+                                    "Numero de soporte / support number, prefijo 'CDD' o 'IDESP' "
+                                    "seguido de digitos. Aparece bajo 'NUM SOPORTE'."
+                                ),
+                                "fieldType": "string",
+                            },
+                            {
+                                "fieldName": "can",
+                                "fieldDescription": (
+                                    "CAN (Card Access Number), 6 digitos numericos impresos "
+                                    "discretamente cerca del numero de soporte."
+                                ),
+                                "fieldType": "string",
+                            },
                         ],
-                    }
+                    },
+                    {
+                        "fieldGroupName": "domicilio_y_filiacion",
+                        "fieldGroupFields": [
+                            {
+                                "fieldName": "domicilio",
+                                "fieldDescription": (
+                                    "Domicilio completo tal como figura en el reverso de la "
+                                    "tarjeta (calle, numero, piso, puerta)."
+                                ),
+                                "fieldType": "string",
+                            },
+                            {
+                                "fieldName": "lugar_nacimiento",
+                                "fieldDescription": (
+                                    "Lugar de nacimiento (municipio y provincia) del reverso."
+                                ),
+                                "fieldType": "string",
+                            },
+                            {
+                                "fieldName": "padre_nombre",
+                                "fieldDescription": (
+                                    "Nombre del padre (HIJO/A DE), reverso de la tarjeta."
+                                ),
+                                "fieldType": "string",
+                            },
+                            {
+                                "fieldName": "madre_nombre",
+                                "fieldDescription": (
+                                    "Nombre de la madre (HIJO/A DE), reverso de la tarjeta."
+                                ),
+                                "fieldType": "string",
+                            },
+                            {
+                                "fieldName": "equipo",
+                                "fieldDescription": (
+                                    "Codigo del equipo emisor (EQUIPO), letras y digitos."
+                                ),
+                                "fieldType": "string",
+                            },
+                        ],
+                    },
                 ],
             }
         ],
@@ -310,14 +388,12 @@ def visualize(pdf_path: Path, response: dict[str, Any], out_prefix: str) -> list
         by_page.setdefault(fb.page, []).append(fb)
     font = _font()
     png_paths: list[Path] = []
+    # Render every page in the document so the viewer can audit OCR /
+    # text-layer coverage even on pages where no fields landed.
     for page_index in range(doc.page_count):
         page = doc[page_index]
         page_number = page_index + 1
         boxes = by_page.get(page_number, [])
-        if not boxes and page_index > 0:
-            # Skip pages with no fields (other than page 1 which we always render
-            # so the viewer always has a first-page anchor).
-            continue
         pix = page.get_pixmap(dpi=144)
         img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
         draw = ImageDraw.Draw(img, "RGBA")
