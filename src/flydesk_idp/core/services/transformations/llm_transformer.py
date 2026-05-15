@@ -85,7 +85,8 @@ class LlmTransformer:
             )
             return None
 
-        rows = [r for r in array_field.fieldValueFound or [] if isinstance(r, ExtractedField)]
+        raw = array_field.fieldValueFound if isinstance(array_field.fieldValueFound, list) else []
+        rows = [r for r in raw if isinstance(r, ExtractedField)]
         if not rows:
             return None
 
@@ -125,8 +126,8 @@ class LlmTransformer:
 
         produced_rows = _rebuild_rows(run_result.output.rows, rows[0])
         new_array = ExtractedField(
-            fieldName=array_field.fieldName,
-            fieldValueFound=produced_rows,
+            name=array_field.fieldName,
+            value=produced_rows,
             pagesFound=array_field.pagesFound,
             confidence=array_field.confidence,
             bbox=array_field.bbox,
@@ -196,8 +197,8 @@ def _rebuild_rows(llm_rows: list[_TransformRow], template_row: ExtractedField) -
             tmpl = template_by_name.get(name)
             sub_fields.append(
                 ExtractedField(
-                    fieldName=name,
-                    fieldValueFound=value,
+                    name=name,
+                    value=value,
                     pagesFound=tmpl.pagesFound if tmpl else [],
                     confidence=tmpl.confidence if tmpl else 0.0,
                     bbox=tmpl.bbox if tmpl else template_row.bbox,
@@ -205,8 +206,8 @@ def _rebuild_rows(llm_rows: list[_TransformRow], template_row: ExtractedField) -
             )
         materialised.append(
             ExtractedField(
-                fieldName=f"row_{i + 1}",
-                fieldValueFound=sub_fields,
+                name=f"row_{i + 1}",
+                value=sub_fields,
                 pagesFound=template_row.pagesFound,
                 confidence=template_row.confidence,
                 bbox=template_row.bbox,

@@ -66,7 +66,8 @@ class EntityResolutionTransformer:
             )
             return None
 
-        rows = [r for r in array_field.fieldValueFound or [] if isinstance(r, ExtractedField)]
+        raw = array_field.fieldValueFound if isinstance(array_field.fieldValueFound, list) else []
+        rows = [r for r in raw if isinstance(r, ExtractedField)]
         if not rows:
             return None
 
@@ -74,10 +75,12 @@ class EntityResolutionTransformer:
 
         # Build the replacement array field. We keep the same
         # ``fieldName`` so downstream consumers don't need to special-case
-        # the post-transformation shape.
+        # the post-transformation shape. ``name=`` / ``value=`` are
+        # Pydantic aliases declared on :class:`ExtractedField`; we use
+        # them here so static type checkers don't flag the call.
         new_array = ExtractedField(
-            fieldName=array_field.fieldName,
-            fieldValueFound=merged_rows,
+            name=array_field.fieldName,
+            value=merged_rows,
             pagesFound=array_field.pagesFound,
             confidence=array_field.confidence,
             bbox=array_field.bbox,
@@ -242,7 +245,7 @@ def _canonicalise(cluster: list[ExtractedField], _t: EntityResolutionTransformat
     """
     if not cluster:
         # Defensive — callers ensure non-empty clusters but keep this safe.
-        return ExtractedField(fieldName="row", fieldValueFound=None)
+        return ExtractedField(name="row", value=None)
 
     base = cluster[0]
     if not isinstance(base.fieldValueFound, list):
@@ -252,9 +255,8 @@ def _canonicalise(cluster: list[ExtractedField], _t: EntityResolutionTransformat
     seen_names: list[str] = []
     by_name: dict[str, list[ExtractedField]] = {}
     for row in cluster:
-        if not isinstance(row.fieldValueFound, list):
-            continue
-        for sub in row.fieldValueFound:
+        inner = row.fieldValueFound if isinstance(row.fieldValueFound, list) else []
+        for sub in inner:
             if not isinstance(sub, ExtractedField):
                 continue
             if sub.fieldName not in by_name:
@@ -263,13 +265,13 @@ def _canonicalise(cluster: list[ExtractedField], _t: EntityResolutionTransformat
             by_name[sub.fieldName].append(sub)
 
     merged_subs: list[ExtractedField] = []
-    for name in seen_names:
-        candidates = by_name[name]
+    for fname in seen_names:
+        candidates = by_name[fname]
         merged_subs.append(_pick_canonical(candidates))
 
     return ExtractedField(
-        fieldName=base.fieldName,
-        fieldValueFound=merged_subs,
+        name=base.fieldName,
+        value=merged_subs,
         pagesFound=_merge_pages(cluster),
         confidence=max((r.confidence for r in cluster), default=0.0),
         bbox=base.bbox,

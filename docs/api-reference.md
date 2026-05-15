@@ -570,6 +570,33 @@ The extractor and `bbox_validation` are always on; `assemble`/`load`
 are unconditional. The `transform` toggle is a no-op when
 `options.transformations` is empty.
 
+### EDA event envelopes (audit + webhook payload)
+
+Every event the service publishes — `IDPJobSubmitted`,
+`IDPJobCompleted`, `IDPBboxRefineRequested`,
+`IDPBboxRefineCompleted` — carries a typed envelope:
+
+```jsonc
+{
+  "event_id":       "f0c7b3aa-2f43-4d34-bf6c-3b09e6efbb19",  // UUID v4
+  "event_type":     "IDPJobCompleted",                       // routing discriminator
+  "version":        "1.0.0",                                 // semver of the payload shape
+  "occurred_at":    "2026-05-15T16:42:11.103Z",              // UTC ISO-8601
+  "correlation_id": "req-…",                                 // echoes inbound X-Correlation-Id
+  "tenant_id":      "tenant-…",                              // echoes X-Tenant-Id when set
+  "job_id":         "…",
+  "status":         "SUCCEEDED",                             // type-specific
+  "started_at":     "…",
+  "finished_at":    "…",
+  "attempts":       1
+}
+```
+
+Webhook deliveries surface the same envelope on the wire, plus the
+`result` (for `SUCCEEDED` / `PARTIAL_SUCCEEDED`) and `error_code` /
+`error_message` (for `FAILED`). Dedupe by `event_id` on the client
+since the publisher retries on delivery failure.
+
 ### `Transformation` (discriminated union)
 
 Two `type` values today; the union is open for new declarative types.

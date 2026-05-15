@@ -65,11 +65,7 @@ from flydesk_idp.core.services.judge import Judge
 from flydesk_idp.core.services.pipeline import PipelineOrchestrator
 from flydesk_idp.core.services.rules import RuleEngine
 from flydesk_idp.core.services.splitting import DocumentSplitter
-from flydesk_idp.core.services.transformations import (
-    EntityResolutionTransformer,
-    LlmTransformer,
-    TransformationEngine,
-)
+from flydesk_idp.core.services.transformations import LlmTransformer, TransformationEngine
 from flydesk_idp.core.services.validation import FieldValidator, RequestValidator
 from flydesk_idp.core.services.webhook import WebhookPublisher
 from flydesk_idp.core.services.workers.job_worker import JobWorker
@@ -277,23 +273,14 @@ class IDPCoreConfiguration:
     def llm_transformer(self, settings: IDPSettings, prompts: PromptCatalog) -> LlmTransformer:
         """Free-form post-extraction transformer.
 
-        Pairs with :class:`EntityResolutionTransformer` (autoscanned
-        via ``@service``) behind :class:`TransformationEngine` to
-        cover every transformation kind the caller can declare via
-        :class:`Transformation` on the request.
+        Needs explicit ``@bean`` construction because it depends on
+        a ``PromptTemplate`` (resolved through :class:`PromptCatalog`)
+        and the default model id — neither of which pyfly's autoscan
+        can resolve by type alone. :class:`TransformationEngine` is a
+        ``@service`` that autowires this bean alongside the
+        ``EntityResolutionTransformer``.
         """
         return LlmTransformer(template=prompts.transform, model=settings.model)
-
-    @bean
-    def transformation_engine(
-        self,
-        entity_resolver: EntityResolutionTransformer,
-        llm_transformer: LlmTransformer,
-    ) -> TransformationEngine:
-        return TransformationEngine(
-            entity_resolver=entity_resolver,
-            llm_transformer=llm_transformer,
-        )
 
     @bean
     def rule_engine(self, settings: IDPSettings, prompts: PromptCatalog) -> RuleEngine:

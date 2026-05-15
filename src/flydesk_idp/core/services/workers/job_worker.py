@@ -40,6 +40,11 @@ from flydesk_idp.core.observability import log_outbound
 from flydesk_idp.core.services.pipeline import PipelineOrchestrator
 from flydesk_idp.core.services.webhook import WebhookPublisher
 from flydesk_idp.interfaces.dtos.doc import DocSpec
+from flydesk_idp.interfaces.dtos.event import (
+    IDPBboxRefineRequestedEvent,
+    IDPJobSubmittedEvent,
+    envelope_for_publish,
+)
 from flydesk_idp.interfaces.dtos.extract import (
     DocumentInput,
     ExtractionOptions,
@@ -200,20 +205,30 @@ class JobWorker:
                 attempt=attempts,
                 terminal=terminal_status.value,
             )
+            correlation_headers = _extract_correlation(job.metadata_json)
             await self._fire_webhook(
                 job_id=job.id,
                 status=terminal_status,
                 result=result,
                 metadata=job.metadata_json or {},
                 callback_url=job.callback_url,
-                correlation=_extract_correlation(job.metadata_json),
+                correlation=correlation_headers,
+                started_at=getattr(job, "started_at", None),
+                finished_at=datetime.now(UTC),
+                attempts=attempts,
             )
             if wants_bbox_refine:
+                refine_event = IDPBboxRefineRequestedEvent(
+                    job_id=job.id,
+                    attempt=1,
+                    correlation_id=correlation_headers.get("X-Correlation-Id"),
+                    tenant_id=correlation_headers.get("X-Tenant-Id"),
+                )
                 await self._publisher.publish(
                     destination=self._settings.bbox_refine_topic,
                     event_type=self._settings.bbox_refine_event_type,
-                    payload={"job_id": job.id},
-                    headers=_extract_correlation(job.metadata_json),
+                    payload=envelope_for_publish(refine_event),
+                    headers=correlation_headers,
                 )
                 log_outbound(
                     "eda",
@@ -251,6 +266,9 @@ class JobWorker:
                     error_code=error_code,
                     error_message=str(exc),
                     correlation=_extract_correlation(job.metadata_json),
+                    started_at=getattr(job, "started_at", None),
+                    finished_at=datetime.now(UTC),
+                    attempts=attempts,
                 )
             else:
                 delay = self._backoff_delay(attempts)
@@ -278,10 +296,18 @@ class JobWorker:
     async def _delayed_publish(self, job_id: str, delay_s: float) -> None:
         try:
             await asyncio.sleep(delay_s)
+            # We don't have the original correlation context here (this
+            # runs in a detached task after the handler returned), so
+            # emit the envelope without correlation. The dedupe-by-event-id
+            # guarantee still holds for clients tracking re-deliveries.
+            republish_event = IDPJobSubmittedEvent(
+                job_id=job_id,
+                attempt=2,  # any republish is at least attempt 2 from the worker's POV
+            )
             await self._publisher.publish(
                 destination=self._settings.jobs_topic,
                 event_type=self._settings.jobs_event_type,
-                payload={"job_id": job_id},
+                payload=envelope_for_publish(republish_event),
             )
             log_outbound(
                 "eda",
@@ -340,20 +366,29 @@ class JobWorker:
         error_code: str | None = None,
         error_message: str | None = None,
         correlation: dict[str, str] | None = None,
+        started_at: datetime | None = None,
+        finished_at: datetime | None = None,
+        attempts: int = 1,
     ) -> None:
         if not callback_url:
             return
         clean_metadata = {k: v for k, v in (metadata or {}).items() if not k.startswith("_")}
+        corr = correlation or {}
         payload = JobWebhookPayload(
             job_id=job_id,
             status=status,
             occurred_at=datetime.now(UTC),
+            started_at=started_at,
+            finished_at=finished_at,
+            attempts=attempts,
+            correlation_id=corr.get("X-Correlation-Id"),
+            tenant_id=corr.get("X-Tenant-Id"),
             metadata=clean_metadata,
             result=result,
             error_code=error_code,
             error_message=error_message,
         )
-        await self._webhook.deliver(callback_url, payload, extra_headers=correlation or {})
+        await self._webhook.deliver(callback_url, payload, extra_headers=corr)
 
 
 def _extract_correlation(metadata: dict[str, Any] | None) -> dict[str, str]:

@@ -28,10 +28,40 @@ single-line union extension plus a new branch in
 }
 ```
 
-The stage is silently a no-op when `transformations` is empty even
-with the toggle on. Failures of individual transformations are caught
-by the engine and logged; the surrounding pipeline never fails because
-one transformation misbehaved.
+`transformations` is **always a list** and is applied in declared
+order, so you can chain transformations against the same target — a
+common pattern is `entity_resolution` first (cheap, deterministic)
+followed by an `llm` step that operates on the deduped survivors.
+The list can be empty: the stage is silently a no-op even with the
+toggle on. Failures of individual transformations are caught by the
+engine and logged; the surrounding pipeline never fails because one
+transformation misbehaved.
+
+### Chaining example
+
+```json
+{
+  "options": {
+    "stages": { "transform": true },
+    "transformations": [
+      {
+        "type": "entity_resolution",
+        "target_group": "personas",
+        "match_by": ["dni", "nombre"],
+        "scope": "request"
+      },
+      {
+        "type": "llm",
+        "target_group": "personas",
+        "intention": "Classify each cargo into a closed taxonomy."
+      }
+    ]
+  }
+}
+```
+
+The LLM in the second entry sees the *deduped* rows produced by the
+first one — not the originals.
 
 ## Scope: per-task vs. per-request
 

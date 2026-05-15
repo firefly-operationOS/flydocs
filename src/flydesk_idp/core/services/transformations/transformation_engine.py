@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import logging
 
+from pyfly.container import service
+
 from flydesk_idp.core.services.transformations.entity_resolution import (
     EntityResolutionTransformer,
 )
@@ -33,8 +35,23 @@ from flydesk_idp.interfaces.dtos.transformation import (
 logger = logging.getLogger(__name__)
 
 
+@service
 class TransformationEngine:
-    """Apply :class:`Transformation` objects to extracted groups."""
+    """Apply :class:`Transformation` objects to extracted groups.
+
+    Both dependencies are autowired by type:
+
+    * :class:`EntityResolutionTransformer` is itself ``@service``-decorated.
+    * :class:`LlmTransformer` is registered as a ``@bean`` by
+      :class:`IDPCoreConfiguration` because its constructor needs the
+      ``transform`` prompt template + the default model — values
+      pyfly cannot autoresolve by type alone.
+
+    Picking ``@service`` over ``@bean`` keeps the wiring at the
+    declaration site rather than in the central configuration file,
+    which is the pyfly idiom for services whose dependencies are
+    themselves DI-managed.
+    """
 
     def __init__(
         self,
@@ -143,8 +160,8 @@ def _consolidate_groups(
     if not found_any or not all_rows:
         return None
     array_field = ExtractedField(
-        fieldName=array_field_name or "rows",
-        fieldValueFound=all_rows,
+        name=array_field_name or "rows",
+        value=all_rows,
     )
     return ExtractedFieldGroup(
         fieldGroupName=target_name,
