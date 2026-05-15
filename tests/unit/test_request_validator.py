@@ -49,7 +49,9 @@ def _doc(doc_type: str = "passport", *, with_visual: bool = False) -> DocSpec:
 
 def _request(*, docs=None, rules=None, options=None) -> ExtractionRequest:
     return ExtractionRequest(
-        document=DocumentInput(filename="x.pdf", content_base64=_DUMMY_B64, content_type="application/pdf"),
+        documents=[
+            DocumentInput(filename="x.pdf", content_base64=_DUMMY_B64, content_type="application/pdf")
+        ],
         docs=docs or [_doc()],
         rules=rules or [],
         options=options or ExtractionOptions(),

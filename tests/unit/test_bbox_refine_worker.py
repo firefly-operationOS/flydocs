@@ -174,8 +174,13 @@ async def test_grounds_partial_succeeded_job_and_transitions_to_succeeded() -> N
     pdf = _real_pdf()
     job = _StubJob(
         schema_json={
-            "document_content_base64": base64.b64encode(pdf).decode(),
-            "document_content_type": "application/pdf",
+            "documents": [
+                {
+                    "filename": "invoice.pdf",  # matches result.documents[0].source_file
+                    "content_base64": base64.b64encode(pdf).decode(),
+                    "content_type": "application/pdf",
+                }
+            ],
         },
         result_json=_result_with_field("Acme Corporation").model_dump(mode="json", by_alias=True),
     )
@@ -231,7 +236,7 @@ async def test_drops_unknown_job_id() -> None:
 
 @pytest.mark.asyncio
 async def test_permanent_error_marks_failed_no_republish() -> None:
-    # Empty schema_json triggers a permanent ValueError ("no document_content_base64").
+    # Empty schema_json triggers a permanent ValueError ("missing 'documents'").
     job = _StubJob(
         schema_json={},
         result_json=_result_with_field("Acme").model_dump(mode="json", by_alias=True),

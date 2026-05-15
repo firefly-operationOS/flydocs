@@ -60,54 +60,185 @@ object containing, for every document you asked about:
 | **Judge**                   | A second LLM pass re-checks each extracted value against the document and stamps PASS / FAIL / UNCERTAIN with evidence. |
 | **Business rules**          | Boolean / categorical decisions over the data, evaluated as a DAG — _"is this KYC-complete?"_, _"escalate to manual review?"_, _"approve / reject"_. |
 | **Audit trail**             | Request id, per-stage latencies, per-doc model used, structured logs.                          |
-| **Cost telemetry**          | Aggregated `usage` block in every response: input/output tokens + estimated USD cost (live Anthropic tariffs via `genai-prices`), broken down by agent and by model. Plus a per-call `cost_usd` on every `outbound_call` log line. |
-| **Prompt caching**          | Anthropic prompt caching is on for every agent: system prompt + last user-message block are cached with a 5-minute TTL. Cache writes / reads are surfaced as `cache_creation_tokens` / `cache_read_tokens` on the response and on every `outbound_call` log line. |
+| **Cost telemetry**          | Aggregated `usage` block in every response: input/output tokens + estimated USD cost — sourced from `genai-prices`, which is **provider-agnostic** (Anthropic, OpenAI, Google, Mistral, …). Broken down by agent and by model. Plus a per-call `cost_usd` on every `outbound_call` log line. |
+| **Prompt caching**          | Provider-aware. Anthropic prompt caching is on by default (system prompt + last user-message block cached with a 5-minute TTL). For non-Anthropic providers the cache middleware is a no-op until a provider-specific shim lands. Cache writes / reads surface as `cache_creation_tokens` / `cache_read_tokens` on the response. Toggle with `FLYDESK_IDP_PROMPT_CACHE`. |
 
-A single request can carry **one file or many**. Submit
-`documents: [...]` to ship several at once: pin each file's
-`document_type` when you know it, or let the LLM classifier decide.
-Each extracted document carries a `source_file` field so callers can
-map output back to the input file that produced it. The full
-multi-file shape is documented in
-[docs/api-reference.md § 2a](docs/api-reference.md#2a-multi-file-extraction).
+A single request always carries a non-empty `documents` list — a
+single file is just a one-element list. Submit several entries to ship
+a multi-file pack at once: pin each file's `document_type` when you
+know it, or let the LLM classifier decide. Each extracted document
+carries a `source_file` field so callers can map output back to the
+input file that produced it. The full multi-file shape is documented
+in [docs/api-reference.md § 2a](docs/api-reference.md#2a-multi-file--sub-document-discovery).
 
 The same call works **synchronously** (`POST /api/v1/extract`, blocks
 until done) or as a **queued job** with a webhook
-(`POST /api/v1/jobs`, returns 202 + a job id). The async endpoint is
-single-file only for now.
+(`POST /api/v1/jobs`, returns 202 + a job id). Multi-file submission
+is supported on both surfaces.
 
 ---
 
 ## Quickstart
 
-Local dev:
+A complete walk-through from a fresh clone to your first **sync**
+extraction and your first **async, multi-file** job with a
+transformation. Pick whichever provider you have a key for —
+`fireflyframework-genai` resolves the right credential from the model
+id prefix.
+
+### 0. Prerequisites
+
+- **Python 3.13** (`uv` will install it on demand; otherwise install
+  via `pyenv` / `asdf` / the system package manager).
+- **`uv`** — the package manager (`brew install uv` on macOS, or
+  `curl -LsSf https://astral.sh/uv/install.sh | sh`).
+- **Docker** — for Postgres in dev, and optionally for the full stack.
+- **`task`** — task runner used by every helper command
+  (`brew install go-task/tap/go-task`, or see
+  [taskfile.dev](https://taskfile.dev/installation/)).
+- **An LLM provider key** — `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
+  `GOOGLE_API_KEY`, `MISTRAL_API_KEY`, … any one the provider you
+  pick supports.
+
+### 1. Clone and install
 
 ```bash
-git clone <this repo>
-cd firefly-operationOS/flydesk-idp
-task deps:install        # uv sync --extra dev
-task env:init            # copy env_template -> .env
-task dev:db              # bring up Postgres + Redis in Docker
-task dev:migrate         # alembic upgrade head
-task dev:serve           # API on http://localhost:8400/docs
-task dev:worker          # in another terminal — subscribes to the EDA bus
+git clone https://github.com/firefly-operationOS/flydesk-idp.git
+cd flydesk-idp
+task deps:install        # uv sync --extra dev: pins the venv at .venv/
 ```
 
-Or just the container stack:
+### 2. Configure the environment
 
 ```bash
-task docker:up           # api + worker + Postgres + Redis
-task health              # GET /actuator/health
-task docker:logs         # tail every container
+task env:init            # copies env_template -> .env (gitignored)
 ```
 
-Smoke test against a real document:
+Edit `.env`. The two knobs you actually need to think about:
+
+```env
+# Pick any provider + model id that fireflyframework-genai can resolve.
+FLYDESK_IDP_MODEL=anthropic:claude-sonnet-4-6
+# Optional second provider used on transient errors. Mix providers freely.
+FLYDESK_IDP_FALLBACK_MODEL=openai:gpt-4o
+
+# Set the credential matching the prefix you chose above. Set the
+# fallback's credential too if it's a different provider.
+ANTHROPIC_API_KEY=sk-ant-...
+# OPENAI_API_KEY=sk-...
+# GOOGLE_API_KEY=...
+# MISTRAL_API_KEY=...
+```
+
+Everything else (Postgres URL, EDA adapter, timeouts, webhook secret,
+…) has sane defaults in `env_template`.
+
+### 3. Bring up Postgres and run migrations
+
+```bash
+task dev:db              # docker compose up Postgres (and Redis if you switch adapter)
+task dev:migrate         # alembic upgrade head — creates extraction_jobs +
+                         # the pyfly_eda_outbox / pyfly_eda_offsets tables
+```
+
+### 4. Start the API and the worker
+
+Two terminals — the API serves HTTP, the worker drains the EDA bus.
+
+```bash
+# Terminal A
+task dev:serve           # uvicorn on http://localhost:8400
+                         # OpenAPI:    /docs
+                         # Health:     /actuator/health/readiness
+                         # PyFly admin: /admin
+
+# Terminal B
+task dev:worker          # subscribes via fireflyframework-pyfly's EventPublisher
+```
+
+A healthy boot prints both the `database_health` and `eda_health`
+indicators as `UP`. Hit `/actuator/health/readiness` to confirm before
+sending traffic.
+
+### 5. Your first synchronous extraction
 
 ```bash
 curl -s http://localhost:8400/api/v1/extract \
   -H 'content-type: application/json' \
-  -d @docs/examples/extract.json | jq .documents[0].fields
+  -d @docs/examples/extract.json | jq '.documents[0].fields'
 ```
+
+The endpoint blocks until the pipeline finishes (or hits
+`FLYDESK_IDP_SYNC_TIMEOUT_S`, default 60 s). The response carries every
+extracted field with its bounding box, validation outcome, judge
+verdict, business-rule decisions, and a `usage` block with the USD
+cost. See [docs/api-reference.md](docs/api-reference.md) for the full
+shape.
+
+### 6. Your first asynchronous, multi-file job with a transformation
+
+Build a payload with two files, a deduper, and a webhook callback,
+then POST it. The submit returns immediately with a `202` + job id;
+the worker drives the same pipeline and posts the result to your
+`callback_url` when it finishes:
+
+```bash
+curl -s http://localhost:8400/api/v1/jobs \
+  -H 'content-type: application/json' \
+  -H 'idempotency-key: '"$(uuidgen)" \
+  -d '{
+    "intention": "KYB pack: deed + DNI. Dedupe people across docs.",
+    "documents": [
+      {"filename": "deed.pdf", "content_base64": "JVBERi0xLjQK...",  "content_type": "application/pdf"},
+      {"filename": "dni.jpg",  "content_base64": "/9j/4AAQ...",       "content_type": "image/jpeg"}
+    ],
+    "docs":  [ /* one DocSpec per docType — see docs/api-reference.md § 4 */ ],
+    "rules": [],
+    "options": {
+      "stages": {"classifier": true, "judge": true, "transform": true},
+      "transformations": [
+        {"type": "entity_resolution", "target_group": "personas",
+         "match_by": ["dni", "nombre"], "scope": "request"}
+      ]
+    },
+    "callback_url": "https://your-workflow.example.com/idp/webhook",
+    "metadata": {"tenant_id": "acme"}
+  }'
+```
+
+Poll status if you don't want to wait for the webhook:
+
+```bash
+JOB_ID=01HEM2ZZ7M0Q8...
+curl -s http://localhost:8400/api/v1/jobs/$JOB_ID
+curl -s http://localhost:8400/api/v1/jobs/$JOB_ID/result | jq
+```
+
+The webhook payload mirrors the EDA event envelope (`event_id`,
+`event_type`, `occurred_at`, `correlation_id`, …) and carries the full
+`ExtractionResult` for terminal `SUCCEEDED` / `PARTIAL_SUCCEEDED`
+states. Signed with HMAC-SHA256 in `X-FLYDESK-Signature` using
+`FLYDESK_IDP_WEBHOOK_HMAC_SECRET`.
+
+### 7. (Optional) Skip steps 3–4 with the full container stack
+
+```bash
+task docker:up           # api + worker + Postgres on Docker (and Redis if adapter=redis)
+task health              # GET /actuator/health
+task docker:logs         # tail every container
+```
+
+This is the closest thing to production locally; the only difference
+is no TLS termination in front of the service.
+
+### 8. Run the test suite
+
+```bash
+task test                # unit suite — ~250 tests, in-memory SQLite + EDA, <2 s
+task test:llm            # real-LLM smoke test — needs the provider key from step 2
+```
+
+`task lint:check` runs `ruff` + `pyright` (both gated in CI).
 
 ---
 
@@ -159,18 +290,18 @@ business logic stays small.
 | Async pipeline DAG               | `fireflyframework-agentic` `PipelineEngine` / `PipelineBuilder` |
 | Prompt management                | `fireflyframework-agentic` `PromptTemplate` + `PromptRegistry` (YAML-backed) |
 | LLM agents (multimodal)          | `fireflyframework-agentic` `FireflyAgent` over `pydantic-ai` |
-| EDA / async jobs                 | pyfly `EventPublisher` — default `postgres` (durable outbox + LISTEN/NOTIFY); flip `FLYDESK_IDP_EDA_ADAPTER` to `memory` / `redis` / `kafka` |
-| W3C trace context                | pyfly `CorrelationFilter` (default web filter) + `pyfly.observability.correlation` |
+| EDA / async jobs                 | `fireflyframework-pyfly` `EventPublisher` — default `postgres` (durable outbox + LISTEN/NOTIFY); flip `FLYDESK_IDP_EDA_ADAPTER` to `memory` / `redis` / `kafka` |
+| W3C trace context                | `fireflyframework-pyfly` `CorrelationFilter` (default web filter) + `pyfly.observability.correlation` |
 | K8s probes                       | `/actuator/health/liveness` + `/actuator/health/readiness` with `database_health` + `eda_health` indicators |
 | Multi-arch container             | `ghcr.io/firefly-operationos/flydesk-idp:latest` — linux/amd64 + linux/arm64 manifest |
 | Observability                    | structlog JSON, OTLP tracing, Prometheus metrics, actuator |
 | Persistence                      | SQLAlchemy async, Alembic, Postgres (SQLite for tests)  |
 | RFC 7807 error responses         | `@controller_advice` exception handler                  |
 
-Everything is wired through pyfly's container — including the prompt
-catalog, the EDA event publisher, the webhook publisher, and the async
-worker — so the application has **no manually-constructed singletons**
-outside the DI graph.
+Everything is wired through `fireflyframework-pyfly`'s container —
+including the prompt catalog, the EDA event publisher, the webhook
+publisher, and the async worker — so the application has **no
+manually-constructed singletons** outside the DI graph.
 
 ---
 
@@ -191,9 +322,9 @@ src/flydesk_idp/
 │       ├── authenticity/    Visual + content audits
 │       ├── judge/           LLM judge / re-evaluator
 │       ├── rules/           DAG-based business rule engine
-│       ├── pipeline/        PipelineOrchestrator (agentic PipelineEngine)
+│       ├── pipeline/        PipelineOrchestrator (fireflyframework-agentic PipelineEngine)
 │       ├── webhook/         Outbound webhook publisher with HMAC
-│       └── workers/         JobWorker (subscribes to pyfly.eda)
+│       └── workers/         JobWorker (subscribes to fireflyframework-pyfly EDA)
 ├── resources/
 │   └── prompts/             YAML prompt templates (one per LLM stage)
 └── web/
@@ -245,7 +376,7 @@ finding but keeps the field valid). See
 
 **Prompt catalog** — every LLM stage reads its system + user prompt
 from a YAML file under `src/flydesk_idp/resources/prompts/`. The
-catalog is a normal pyfly bean; you can swap templates, bump versions,
+catalog is a normal `fireflyframework-pyfly` bean; you can swap templates, bump versions,
 or A/B-test prompts without touching Python. See
 [docs/prompts.md](docs/prompts.md).
 
@@ -275,7 +406,7 @@ Cycles are rejected before any LLM call is issued. See
 | Document                                       | Read it when…                                                            |
 | ---------------------------------------------- | ------------------------------------------------------------------------ |
 | [docs/overview.md](docs/overview.md)           | You're new and want a guided tour of the system.                         |
-| [docs/architecture.md](docs/architecture.md)   | You need to know how pyfly + agentic plug together.                      |
+| [docs/architecture.md](docs/architecture.md)   | You need to know how `fireflyframework-pyfly` + `fireflyframework-agentic` plug together. |
 | [docs/pipeline.md](docs/pipeline.md)           | You're touching the orchestrator or adding a new stage.                  |
 | [docs/api-reference.md](docs/api-reference.md) | You're integrating with the HTTP API.                                    |
 | [docs/transformations.md](docs/transformations.md) | You want to dedupe, normalise or run free-form LLM transformations on extracted data. |
@@ -293,7 +424,7 @@ Cycles are rejected before any LLM call is issued. See
 task deps:install        # uv sync --extra dev
 task lint:check          # ruff + pyright
 task test                # unit suite (~26 tests, <1s)
-task test:llm            # real Claude smoke test (requires ANTHROPIC_API_KEY)
+task test:llm            # real-LLM smoke test (needs the provider key matching FLYDESK_IDP_MODEL)
 task dev:serve           # API on :8400
 task dev:worker          # async job consumer
 task migrate             # alembic upgrade head

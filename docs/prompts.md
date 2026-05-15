@@ -148,10 +148,14 @@ template = catalog.get("flydesk_idp/extract", version="1.0.0")
 3. **Bump the version** when you change semantics. The registry
    indexes by `name + version`; an older version can coexist for an
    A/B test or a controlled rollout.
-4. **Run the real-LLM smoke test** after the change:
+4. **Run the real-LLM smoke test** after the change. Use whichever
+   provider your `FLYDESK_IDP_MODEL` is set to — `fireflyframework-genai`
+   reads the matching env var automatically:
 
    ```bash
-   ANTHROPIC_API_KEY=… task test:llm
+   ANTHROPIC_API_KEY=… task test:llm   # for anthropic:* models
+   # or
+   OPENAI_API_KEY=…    task test:llm   # for openai:* models
    ```
 
    It pretty-prints every field + judge verdict + rule output, so a

@@ -18,16 +18,17 @@ A production deployment has three moving parts:
                                                   └──────────┬─────────────────┘
                                                              │ LISTEN
                                                              ▼
-                                                  ┌─────────────────────────┐
-                                                  │ JobWorker(s) (uvicorn)  │
-                                                  │  pyfly.eda subscribe    │
-                                                  └─────────────────────────┘
+                                                  ┌──────────────────────────────────┐
+                                                  │ JobWorker(s) (uvicorn)           │
+                                                  │  fireflyframework-pyfly EDA      │
+                                                  │  subscribe                       │
+                                                  └──────────────────────────────────┘
 ```
 
 | Component    | Role |
 | ------------ | ---- |
 | **API**      | One or more uvicorn workers behind a load balancer. Stateless; no sticky sessions. Publishes ``IDPJobSubmitted`` events on the EDA bus. |
-| **Worker**   | One or more processes that subscribe to the EDA bus via `pyfly.eda.EventPublisher.subscribe`. Each event is delivered to exactly one consumer in the `flydesk-idp-workers` consumer group. |
+| **Worker**   | One or more processes that subscribe to the EDA bus via `fireflyframework-pyfly`'s `EventPublisher.subscribe`. Each event is delivered to exactly one consumer in the `flydesk-idp-workers` consumer group. |
 | **Postgres** | Holds `extraction_jobs` *and* the EDA outbox (`pyfly_eda_outbox` + `pyfly_eda_offsets`). With the Postgres EDA adapter you no longer need a separate broker. |
 
 Redis or Kafka are still supported brokers — see §3 — but the default
@@ -56,13 +57,17 @@ FLYDESK_IDP_DATABASE_URL=postgresql+asyncpg://idp:s3cret@db:5432/flydesk_idp
 # a durable outbox in the same Postgres the service already owns.
 # Other options: ``memory`` (single-process dev), ``redis`` (Redis
 # Streams), ``kafka`` (aiokafka). The auto-configuration is in
-# pyfly.eda.auto_configuration:EdaAutoConfiguration; ``pyfly.yaml``
-# plumbs the env var into ``pyfly.eda.provider``.
+# ``pyfly.eda.auto_configuration.EdaAutoConfiguration``;
+# ``fireflyframework-pyfly``'s app config plumbs the env var into
+# ``pyfly.eda.provider``.
 FLYDESK_IDP_EDA_ADAPTER=postgres
 FLYDESK_IDP_REDIS_URL=redis://redis:6379/0   # only used when adapter=redis
 FLYDESK_IDP_JOBS_TOPIC=flydesk.idp.jobs
 
-# Models — Anthropic first, OpenAI as a fallback when the primary errors out.
+# Model selection. Pick any provider+model id that
+# `fireflyframework-genai` / `fireflyframework-agentic` can resolve —
+# `anthropic:…`, `openai:…`, `google:…`, `mistral:…`. The fallback
+# model is used when the primary errors out; mix providers freely.
 FLYDESK_IDP_MODEL=anthropic:claude-sonnet-4-6
 FLYDESK_IDP_FALLBACK_MODEL=openai:gpt-4o
 
@@ -94,9 +99,13 @@ FLYDESK_IDP_WEBHOOK_HMAC_SECRET=<a-strong-random-string>
 # Optional API-key auth (comma-separated).
 FLYDESK_IDP_API_KEYS=tenant-a-secret,tenant-b-secret
 
-# Provider credentials (standard names; not prefixed).
-ANTHROPIC_API_KEY=...
-OPENAI_API_KEY=...
+# Provider credentials (standard names; not prefixed). Set whichever
+# matches the model id you picked above — and the fallback too if it's
+# a different provider. fireflyframework-genai reads these directly.
+ANTHROPIC_API_KEY=...      # required for anthropic:* model ids
+OPENAI_API_KEY=...         # required for openai:* model ids
+# GOOGLE_API_KEY=...       # required for google:* model ids
+# MISTRAL_API_KEY=...      # required for mistral:* model ids
 ```
 
 ---
@@ -187,12 +196,14 @@ readinessProbe:
 
 The composite always includes:
 
-- **`database_health`** — `pyfly.data.relational.health.SqlAlchemyHealthIndicator`
-  pings the async engine with `SELECT 1` and surfaces the dialect on
-  the response.
-- **`eda_health`** — `pyfly.eda.health.EventPublisherHealthIndicator`
-  is auto-registered by `pyfly.eda.auto_configuration.EdaHealthAutoConfiguration`
-  whenever the actuator subsystem is on. It reports the active adapter
+- **`database_health`** — `fireflyframework-pyfly`'s
+  `pyfly.data.relational.health.SqlAlchemyHealthIndicator` pings the
+  async engine with `SELECT 1` and surfaces the dialect on the
+  response.
+- **`eda_health`** — `fireflyframework-pyfly`'s
+  `pyfly.eda.health.EventPublisherHealthIndicator` is auto-registered
+  by `pyfly.eda.auto_configuration.EdaHealthAutoConfiguration` whenever
+  the actuator subsystem is on. It reports the active adapter
   (`PostgresEventBus`, `RedisStreamsEventBus`, `KafkaEventBus`, or
   `InMemoryEventBus`).
 
@@ -211,11 +222,11 @@ A response from a healthy stack:
 When any indicator is `DOWN`, the endpoint returns `503` so the
 load-balancer / kubelet stops routing traffic. Add a service-specific
 probe by registering another `pyfly.actuator.health.HealthIndicator`
-bean in `core/configuration.py` — the lifespan rescan picks it up
-automatically.
+bean (from `fireflyframework-pyfly`) in `core/configuration.py` — the
+lifespan rescan picks it up automatically.
 
-> **W3C trace context** is propagated by pyfly's default
-> `CorrelationFilter`: every response echoes back `X-Correlation-Id`,
+> **W3C trace context** is propagated by `fireflyframework-pyfly`'s
+> default `CorrelationFilter`: every response echoes back `X-Correlation-Id`,
 > `X-Request-Id`, `traceparent`, `tracestate`, and `X-Tenant-Id` when
 > the request carried them. No middleware to wire locally.
 
@@ -248,6 +259,7 @@ external call:
 ```text
 outbound_call target=anthropic op=extract        status=ok  latency_ms=12879 model=anthropic:claude-opus-4-7
 outbound_call target=anthropic op=judge          status=ok  latency_ms=15162 model=anthropic:claude-opus-4-7
+outbound_call target=openai    op=extract        status=ok  latency_ms=11420 model=openai:gpt-4o
 outbound_call target=webhook   op=deliver        status=ok  latency_ms=12    url=... attempt=1 http_status=200 correlation_id=...
 outbound_call target=worker    op=job.run        status=ok  latency_ms=42557 job_id=... attempt=1
 ```
@@ -271,8 +283,8 @@ outbound_call target=worker    op=job.run        status=ok  latency_ms=42557 job
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Document bytes** | Never written to disk on the service side. Only the base64 payload sits in `extraction_jobs.schema_json` for the job lifetime. Replace with a blob-store pointer if your DB can't keep this. |
 | **Webhook HMAC** | Mandatory in production — set `FLYDESK_IDP_WEBHOOK_HMAC_SECRET` to a strong random string. The publisher signs every payload with HMAC-SHA256.                  |
-| **API keys**     | Entry-level gate — set `FLYDESK_IDP_API_KEYS` to a comma-separated list. For OIDC / OAuth2, swap in pyfly's `security-jwt` starter and add a JWT decoder bean. |
-| **LLM keys**     | Provider credentials are read from standard env vars (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`). Use your secrets manager; never bake them into the image.        |
+| **API keys**     | Entry-level gate — set `FLYDESK_IDP_API_KEYS` to a comma-separated list. For OIDC / OAuth2, swap in `fireflyframework-pyfly`'s `security-jwt` starter and add a JWT decoder bean. |
+| **LLM keys**     | Provider credentials are read from each provider's standard env var (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`, `MISTRAL_API_KEY`, …). `fireflyframework-genai` resolves the right one from the model id prefix. Use your secrets manager; never bake them into the image. |
 | **TLS**          | Terminate at the load balancer. The service serves plain HTTP inside the cluster.                                                                              |
 
 ---

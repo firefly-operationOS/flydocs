@@ -125,8 +125,8 @@ class ExtractController:
 
 
 def _enforce_size_limits(request: ExtractionRequest, *, max_bytes: int) -> None:
-    """Per-file size + base64 sanity. Works for both single- and multi-file requests."""
-    for file in request.files:
+    """Per-file size + base64 sanity."""
+    for file in request.documents:
         encoded = file.content_base64
         decoded_size = (len(encoded) * 3) // 4
         if decoded_size > max_bytes:

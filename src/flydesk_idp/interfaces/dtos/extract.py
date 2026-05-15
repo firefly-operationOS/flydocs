@@ -16,7 +16,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from flydesk_idp.interfaces.dtos.authenticity import DocumentAuthenticity
 from flydesk_idp.interfaces.dtos.doc import DocSpec
@@ -197,20 +197,9 @@ class ExtractionOptions(BaseModel):
 class ExtractionRequest(BaseModel):
     """One IDP extraction request.
 
-    Two input shapes are supported:
-
-    1. **Single file** -- set ``document``. This is the original API
-       surface and stays fully compatible. The single file may itself
-       contain multiple document types (passport + utility bill in one
-       PDF); the splitter stage handles that.
-    2. **Multiple files** -- set ``documents``. Each file is processed
-       independently. A file may optionally pin its target type via
-       ``document_type``; otherwise the classifier stage matches the
-       file to one of the declared :class:`DocSpec`s.
-
-    The two fields are mutually exclusive. Internally the orchestrator
-    promotes ``document`` to ``documents = [document]`` so the
-    pipeline only has to deal with the list shape.
+    Every request carries ``documents`` (a non-empty list). A single
+    file is just a one-element list; the pipeline never needs to
+    branch on cardinality.
     """
 
     request_id: uuid.UUID = Field(default_factory=uuid.uuid4)
@@ -218,42 +207,19 @@ class ExtractionRequest(BaseModel):
         default="Extract structured data from the document.",
         description="Free-form prompt that nuances every node's behaviour (search, judge, rules).",
     )
-    document: DocumentInput | None = Field(
-        default=None,
-        description=(
-            "Legacy single-file shape. Mutually exclusive with "
-            "``documents``. Promoted to ``documents = [document]`` "
-            "internally."
-        ),
-    )
     documents: list[DocumentInput] = Field(
-        default_factory=list,
+        ...,
+        min_length=1,
         description=(
-            "Multi-file input. Each file is processed independently. Mutually exclusive with ``document``."
+            "Input files. Each file is processed independently. A file "
+            "may optionally pin its target type via ``document_type``; "
+            "otherwise the classifier stage matches it to one of the "
+            "declared ``docs`` entries."
         ),
     )
     docs: list[DocSpec] = Field(..., min_length=1)
     rules: list[RuleSpec] = Field(default_factory=list)
     options: ExtractionOptions = Field(default_factory=ExtractionOptions)
-
-    @model_validator(mode="after")
-    def _normalise_documents(self) -> ExtractionRequest:
-        if self.document is not None and self.documents:
-            raise ValueError(
-                "request can carry either ``document`` (legacy single-file) "
-                "or ``documents`` (multi-file) but not both"
-            )
-        if self.document is None and not self.documents:
-            raise ValueError("request must carry either ``document`` or at least one entry in ``documents``")
-        return self
-
-    @property
-    def files(self) -> list[DocumentInput]:
-        """Return every input file as a uniform list, regardless of shape."""
-        if self.documents:
-            return list(self.documents)
-        assert self.document is not None  # guaranteed by the model_validator
-        return [self.document]
 
 
 # ---------------------------------------------------------------------------
@@ -279,12 +245,7 @@ class ClassificationInfo(BaseModel):
 
 
 class DocumentInfo(BaseModel):
-    """Summary of one input file.
-
-    For multi-file requests one ``DocumentInfo`` is produced per
-    submitted file; the legacy single-file shape ends up as a list
-    of length 1.
-    """
+    """Summary of one input file. One entry per submitted document."""
 
     filename: str
     media_type: str
@@ -295,8 +256,8 @@ class DocumentInfo(BaseModel):
         description=(
             "Final document type assigned to this file: the caller's pin "
             "when one was given, the classifier's verdict otherwise. "
-            "``null`` in the legacy single-file shape where the doc type "
-            "is implicit in ``docs[0]``."
+            "``null`` when neither the caller nor the classifier could "
+            "settle on a type."
         ),
     )
     classification: ClassificationInfo | None = Field(
@@ -322,11 +283,7 @@ class ExtractedDocument(BaseModel):
     notes: str | None = None
     source_file: str | None = Field(
         default=None,
-        description=(
-            "Filename of the input file this extracted document came "
-            "from. Populated for multi-file requests; ``null`` for the "
-            "legacy single-file shape."
-        ),
+        description="Filename of the input file this extracted document came from.",
     )
 
 
@@ -393,20 +350,9 @@ class ExtractionResult(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     request_id: uuid.UUID
-    document: DocumentInfo | None = Field(
-        default=None,
-        description=(
-            "Legacy single-file echo of the input. ``None`` when the "
-            "request used the multi-file ``documents`` shape -- in that "
-            "case read ``files`` instead."
-        ),
-    )
     files: list[DocumentInfo] = Field(
         default_factory=list,
-        description=(
-            "Per-file summary for every input file the request carried. "
-            "For the legacy single-file shape this is a list of length 1."
-        ),
+        description="Per-file summary for every input file the request carried.",
     )
     documents: list[ExtractedDocument] = Field(default_factory=list)
     additional_documents: list[ExtractedDocument] = Field(

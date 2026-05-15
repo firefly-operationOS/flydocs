@@ -181,9 +181,10 @@ def _render(result, request) -> str:
     out.append(f"  flydesk-idp -- real Claude run ({result.model})")
     out.append("=" * 70)
     out.append("")
-    out.append(f"document      : {result.document.filename} ({result.document.media_type})")
-    out.append(f"pages         : {result.document.page_count}")
-    out.append(f"bytes         : {result.document.bytes:,}")
+    primary = result.files[0]
+    out.append(f"document      : {primary.filename} ({primary.media_type})")
+    out.append(f"pages         : {primary.page_count}")
+    out.append(f"bytes         : {primary.bytes:,}")
     out.append(f"latency_ms    : {result.latency_ms:,}")
     out.append(f"request_id    : {result.request_id}")
     out.append("")
@@ -280,11 +281,13 @@ def test_real_claude_extraction_with_rules() -> None:
             "Extract the canonical fields, verify the notary's signature is "
             "present, and evaluate whether the document is complete and recent."
         ),
-        document=DocumentInput(
-            filename=PDF_PATH.name,
-            content_base64=base64.b64encode(pdf_bytes).decode("ascii"),
-            content_type="application/pdf",
-        ),
+        documents=[
+            DocumentInput(
+                filename=PDF_PATH.name,
+                content_base64=base64.b64encode(pdf_bytes).decode("ascii"),
+                content_type="application/pdf",
+            )
+        ],
         docs=[doc_spec],
         rules=_RULES,
         options=ExtractionOptions(
@@ -307,8 +310,8 @@ def test_real_claude_extraction_with_rules() -> None:
     print("\n" + _render(result, request))
 
     # -------- assertions ------------------------------------------------
-    assert result.document.media_type == "application/pdf"
-    assert result.document.page_count >= 1
+    assert result.files[0].media_type == "application/pdf"
+    assert result.files[0].page_count >= 1
     assert len(result.documents) == 1
     doc = result.documents[0]
     assert doc.document_type == _DOC_TYPE
