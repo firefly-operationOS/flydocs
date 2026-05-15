@@ -325,31 +325,22 @@ class JobWorker:
         docs = [DocSpec.model_validate(d) for d in schema.get("docs", [])]
         rules = [RuleSpec.model_validate(r) for r in schema.get("rules", [])]
         options = ExtractionOptions.model_validate(job.options_json or {})
-        # Multi-file submits persist their files as ``schema.documents``;
-        # legacy single-file submits use the ``document_content_*`` keys.
-        documents_payload = schema.get("documents")
-        if isinstance(documents_payload, list) and documents_payload:
-            return ExtractionRequest(
-                intention=intention,
-                documents=[
-                    DocumentInput(
-                        filename=d.get("filename", job.filename),
-                        content_base64=d.get("content_base64", ""),
-                        content_type=d.get("content_type"),
-                    )
-                    for d in documents_payload
-                ],
-                docs=docs,
-                rules=rules,
-                options=options,
+        documents_payload = schema.get("documents") or []
+        if not documents_payload:
+            raise ValueError(
+                f"job {job.id} schema_json missing 'documents' — cannot rebuild ExtractionRequest"
             )
         return ExtractionRequest(
             intention=intention,
-            document=DocumentInput(
-                filename=job.filename,
-                content_base64=schema.get("document_content_base64", ""),
-                content_type=schema.get("document_content_type"),
-            ),
+            documents=[
+                DocumentInput(
+                    filename=d.get("filename", job.filename),
+                    content_base64=d.get("content_base64", ""),
+                    content_type=d.get("content_type"),
+                    document_type=d.get("document_type"),
+                )
+                for d in documents_payload
+            ],
             docs=docs,
             rules=rules,
             options=options,

@@ -243,37 +243,25 @@ class BboxRefineWorker:
         result = ExtractionResult.model_validate(job.result_json)
 
         schema = job.schema_json or {}
-        # ``schema_json`` carries the original document bytes the submit
-        # handler stored. Two shapes are supported:
-        #   * multi-file (``documents=[{filename, content_base64, ...}]``)
-        #   * legacy single-file (``document_content_base64``/``_type``)
-        # We normalise each input file independently so the refiner has
-        # one ``NormalisedBinary`` row per ``source_file`` to look up.
-        sources: list[tuple[bytes, str | None, str]] = []
-        documents_payload = schema.get("documents")
-        if isinstance(documents_payload, list) and documents_payload:
-            for entry in documents_payload:
-                encoded_one = entry.get("content_base64") or ""
-                if not encoded_one:
-                    continue
-                sources.append(
-                    (
-                        base64.b64decode(encoded_one),
-                        entry.get("content_type"),
-                        entry.get("filename") or job.filename,
-                    )
-                )
-        else:
-            encoded = schema.get("document_content_base64") or ""
-            if not encoded:
-                raise ValueError(f"job {job.id} has no document bytes in schema_json")
-            sources.append(
-                (
-                    base64.b64decode(encoded),
-                    schema.get("document_content_type"),
-                    job.filename,
-                )
+        # ``schema_json.documents`` carries every input file the submit
+        # handler stored: a list of ``{filename, content_base64,
+        # content_type, document_type}``. We normalise each one
+        # independently so the refiner has one :class:`NormalisedBinary`
+        # row per ``source_file`` to look up.
+        documents_payload = schema.get("documents") or []
+        if not documents_payload:
+            raise ValueError(f"job {job.id} schema_json missing 'documents'")
+        sources: list[tuple[bytes, str | None, str]] = [
+            (
+                base64.b64decode(entry.get("content_base64") or ""),
+                entry.get("content_type"),
+                entry.get("filename") or job.filename,
             )
+            for entry in documents_payload
+            if entry.get("content_base64")
+        ]
+        if not sources:
+            raise ValueError(f"job {job.id} has no decodable document bytes in schema_json")
 
         normalised: list[NormalisedBinary] = []
         for raw_bytes, media_type, name in sources:
@@ -287,15 +275,13 @@ class BboxRefineWorker:
         # Index by filename for source_file lookups. Multi-row inputs
         # carry their normalised filename in ``row.filename``.
         by_filename: dict[str, NormalisedBinary] = {row.filename: row for row in normalised}
-        # Fallback row when ``source_file`` is null (legacy single-doc).
-        fallback = normalised[0] if normalised else None
 
         language_hint = (job.options_json or {}).get("language_hint")
 
         for document in result.documents:
             if not document.fields:
                 continue
-            row = by_filename.get(document.source_file or "", fallback)
+            row = by_filename.get(document.source_file or "")
             if row is None:
                 continue
             await self._refiner.refine(

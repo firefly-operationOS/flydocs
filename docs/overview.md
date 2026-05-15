@@ -94,7 +94,8 @@ load → split? → extract → field_validation? → visual_authenticity?
 
 The extractor is always on. The rest are caller-toggled through
 `ExtractionOptions.stages`. The DAG is built fresh per request from
-`agentic.PipelineEngine`, so the trace mirrors exactly what ran.
+`fireflyframework-agentic`'s `PipelineEngine`, so the trace mirrors
+exactly what ran.
 
 ### 3c. The `ExtractionResult`
 
@@ -121,7 +122,7 @@ ExtractController     ← @rest_controller, RFC 7807 on validation error
 ExtractHandler        ← @command_handler. asyncio.wait_for(SYNC_TIMEOUT_S).
       │
       ▼
-PipelineOrchestrator  ← builds an agentic.PipelineEngine DAG
+PipelineOrchestrator  ← builds a fireflyframework-agentic PipelineEngine DAG
       │
       ├──▶ load           DocumentLoader: sniff media_type + page count
       ├──▶ split?         DocumentSplitter (LLM): pages per docType
@@ -143,7 +144,7 @@ Async path (`POST /api/v1/jobs`):
 
 ```
 JobsController → SubmitJobCommand → SubmitJobHandler → ExtractionJob table
-                                                      └──▶ pyfly EventPublisher.publish
+                                                      └──▶ fireflyframework-pyfly EventPublisher.publish
                                                             (IDPJobSubmitted event)
                                                               │
                                                               ▼  durable outbox in Postgres
@@ -177,7 +178,7 @@ care; only the bus implementation changes.
 | Wire a new bean                                   | `core/configuration.py` (`@bean`) or decorate the class with `@service` |
 | Diagnose a request                                | Grep the structured logs by `request_id` (UUID stamped in the response) |
 | Run only the unit tests                           | `task test`                                                              |
-| Run the real-LLM smoke test                       | `ANTHROPIC_API_KEY=… task test:llm`                                      |
+| Run the real-LLM smoke test                       | `ANTHROPIC_API_KEY=… task test:llm` (or `OPENAI_API_KEY=…` etc., depending on the model id in `FLYDESK_IDP_MODEL`) |
 
 ---
 
@@ -187,9 +188,9 @@ care; only the bus implementation changes.
 | ---------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------ |
 | **PyFly application**              | Spring-Boot-style framework: DI, CQRS, web, EDA, actuator, security  | `flydesk_idp.app.FlydeskIDPApplication`         |
 | **Configuration**                  | Single `@configuration` declaring every cross-cutting bean           | `core/configuration.py::IDPCoreConfiguration`   |
-| **PromptCatalog**                  | Loads YAML prompts at boot, registers them with the agentic registry | `core/services/extraction/prompts.py`           |
-| **Pipeline orchestrator**          | Builds + runs an `agentic.PipelineEngine` per request                | `core/services/pipeline/orchestrator.py`        |
-| **Event bus**                      | `pyfly.eda.EventPublisher` — default Postgres outbox + LISTEN/NOTIFY; swap to Redis Streams / Kafka via `FLYDESK_IDP_EDA_ADAPTER` | injected by `pyfly.eda.auto_configuration.EdaAutoConfiguration` |
+| **PromptCatalog**                  | Loads YAML prompts at boot, registers them with the `fireflyframework-agentic` registry | `core/services/extraction/prompts.py`           |
+| **Pipeline orchestrator**          | Builds + runs a `fireflyframework-agentic` `PipelineEngine` per request                | `core/services/pipeline/orchestrator.py`        |
+| **Event bus**                      | `fireflyframework-pyfly` `EventPublisher` — default Postgres outbox + LISTEN/NOTIFY; swap to Redis Streams / Kafka via `FLYDESK_IDP_EDA_ADAPTER` | injected by `pyfly.eda.auto_configuration.EdaAutoConfiguration` |
 | **WebhookPublisher**               | HMAC-SHA256 signed, retries on 5xx / 429 with `tenacity`             | `core/services/webhook/webhook_publisher.py`    |
 | **Database**                       | Async SQLAlchemy + Alembic                                           | `models/repositories/extraction_job_repository.py` |
 | **Settings**                       | Pydantic settings; every knob is a `FLYDESK_IDP_*` env var           | `config.py`                                      |
@@ -199,7 +200,8 @@ care; only the bus implementation changes.
 ## 7. What's coming next in the docs
 
 - [architecture.md](architecture.md) — Firefly Framework deep dive: how
-  pyfly resolves the bean graph and how agentic builds the pipeline.
+  `fireflyframework-pyfly` resolves the bean graph and how
+  `fireflyframework-agentic` builds the pipeline.
 - [pipeline.md](pipeline.md) — every stage in detail, with timeouts,
   concurrency, and debugging recipes.
 - [api-reference.md](api-reference.md) — full request/response schemas.

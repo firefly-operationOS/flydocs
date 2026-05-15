@@ -248,8 +248,7 @@ class PipelineOrchestrator:
     async def _execute_inner(self, request: ExtractionRequest, started: float) -> ExtractionResult:
         stages = request.options.stages
         model_id = request.options.model or self._default_model
-        files = request.files
-        is_multi_file = len(files) > 1 or any(f.document_type for f in files)
+        files = request.documents
 
         builder = PipelineBuilder(self.PIPELINE_NAME)
         chain: list[str] = []
@@ -368,7 +367,6 @@ class PipelineOrchestrator:
             metadata={
                 "request": request,
                 "model_id": model_id,
-                "is_multi_file": is_multi_file,
                 "pipeline_errors": [],
                 "unmatched_segments": [],  # segments the classifier left without a docType
             },
@@ -404,7 +402,7 @@ class PipelineOrchestrator:
         files: list[_FileSlot] = []
         # Slot index is monotonic across the expansion of all inputs.
         slot_index = 0
-        for file in request.files:
+        for file in request.documents:
             document_bytes = file.decoded_bytes()
             normalised = await self._binary_normalizer.normalise(
                 document_bytes,
@@ -440,12 +438,8 @@ class PipelineOrchestrator:
                 ]
                 files.append(slot)
                 slot_index += 1
-        # ``is_multi_file`` is recomputed after expansion so a single
-        # uploaded ZIP that fans out to N members surfaces as multi-file.
-        is_multi_file = len(files) > 1 or any(s.declared_doctype for s in files)
-        ctx.metadata["is_multi_file"] = is_multi_file
         ctx.metadata["files_data"] = files
-        return {"file_count": len(files), "is_multi_file": is_multi_file}
+        return {"file_count": len(files)}
 
     async def _step_discover(self, ctx: PipelineContext, _inputs: dict[str, Any]) -> Any:
         """Per-file splitter: enumerate every distinct sub-document.
@@ -901,12 +895,9 @@ class PipelineOrchestrator:
         files_data: list[_FileSlot] = ctx.metadata.get("files_data", [])
         tasks: list[_ExtractionTask] = ctx.metadata.get("tasks", [])
         rule_results = ctx.metadata.get("rule_results", [])
-        is_multi_file: bool = ctx.metadata.get("is_multi_file", False)
         unmatched_segments: list[_Segment] = ctx.metadata.get("unmatched_segments", [])
 
         files_info = [_file_info(slot) for slot in files_data]
-        # Legacy ``document`` field for the single-file request shape.
-        document_info = files_info[0] if (files_info and not is_multi_file) else None
 
         # Resolve the model field by aggregating what the extractor actually
         # used across tasks (handles fallback + escalation).
@@ -923,7 +914,7 @@ class PipelineOrchestrator:
                 confidence=_segment_confidence(task.segment),
                 fields=task.extracted_groups,
                 authenticity=DocumentAuthenticity(visual=task.visual, content=task.content),
-                source_file=task.segment.filename if is_multi_file else None,
+                source_file=task.segment.filename,
             )
             for task in tasks
         ]
@@ -939,7 +930,7 @@ class PipelineOrchestrator:
                     seg.classification.confidence if seg.classification else seg.segmentation_confidence
                 ),
                 notes=(seg.classification.notes if seg.classification else None),
-                source_file=seg.filename if is_multi_file else None,
+                source_file=seg.filename,
             )
             for seg in unmatched_segments
         ]
@@ -952,7 +943,6 @@ class PipelineOrchestrator:
         trace = _trace_entries(pipeline_result)
         return ExtractionResult(
             request_id=request.request_id,
-            document=document_info,
             files=files_info,
             documents=documents,
             additional_documents=additional_documents,

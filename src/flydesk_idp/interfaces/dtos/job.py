@@ -6,7 +6,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from pydantic import AnyHttpUrl, BaseModel, Field, model_validator
+from pydantic import AnyHttpUrl, BaseModel, Field
 
 from flydesk_idp.interfaces.dtos.doc import DocSpec
 from flydesk_idp.interfaces.dtos.extract import DocumentInput, ExtractionOptions, ExtractionResult
@@ -15,28 +15,19 @@ from flydesk_idp.interfaces.enums.job_status import JobStatus
 
 
 class SubmitJobRequest(BaseModel):
-    """Async-job submit payload -- single-file or multi-file.
+    """Async-job submit payload.
 
-    Mirrors :class:`flydesk_idp.interfaces.dtos.extract.ExtractionRequest`
-    in accepting either the legacy ``document`` (single file) shape or
-    the multi-file ``documents`` shape. The two are mutually exclusive;
-    use the :meth:`files` accessor to read the input as a uniform list.
+    Mirrors :class:`flydesk_idp.interfaces.dtos.extract.ExtractionRequest`:
+    every submission carries a non-empty ``documents`` list. A single
+    file is just a one-element list — the worker pipeline never branches
+    on cardinality.
     """
 
     intention: str = "Extract structured data from the document."
-    document: DocumentInput | None = Field(
-        default=None,
-        description=(
-            "Legacy single-file shape. Mutually exclusive with ``documents``. "
-            "Internally promoted to ``documents = [document]`` by the handler."
-        ),
-    )
     documents: list[DocumentInput] = Field(
-        default_factory=list,
-        description=(
-            "Multi-file input. Each entry is processed independently by the "
-            "pipeline. Mutually exclusive with ``document``."
-        ),
+        ...,
+        min_length=1,
+        description="Input files. Each entry is processed independently by the pipeline.",
     )
     docs: list[DocSpec] = Field(..., min_length=1)
     rules: list[RuleSpec] = Field(default_factory=list)
@@ -46,25 +37,6 @@ class SubmitJobRequest(BaseModel):
         description="If set, the worker POSTs a JobWebhookPayload here on terminal status.",
     )
     metadata: dict[str, Any] = Field(default_factory=dict)
-
-    @model_validator(mode="after")
-    def _normalise_documents(self) -> SubmitJobRequest:
-        if self.document is not None and self.documents:
-            raise ValueError(
-                "request can carry either ``document`` (legacy single-file) "
-                "or ``documents`` (multi-file) but not both"
-            )
-        if self.document is None and not self.documents:
-            raise ValueError("request must carry either ``document`` or at least one entry in ``documents``")
-        return self
-
-    @property
-    def files(self) -> list[DocumentInput]:
-        """Return every input file as a uniform list, regardless of shape."""
-        if self.documents:
-            return list(self.documents)
-        assert self.document is not None  # guaranteed by the model_validator
-        return [self.document]
 
 
 class SubmitJobResponse(BaseModel):

@@ -56,7 +56,7 @@ def _request(*, escalation_threshold=None, escalation_model=None) -> ExtractionR
     if escalation_model is not None:
         opts.escalation_model = escalation_model
     return ExtractionRequest(
-        document=DocumentInput(filename="x.pdf", content_base64=_DUMMY, content_type="application/pdf"),
+        documents=[DocumentInput(filename="x.pdf", content_base64=_DUMMY, content_type="application/pdf")],
         docs=[_doc_spec()],
         rules=[],
         options=opts,

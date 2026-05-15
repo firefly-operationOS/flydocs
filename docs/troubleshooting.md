@@ -32,8 +32,9 @@ resolve it. Usually one of:
 
 ### `'list' object has no attribute 'document'`
 
-A class with an `async def run(...)` method was treated as a pyfly
-`CommandLineRunner` and auto-invoked at startup with `sys.argv[1:]`.
+A class with an `async def run(...)` method was treated as a
+`fireflyframework-pyfly` `CommandLineRunner` and auto-invoked at
+startup with `sys.argv[1:]`.
 
 - Rename the method to something other than `run`. The
   `PipelineOrchestrator` uses `execute` for exactly this reason.
@@ -215,9 +216,9 @@ DAG nodes were changed back to `RuleSpec` objects. Nodes are strings
 
 ### No metrics on `/actuator/metrics`
 
-Make sure `pyfly.metrics.enabled: true` is in `pyfly.yaml` (it is by
-default via `@enable_core_stack`). Then scrape the endpoint — output is
-Prometheus format.
+Make sure `pyfly.metrics.enabled: true` is in `fireflyframework-pyfly`'s
+app config (it is by default via `@enable_core_stack`). Then scrape the
+endpoint — output is Prometheus format.
 
 ### Logs lack request ids
 
