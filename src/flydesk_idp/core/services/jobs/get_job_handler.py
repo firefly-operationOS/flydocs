@@ -38,4 +38,10 @@ class GetJobHandler(QueryHandler[GetJobQuery, JobStatusResponse | None]):
             attempts=job.attempts,
             error_code=job.error_code,
             error_message=job.error_message,
+            bbox_refine_status=job.bbox_refine_status,
+            bbox_refine_attempts=job.bbox_refine_attempts or 0,
+            bbox_refine_started_at=job.bbox_refine_started_at,
+            bbox_refine_finished_at=job.bbox_refine_finished_at,
+            bbox_refine_error_code=job.bbox_refine_error_code,
+            bbox_refine_error_message=job.bbox_refine_error_message,
         )

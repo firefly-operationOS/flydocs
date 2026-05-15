@@ -122,6 +122,70 @@ class ExtractionJobRepository:
     async def mark_cancelled(self, job_id: str) -> ExtractionJob | None:
         return await self.update(job_id, status="CANCELLED", finished_at=_utcnow())
 
+    # -- bbox-refine leg ----------------------------------------------
+
+    async def mark_partial_succeeded(self, job_id: str, *, result: dict[str, Any]) -> ExtractionJob | None:
+        """Main extraction done; bbox refine pending.
+
+        Persists the LLM-bbox result, transitions the job to
+        ``PARTIAL_SUCCEEDED``, and stamps the bbox leg as ``pending``.
+        Callers reading ``GET /api/v1/jobs/{id}/result`` get the
+        ungrounded result immediately; grounded coordinates land once
+        the refine worker finishes.
+        """
+        return await self.update(
+            job_id,
+            status="PARTIAL_SUCCEEDED",
+            result_json=result,
+            error_code=None,
+            error_message=None,
+            bbox_refine_status="pending",
+        )
+
+    async def mark_bbox_refining(self, job_id: str) -> ExtractionJob | None:
+        """Bbox worker has picked up the event and started grounding.
+
+        Atomically transitions ``PARTIAL_SUCCEEDED`` -> ``REFINING_BBOXES``
+        and increments the bbox attempt counter so retries are bounded.
+        """
+        async with self._session_factory() as session:
+            job = await session.get(ExtractionJob, job_id)
+            if job is None:
+                return None
+            job.status = "REFINING_BBOXES"
+            job.bbox_refine_status = "running"
+            job.bbox_refine_started_at = _utcnow()
+            job.bbox_refine_attempts = (job.bbox_refine_attempts or 0) + 1
+            await session.commit()
+            await session.refresh(job)
+            return job
+
+    async def mark_bbox_refined(self, job_id: str, *, result: dict[str, Any]) -> ExtractionJob | None:
+        """Refiner produced grounded coordinates; flip to fully SUCCEEDED."""
+        return await self.update(
+            job_id,
+            status="SUCCEEDED",
+            finished_at=_utcnow(),
+            result_json=result,
+            bbox_refine_status="succeeded",
+            bbox_refine_finished_at=_utcnow(),
+            bbox_refine_error_code=None,
+            bbox_refine_error_message=None,
+        )
+
+    async def mark_bbox_refine_failed(self, job_id: str, *, code: str, message: str) -> ExtractionJob | None:
+        """Refiner gave up; revert to ``PARTIAL_SUCCEEDED`` so the LLM-bbox
+        result stays readable. Failure context is captured on the row.
+        """
+        return await self.update(
+            job_id,
+            status="PARTIAL_SUCCEEDED",
+            bbox_refine_status="failed",
+            bbox_refine_finished_at=_utcnow(),
+            bbox_refine_error_code=code,
+            bbox_refine_error_message=message,
+        )
+
 
 def _utcnow() -> datetime:
     return datetime.now(UTC)

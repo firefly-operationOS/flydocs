@@ -39,7 +39,13 @@ normally have to glue together themselves:
    the workflow that called us.
 
 The same call works synchronously (blocking, sub-minute) or as a
-queue-backed async job with an HMAC-signed webhook.
+queue-backed async job with an HMAC-signed webhook. When bbox grounding
+is enabled, async jobs go through a two-stage state machine: the main
+extraction lands in ``PARTIAL_SUCCEEDED`` with the LLM-bbox result
+immediately readable, then a second EDA worker grounds the coordinates
+and flips the job to ``SUCCEEDED``. Callers can poll status, fetch the
+partial result, or long-poll ``GET /api/v1/jobs/{id}/result?wait_for_bboxes=true``
+to block until grounding finishes.
 
 ---
 

@@ -16,6 +16,7 @@ from pyfly.web import (
     Body,
     Header,
     PathVar,
+    QueryParam,
     Valid,
     delete_mapping,
     get_mapping,
@@ -112,15 +113,33 @@ class JobsController:
         return status
 
     @get_mapping("/{job_id}/result")
-    async def get_result(self, job_id: PathVar[str]) -> JobResult:
-        """Fetch the final ``ExtractionResult`` of a finished job.
+    async def get_result(
+        self,
+        job_id: PathVar[str],
+        wait_for_bboxes: QueryParam[bool] = False,
+        timeout: QueryParam[float] = 60.0,
+    ) -> JobResult:
+        """Fetch the ``ExtractionResult`` of a finished or partial job.
 
-        Valid only once the job is ``SUCCEEDED`` -- while it's still
-        running or queued the endpoint returns ``409 job_not_ready``.
-        Unknown ``job_id`` returns ``404``.
+        Returns the result when the job is in ``SUCCEEDED``,
+        ``PARTIAL_SUCCEEDED``, or ``REFINING_BBOXES``. ``QUEUED`` /
+        ``RUNNING`` / ``FAILED`` / ``CANCELLED`` return
+        ``409 job_not_ready``. Unknown ``job_id`` returns ``404``.
+
+        ``wait_for_bboxes=true`` long-polls the row until the bbox refiner
+        finishes (status -> ``SUCCEEDED``) or ``timeout`` (seconds, default
+        60) elapses; on timeout the partial result is returned with the
+        LLM-bbox version intact. Useful for callers that submitted async
+        but need grounded coordinates inline.
         """
         try:
-            result = await self._queries.query(GetJobResultQuery(job_id=job_id))
+            result = await self._queries.query(
+                GetJobResultQuery(
+                    job_id=job_id,
+                    wait_for_bboxes=bool(wait_for_bboxes),
+                    timeout_s=float(timeout),
+                )
+            )
         except JobNotReady as exc:
             raise _http_problem(409, "job_not_ready", "Job not ready", str(exc)) from exc
         if result is None:
