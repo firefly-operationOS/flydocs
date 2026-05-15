@@ -15,6 +15,7 @@ import hashlib
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Any
 
 from pyfly.container import service
 from pyfly.cqrs import Command, CommandHandler, command_handler
@@ -79,13 +80,23 @@ class SubmitJobHandler(CommandHandler[SubmitJobCommand, SubmitJobResponse]):
         payload = command.request
         # Reuse the sync semantic validator over an ExtractionRequest
         # built from the submit payload -- same checks, same error shape.
-        as_extraction = ExtractionRequest(
-            intention=payload.intention,
-            document=payload.document,
-            docs=payload.docs,
-            rules=payload.rules,
-            options=payload.options,
-        )
+        files = payload.files
+        if len(files) == 1:
+            as_extraction = ExtractionRequest(
+                intention=payload.intention,
+                document=files[0],
+                docs=payload.docs,
+                rules=payload.rules,
+                options=payload.options,
+            )
+        else:
+            as_extraction = ExtractionRequest(
+                intention=payload.intention,
+                documents=files,
+                docs=payload.docs,
+                rules=payload.rules,
+                options=payload.options,
+            )
         report = self._validator.validate(as_extraction)
         if report.has_errors:
             raise InvalidRequestError(report)
@@ -97,8 +108,42 @@ class SubmitJobHandler(CommandHandler[SubmitJobCommand, SubmitJobResponse]):
                 issue.message,
             )
 
-        bytes_decoded = payload.document.decoded_bytes()
-        content_sha256 = hashlib.sha256(bytes_decoded).hexdigest()
+        # The DB row carries a single ``filename``/``content_sha256`` pair;
+        # for multi-file submits we summarise (first filename + count) and
+        # hash the concatenation so the idempotency / dedupe checks still
+        # work. The per-file bytes live in ``schema_json.documents``.
+        per_file_bytes = [f.decoded_bytes() for f in files]
+        total_bytes = sum(len(b) for b in per_file_bytes)
+        if len(files) == 1:
+            primary_filename = files[0].filename
+            content_sha256 = hashlib.sha256(per_file_bytes[0]).hexdigest()
+            schema_json: dict[str, Any] = {
+                "intention": payload.intention,
+                "docs": [d.model_dump(mode="json") for d in payload.docs],
+                "rules": [r.model_dump(mode="json") for r in payload.rules],
+                "document_content_base64": files[0].content_base64,
+                "document_content_type": files[0].content_type,
+            }
+        else:
+            primary_filename = f"{files[0].filename} (+{len(files) - 1} more)"[:255]
+            roll = hashlib.sha256()
+            for f, b in zip(files, per_file_bytes, strict=True):
+                roll.update(f.filename.encode("utf-8"))
+                roll.update(b)
+            content_sha256 = roll.hexdigest()
+            schema_json = {
+                "intention": payload.intention,
+                "docs": [d.model_dump(mode="json") for d in payload.docs],
+                "rules": [r.model_dump(mode="json") for r in payload.rules],
+                "documents": [
+                    {
+                        "filename": f.filename,
+                        "content_base64": f.content_base64,
+                        "content_type": f.content_type,
+                    }
+                    for f in files
+                ],
+            }
 
         # Persist the inbound correlation context alongside the caller's
         # free-form metadata. The worker reads it back later to stamp
@@ -112,16 +157,10 @@ class SubmitJobHandler(CommandHandler[SubmitJobCommand, SubmitJobResponse]):
         job = ExtractionJob(
             idempotency_key=command.idempotency_key,
             status=JobStatus.QUEUED.value,
-            filename=payload.document.filename,
+            filename=primary_filename,
             content_sha256=content_sha256,
-            content_bytes=len(bytes_decoded),
-            schema_json={
-                "intention": payload.intention,
-                "docs": [d.model_dump(mode="json") for d in payload.docs],
-                "rules": [r.model_dump(mode="json") for r in payload.rules],
-                "document_content_base64": payload.document.content_base64,
-                "document_content_type": payload.document.content_type,
-            },
+            content_bytes=total_bytes,
+            schema_json=schema_json,
             options_json=payload.options.model_dump(mode="json"),
             callback_url=str(payload.callback_url) if payload.callback_url else None,
             metadata_json=metadata,

@@ -65,8 +65,22 @@ class IDPSettings(BaseSettings):
     max_sync_pages: int = 10
     max_bytes: int = 32 * 1024 * 1024  # 32 MiB
     sync_timeout_s: int = 60
-    async_timeout_s: int = 300
+    # Total wall-clock budget per async job (``JobWorker`` wraps the
+    # whole pipeline in ``asyncio.wait_for`` with this timeout). Must be
+    # >= the sum of the per-stage timeouts below. Default sized for
+    # 7-PDF multi-file bundles with the empty-array auto-retry path.
+    async_timeout_s: int = 1200
     job_max_attempts: int = 3
+
+    # Per-pipeline-step timeouts (env-tunable). Conservative defaults so
+    # multi-file requests + the empty-array auto-retry don't run into a
+    # hard wall on the first call.
+    extract_timeout_s: int = 600
+    judge_timeout_s: int = 300
+    bbox_refine_inline_timeout_s: int = 300
+    classifier_timeout_s: int = 180
+    splitter_timeout_s: int = 180
+    judge_escalation_timeout_s: int = 600
     # Exponential backoff bounds between async job retries. The worker
     # schedules the next attempt at ``min(retry_max_delay_s,
     # retry_base_delay_s * 2^(attempt - 1))`` plus a small jitter.
@@ -204,14 +218,17 @@ class IDPSettings(BaseSettings):
         ),
     )
     bbox_refine_matcher: str = Field(
-        default="llm",
+        default="hybrid",
         description=(
             "Strategy that maps each extracted value to OCR / text-layer "
-            "word indices. ``llm`` (default) is generic + multilingual + "
-            "format-agnostic -- one focused LLM call per page handles every "
-            "field at once. ``fuzzy`` is the deterministic rapidfuzz "
-            "fallback for callers that want zero per-request LLM cost on "
-            "the refine path."
+            "word indices. ``hybrid`` (default) cascades: deterministic "
+            "rapidfuzz first (free, millisecond-scale), LLM only for the "
+            "residual fields it could not resolve -- grounds 70-90% of "
+            "fields without an LLM call while still covering spelled-out "
+            "numbers and format variants. ``llm`` runs the LLM matcher on "
+            "every field (generic + multilingual, one focused per-page "
+            "call). ``fuzzy`` is the deterministic rapidfuzz strategy "
+            "alone for callers that want zero per-request LLM cost."
         ),
     )
     bbox_refine_max_text_pages: int = Field(

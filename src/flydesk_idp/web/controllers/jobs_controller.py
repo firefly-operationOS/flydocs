@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 
 from pyfly.container import rest_controller
 
@@ -28,17 +29,20 @@ from flydesk_idp.core.services.jobs import (
     CancelJobCommand,
     GetJobQuery,
     GetJobResultQuery,
+    ListJobsQuery,
     SubmitJobCommand,
 )
 from flydesk_idp.core.services.jobs.cancel_job_handler import JobNotCancellable
 from flydesk_idp.core.services.jobs.get_job_result_handler import JobNotReady
 from flydesk_idp.core.services.jobs.submit_job_handler import InvalidRequestError
 from flydesk_idp.interfaces.dtos.job import (
+    JobListResponse,
     JobResult,
     JobStatusResponse,
     SubmitJobRequest,
     SubmitJobResponse,
 )
+from flydesk_idp.interfaces.enums.job_status import JobStatus
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +99,45 @@ class JobsController:
                 ),
                 extra=exc.report.to_payload(),
             ) from exc
+
+    @get_mapping("")
+    async def list_jobs(
+        self,
+        status: QueryParam[str] = "",
+        bbox_refine_status: QueryParam[str] = "",
+        idempotency_key: QueryParam[str] = "",
+        created_after: QueryParam[str] = "",
+        created_before: QueryParam[str] = "",
+        limit: QueryParam[int] = 50,
+        offset: QueryParam[int] = 0,
+    ) -> JobListResponse:
+        """Paginated, filterable listing of extraction jobs.
+
+        Filters are optional and combine with ``AND``:
+
+        * ``status`` -- comma-separated list of statuses (e.g.
+          ``?status=SUCCEEDED,PARTIAL_SUCCEEDED``). Empty = any status.
+        * ``bbox_refine_status`` -- comma-separated list of refine
+          sub-states: ``pending``, ``running``, ``succeeded``, ``failed``.
+        * ``idempotency_key`` -- exact match against the submit-time key.
+        * ``created_after`` / ``created_before`` -- RFC 3339 timestamps,
+          both inclusive.
+
+        Rows are returned ``created_at DESC`` (newest first) with
+        ``total`` reflecting the filtered set so the caller can paginate.
+        ``limit`` is capped at 500.
+        """
+        return await self._queries.query(
+            ListJobsQuery(
+                statuses=tuple(JobStatus(s) for s in _split_csv(status)),
+                bbox_refine_statuses=tuple(_split_csv(bbox_refine_status)),
+                created_after=_parse_iso(created_after),
+                created_before=_parse_iso(created_before),
+                idempotency_key=idempotency_key or None,
+                limit=int(limit),
+                offset=int(offset),
+            )
+        )
 
     @get_mapping("/{job_id}")
     async def get_status(self, job_id: PathVar[str]) -> JobStatusResponse:
@@ -166,6 +209,21 @@ class JobsController:
                 f"Job {job_id!r} not found", code="JOB_NOT_FOUND", context={"job_id": job_id}
             )
         return cancelled
+
+
+def _split_csv(value: str) -> list[str]:
+    """Split a comma-separated query value into trimmed non-empty tokens."""
+    if not value:
+        return []
+    return [piece.strip() for piece in value.split(",") if piece.strip()]
+
+
+def _parse_iso(value: str) -> datetime | None:
+    """Parse an RFC 3339 timestamp; return ``None`` for empty input."""
+    if not value:
+        return None
+    # Python's ``fromisoformat`` accepts ``Z`` from 3.11+ but be defensive.
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
 def _http_problem(status_code: int, code: str, title: str, detail: str) -> Exception:

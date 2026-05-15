@@ -93,9 +93,26 @@ class BboxRefiner:
 
         counters = _Counters()
         counters.fields_seen = len(leaves)
-        if targets:
-            results = await self._matcher.locate_all(pages=pages, fields=targets)
-            for field_id, _value, _candidate in targets:
+        # Idempotency: when the inline refine pass already grounded a
+        # field (source ∈ {PDF_TEXT, OCR}), the out-of-band worker must
+        # not re-locate it. Re-running the matcher would burn LLM
+        # tokens / OCR CPU and risk replacing a high-confidence
+        # rectangle with a weaker one. Count those as already-grounded.
+        for field in leaves:
+            src = field.bbox.source
+            if src == BboxSource.PDF_TEXT:
+                counters.grounded_pdf_text += 1
+            elif src == BboxSource.OCR:
+                counters.grounded_ocr += 1
+        already_grounded_ids = {
+            str(idx)
+            for idx, field in enumerate(leaves)
+            if field.bbox.source in (BboxSource.PDF_TEXT, BboxSource.OCR)
+        }
+        residual_targets = [t for t in targets if t[0] not in already_grounded_ids]
+        if residual_targets:
+            results = await self._matcher.locate_all(pages=pages, fields=residual_targets)
+            for field_id, _value, _candidate in residual_targets:
                 field = leaves[int(field_id)]
                 match = results.get(field_id)
                 if match is None:

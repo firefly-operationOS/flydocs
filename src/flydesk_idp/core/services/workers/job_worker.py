@@ -154,6 +154,27 @@ class JobWorker:
             attempt=attempts,
         )
         request = self._build_request(job)
+        # Capture the original intent BEFORE we mutate the request: we
+        # need to know whether the caller wanted bbox refinement so we
+        # can publish the IDPBboxRefineRequested event afterwards, even
+        # if we skip the inline node below.
+        wants_bbox_refine = bool(getattr(request.options.stages, "bbox_refine", False))
+        if wants_bbox_refine:
+            # Architectural decision: on the async path, skip the inline
+            # bbox_refine node entirely. The dedicated BboxRefineWorker
+            # picks up the IDPBboxRefineRequested event we publish below
+            # and grounds bboxes there. Running both wastes minutes of
+            # CPU + LLM tokens on duplicate work — and when the inline
+            # step times out (which it does on multi-PDF bundles) the
+            # pipeline framework marks the node as failed, which is
+            # misleading because the out-of-band path recovers
+            # transparently. The :class:`BboxRefiner` is idempotent
+            # (already-grounded fields are skipped on re-run), so even
+            # if both paths execute the work won't double up — but
+            # bypassing inline saves the latency outright.
+            stages_skipped = request.options.stages.model_copy(update={"bbox_refine": False})
+            options_skipped = request.options.model_copy(update={"stages": stages_skipped})
+            request = request.model_copy(update={"options": options_skipped})
         started = time.monotonic()
         try:
             result = await asyncio.wait_for(
@@ -165,7 +186,6 @@ class JobWorker:
             # the actual grounding is delegated to ``BboxRefineWorker`` via
             # a second EDA event. The result is already readable -- only
             # the bboxes change between PARTIAL_SUCCEEDED and SUCCEEDED.
-            wants_bbox_refine = bool(getattr(request.options.stages, "bbox_refine", False))
             terminal_status = JobStatus.PARTIAL_SUCCEEDED if wants_bbox_refine else JobStatus.SUCCEEDED
             if wants_bbox_refine:
                 await self._repository.mark_partial_succeeded(job.id, result=result_payload)
@@ -275,16 +295,38 @@ class JobWorker:
 
     def _build_request(self, job: Any) -> ExtractionRequest:
         schema = job.schema_json or {}
+        intention = schema.get("intention", "Extract structured data from the document.")
+        docs = [DocSpec.model_validate(d) for d in schema.get("docs", [])]
+        rules = [RuleSpec.model_validate(r) for r in schema.get("rules", [])]
+        options = ExtractionOptions.model_validate(job.options_json or {})
+        # Multi-file submits persist their files as ``schema.documents``;
+        # legacy single-file submits use the ``document_content_*`` keys.
+        documents_payload = schema.get("documents")
+        if isinstance(documents_payload, list) and documents_payload:
+            return ExtractionRequest(
+                intention=intention,
+                documents=[
+                    DocumentInput(
+                        filename=d.get("filename", job.filename),
+                        content_base64=d.get("content_base64", ""),
+                        content_type=d.get("content_type"),
+                    )
+                    for d in documents_payload
+                ],
+                docs=docs,
+                rules=rules,
+                options=options,
+            )
         return ExtractionRequest(
-            intention=schema.get("intention", "Extract structured data from the document."),
+            intention=intention,
             document=DocumentInput(
                 filename=job.filename,
                 content_base64=schema.get("document_content_base64", ""),
                 content_type=schema.get("document_content_type"),
             ),
-            docs=[DocSpec.model_validate(d) for d in schema.get("docs", [])],
-            rules=[RuleSpec.model_validate(r) for r in schema.get("rules", [])],
-            options=ExtractionOptions.model_validate(job.options_json or {}),
+            docs=docs,
+            rules=rules,
+            options=options,
         )
 
     async def _fire_webhook(
