@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 
 _PROMPT_FILES: dict[str, str] = {
     "extract": "extract.yaml",
+    "extract_retry_arrays": "extract_retry_arrays.yaml",
     "splitter": "splitter.yaml",
     "classifier": "classifier.yaml",
     "content_authenticity": "content_authenticity.yaml",
@@ -69,6 +70,10 @@ class PromptCatalog:
     @property
     def extract(self) -> PromptTemplate:
         return self._templates["extract"]
+
+    @property
+    def extract_retry_arrays(self) -> PromptTemplate:
+        return self._templates["extract_retry_arrays"]
 
     @property
     def splitter(self) -> PromptTemplate:

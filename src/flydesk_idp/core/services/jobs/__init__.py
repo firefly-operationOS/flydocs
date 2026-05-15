@@ -7,6 +7,7 @@ from flydesk_idp.core.services.jobs.get_job_result_handler import (
     GetJobResultHandler,
     GetJobResultQuery,
 )
+from flydesk_idp.core.services.jobs.list_jobs_handler import ListJobsHandler, ListJobsQuery
 from flydesk_idp.core.services.jobs.submit_job_handler import SubmitJobCommand, SubmitJobHandler
 
 __all__ = [
@@ -16,6 +17,8 @@ __all__ = [
     "GetJobQuery",
     "GetJobResultHandler",
     "GetJobResultQuery",
+    "ListJobsHandler",
+    "ListJobsQuery",
     "SubmitJobCommand",
     "SubmitJobHandler",
 ]

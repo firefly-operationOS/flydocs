@@ -32,7 +32,9 @@ class ExtractionJob(Base):
     )
     # ``UNIQUE WHERE NOT NULL`` is enforced by the partial index below.
     idempotency_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    status: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    # ``String(24)`` -- fits ``PARTIAL_SUCCEEDED`` (17 chars) and ``REFINING_BBOXES`` (15);
+    # the original ``String(16)`` truncated the former and crashed asyncpg on commit.
+    status: Mapped[str] = mapped_column(String(24), nullable=False, index=True)
     filename: Mapped[str] = mapped_column(String(255), nullable=False)
     content_sha256: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     content_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -59,7 +61,7 @@ class ExtractionJob(Base):
     # Bbox-refine leg state -- populated only when the caller enabled
     # ``options.stages.bbox_refine``. ``null`` for jobs that never asked
     # for grounding. See ``interfaces/enums/job_status.py::BboxRefineStatus``.
-    bbox_refine_status: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    bbox_refine_status: Mapped[str | None] = mapped_column(String(24), nullable=True)
     bbox_refine_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     bbox_refine_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     bbox_refine_finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

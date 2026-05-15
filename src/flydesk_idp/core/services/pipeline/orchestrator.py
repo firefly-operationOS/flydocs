@@ -43,6 +43,7 @@ from fireflyframework_agentic.pipeline import (
     PipelineContext,
 )
 
+from flydesk_idp.config import IDPSettings
 from flydesk_idp.core.observability import (
     reset_correlation_id,
     set_correlation_id,
@@ -211,6 +212,7 @@ class PipelineOrchestrator:
         judge: Judge,
         rule_engine: RuleEngine,
         judge_escalator: JudgeEscalator,
+        settings: IDPSettings,
         default_model: str,
     ) -> None:
         self._extractor = extractor
@@ -225,6 +227,7 @@ class PipelineOrchestrator:
         self._judge = judge
         self._rule_engine = rule_engine
         self._judge_escalator = judge_escalator
+        self._settings = settings
         self._default_model = default_model
 
     async def execute(self, request: ExtractionRequest) -> ExtractionResult:
@@ -256,26 +259,42 @@ class PipelineOrchestrator:
         # what they are) AND that file has more than one page.
         needs_discover = stages.splitter and any((not f.document_type) for f in files)
         if needs_discover:
-            builder.add_node("discover", CallableStep(self._step_discover), timeout_seconds=180)
+            builder.add_node(
+                "discover",
+                CallableStep(self._step_discover),
+                timeout_seconds=self._settings.splitter_timeout_s,
+            )
             chain.append("discover")
 
         # Classifier runs per-segment when on. The step itself short-circuits
         # when there are no segments needing a doctype.
         if stages.classifier:
-            builder.add_node("classify", CallableStep(self._step_classifier), timeout_seconds=180)
+            builder.add_node(
+                "classify",
+                CallableStep(self._step_classifier),
+                timeout_seconds=self._settings.classifier_timeout_s,
+            )
             chain.append("classify")
 
         builder.add_node("plan_tasks", CallableStep(self._step_plan_tasks), timeout_seconds=5)
         chain.append("plan_tasks")
 
-        builder.add_node("extract", CallableStep(self._step_extract), timeout_seconds=300)
+        builder.add_node(
+            "extract",
+            CallableStep(self._step_extract),
+            timeout_seconds=self._settings.extract_timeout_s,
+        )
         chain.append("extract")
 
         builder.add_node("bbox_validation", CallableStep(self._step_bbox_validation), timeout_seconds=5)
         chain.append("bbox_validation")
 
         if stages.bbox_refine:
-            builder.add_node("bbox_refine", CallableStep(self._step_bbox_refine), timeout_seconds=120)
+            builder.add_node(
+                "bbox_refine",
+                CallableStep(self._step_bbox_refine),
+                timeout_seconds=self._settings.bbox_refine_inline_timeout_s,
+            )
             chain.append("bbox_refine")
 
         if stages.field_validation:
@@ -303,14 +322,18 @@ class PipelineOrchestrator:
             chain.append("content_authenticity")
 
         if stages.judge:
-            builder.add_node("judge", CallableStep(self._step_judge), timeout_seconds=180)
+            builder.add_node(
+                "judge",
+                CallableStep(self._step_judge),
+                timeout_seconds=self._settings.judge_timeout_s,
+            )
             chain.append("judge")
 
         if stages.judge and stages.judge_escalation:
             builder.add_node(
                 "judge_escalation",
                 CallableStep(self._step_judge_escalation),
-                timeout_seconds=300,
+                timeout_seconds=self._settings.judge_escalation_timeout_s,
             )
             chain.append("judge_escalation")
 

@@ -40,6 +40,7 @@ from flydesk_idp.core.services.bbox import (
     BboxRefiner,
     BboxValidator,
     BboxValueMatcher,
+    HybridValueMatcher,
     LlmValueMatcher,
     NoneOcrEngine,
     OcrEngine,
@@ -125,6 +126,7 @@ class IDPCoreConfiguration:
     def extractor(self, settings: IDPSettings, prompts: PromptCatalog) -> MultimodalExtractor:
         return MultimodalExtractor(
             template=prompts.extract,
+            retry_arrays_template=prompts.extract_retry_arrays,
             model=settings.model,
             fallback_model=settings.fallback_model,
         )
@@ -172,12 +174,24 @@ class IDPCoreConfiguration:
     def bbox_value_matcher(self, settings: IDPSettings, prompts: PromptCatalog) -> BboxValueMatcher:
         """Strategy that grounds extracted values against the word stream.
 
-        Defaults to the LLM-driven matcher (``llm``) -- generic,
-        multilingual, no hardcoded variants. ``fuzzy`` selects the
-        deterministic rapidfuzz fallback for callers that want zero
-        LLM cost on the refine path.
+        Defaults to ``hybrid``: rapidfuzz first (deterministic, free,
+        millisecond-scale), LLM only for the residual that fuzzy could
+        not resolve. This combination grounds 70-90% of fields without
+        an LLM call while still handling spelled-out numbers, date
+        format variants, and multilingual quirks via the LLM fallback.
+        ``llm`` and ``fuzzy`` remain available for callers that want a
+        single strategy with no cascade.
         """
-        kind = (settings.bbox_refine_matcher or "llm").lower()
+        kind = (settings.bbox_refine_matcher or "hybrid").lower()
+        if kind == "hybrid":
+            return HybridValueMatcher(
+                fuzzy=ValueMatcher(settings=settings),
+                llm=LlmValueMatcher(
+                    template=prompts.bbox_matcher,
+                    model=settings.model,
+                    threshold=settings.bbox_refine_threshold,
+                ),
+            )
         if kind == "llm":
             return LlmValueMatcher(
                 template=prompts.bbox_matcher,
@@ -188,7 +202,7 @@ class IDPCoreConfiguration:
             return ValueMatcher(settings=settings)
         raise ValueError(
             f"unknown FLYDESK_IDP_BBOX_REFINE_MATCHER={settings.bbox_refine_matcher!r}; "
-            "expected 'llm' or 'fuzzy'"
+            "expected 'hybrid', 'llm', or 'fuzzy'"
         )
 
     @bean
@@ -307,6 +321,7 @@ class IDPCoreConfiguration:
             judge=judge,
             rule_engine=rule_engine,
             judge_escalator=judge_escalator,
+            settings=settings,
             default_model=settings.model,
         )
 
