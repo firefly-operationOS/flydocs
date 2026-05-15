@@ -9,21 +9,23 @@ stage, or trying to understand why a stage didn't fire.
 ## 1. What the orchestrator is
 
 The orchestrator is the only entry point from the CQRS layer into the
-LLM pipeline. It is a plain pyfly bean (`@bean orchestrator` in
-`IDPCoreConfiguration`) and exposes a single async method:
+LLM pipeline. It is a plain `fireflyframework-pyfly` bean
+(`@bean orchestrator` in `IDPCoreConfiguration`) and exposes a single
+async method:
 
 ```python
 async def execute(self, request: ExtractionRequest) -> ExtractionResult: ...
 ```
 
-`execute` builds a fresh `agentic.PipelineEngine` DAG per request,
-runs it, and assembles the result. The DAG nodes are selected from
-`request.options.stages` so the trace and the event log reflect
-exactly what executed.
+`execute` builds a fresh `fireflyframework-agentic` `PipelineEngine`
+DAG per request, runs it, and assembles the result. The DAG nodes are
+selected from `request.options.stages` so the trace and the event log
+reflect exactly what executed.
 
 > The method is called `execute` rather than `run` so it does **not**
-> accidentally satisfy pyfly's `CommandLineRunner` structural protocol
-> (which would auto-invoke `run(sys.argv[1:])` at startup).
+> accidentally satisfy `fireflyframework-pyfly`'s `CommandLineRunner`
+> structural protocol (which would auto-invoke `run(sys.argv[1:])` at
+> startup).
 
 ---
 
@@ -453,7 +455,7 @@ catches the exception, appends a structured entry to
 {
   "node": "judge",
   "code": "JUDGE_ERROR",
-  "message": "anthropic timed out after 180s"
+  "message": "llm provider timed out after 180s"
 }
 ```
 
@@ -483,11 +485,12 @@ outbound_call target=worker op=job.run status=ok latency_ms=42557 job_id=39e0...
 
 Targets currently emitted:
 
-- `anthropic` / `openai` -- LLM provider, one line per stage call
-  (`op=split`, `op=classifier`, `op=extract`, `op=visual_auth`,
-  `op=content_auth`, `op=judge`, `op=rules.level.<n>`). Includes
-  `correlation_id`, `in_tokens`, `out_tokens`, `total_tokens`, and the
-  estimated `cost_usd` for each call.
+- LLM provider (`anthropic`, `openai`, `google`, `mistral`, … — derived
+  from the active model id) -- one line per stage call (`op=split`,
+  `op=classifier`, `op=extract`, `op=visual_auth`, `op=content_auth`,
+  `op=judge`, `op=rules.level.<n>`). Includes `correlation_id`,
+  `in_tokens`, `out_tokens`, `total_tokens`, and the estimated
+  `cost_usd` for each call.
 - `webhook` -- one line per delivery attempt (`op=deliver`).
 - `worker` -- one line per job start and per terminal outcome
   (`op=job.run`).
@@ -514,24 +517,28 @@ response shape.
 
 ### 7c. Pricing & prompt caching
 
-The framework uses the `genai-prices` package as a live pricing source
-for every model id we hand it. The full Claude 4 family
+The framework uses the `genai-prices` package as a **provider-agnostic
+live pricing source** for every model id we hand it — Anthropic,
+OpenAI, Google, Mistral, and any other provider `fireflyframework-genai`
+knows about are priced uniformly. The full Claude 4 family
 (`opus-4-*`, `sonnet-4-*`, `haiku-4-*`) is covered out of the box; the
-USD figures in the response's `usage` block reflect Anthropic's
+USD figures in the response's `usage` block reflect each provider's
 current published tariffs without any local override.
 
-**Prompt caching.** Every `FireflyAgent` we construct ships with a
-shared `PromptCacheMiddleware` from
+**Prompt caching (Anthropic-specific).** Every `FireflyAgent` we
+construct ships with a shared `PromptCacheMiddleware` from
 `core/observability/agent_middleware.py::DEFAULT_MIDDLEWARE`. The
 middleware injects pydantic-ai's `anthropic_cache_instructions` +
-`anthropic_cache_messages` settings on every request, so the
-Anthropic API caches the system prompt and the last user-message
-block on the first call (5-minute TTL by default). Subsequent calls
-within the TTL pay ~10% on cached tokens. The bbox / token line on
-each `outbound_call` log line carries the per-call `cache_write` /
+`anthropic_cache_messages` settings on every request, which Anthropic
+honours: it caches the system prompt and the last user-message block
+on the first call (5-minute TTL by default), and subsequent calls
+within the TTL pay ~10% on cached tokens. Other providers either
+ignore the hints or expose their own cache primitive — the middleware
+is a no-op there until we add a provider-specific shim. The
+`outbound_call` log line carries the per-call `cache_write` /
 `cache_read` counts; the same data is aggregated into
 `usage.cache_creation_tokens` / `usage.cache_read_tokens` on the
-response.
+response (always 0 for non-Anthropic providers today).
 
 > **Cache hits depend on prompt stability.** Anthropic caches by
 > exact byte prefix of (instructions + tools + messages). Our system
@@ -548,16 +555,18 @@ response.
 **Disabling the cache.** Set `FLYDESK_IDP_PROMPT_CACHE=off` (or `0` /
 `false` / `no`) in the service env to attach the middleware list
 empty for the next process start. Useful for A/B benchmarking, for
-quick rollback when caching misbehaves, and for low-volume workloads
-where the per-call write premium (`+25%` over normal input) can
-exceed the read discount (`-90%` of input) if cache hit-rate is low.
+quick rollback when caching misbehaves, when running against a
+provider that does not support Anthropic's cache hints, and for
+low-volume workloads where the per-call write premium (`+25%` over
+normal input) can exceed the read discount (`-90%` of input) if cache
+hit-rate is low.
 
-**Observed cost characteristics.** In our bastanteo benchmark
-(1 request -> ~27 LLM calls, mostly-unique per-call prompts) the
-warm-cache run costs ~33% more than the no-cache run for the *same
-request*. The first ON-mode request is roughly 2x because it writes
-the whole cache without reading anything. We believe this is the
-expected Anthropic-side accounting for high-fanout, low-repetition
+**Observed cost characteristics.** In our bastanteo benchmark on
+Anthropic (1 request -> ~27 LLM calls, mostly-unique per-call prompts)
+the warm-cache run costs ~33% more than the no-cache run for the
+*same request*. The first ON-mode request is roughly 2x because it
+writes the whole cache without reading anything. We believe this is
+the expected Anthropic-side accounting for high-fanout, low-repetition
 workloads -- cache pays off when the same prefix is replayed many
 times within the 5-minute TTL, e.g. batch reprocessing of the same
 expediente against multiple DocSpec variations. The toggle is there

@@ -32,7 +32,7 @@ uvicorn flydesk_idp.main:app
          ▼
    flydesk_idp.main         ← builds PyFlyApplication(FlydeskIDPApplication)
          │                    ▲
-         │                    └── reads pyfly.yaml + env vars
+         │                    └── reads fireflyframework-pyfly config + env vars
          ▼
    PyFlyApplication._lifespan (FastAPI lifespan hook)
          │
@@ -47,9 +47,10 @@ uvicorn flydesk_idp.main:app
          │                       database_health, prompt_catalog →
          │                       extractor, splitter, judge, rule_engine,
          │                       …, orchestrator). The EDA EventPublisher
-         │                       is provided by pyfly's EdaAutoConfiguration.
+         │                       is provided by fireflyframework-pyfly's
+         │                       EdaAutoConfiguration.
          │
-         ├─▶ register routes  – pyfly mounts every @rest_controller on FastAPI
+         ├─▶ register routes  – fireflyframework-pyfly mounts every @rest_controller on FastAPI
          │
          ├─▶ start actuator   – /actuator/health, /actuator/metrics
          │
@@ -64,8 +65,8 @@ repositories) is already wired and warm.
 
 ## 3. Dependency injection — the four mechanisms
 
-Pyfly has four complementary ways to put a class in the container.
-flydesk-idp uses all four, and the choice is significant.
+`fireflyframework-pyfly` has four complementary ways to put a class in
+the container. flydesk-idp uses all four, and the choice is significant.
 
 ### 3a. `@configuration` + `@bean`
 
@@ -121,9 +122,9 @@ The constructor's type annotations drive injection.
 
 ### 3c. `@rest_controller`
 
-A specialised stereotype that also tells pyfly to mount the class onto
-the FastAPI app and register every `@get_mapping`/`@post_mapping` route
-method.
+A specialised stereotype that also tells `fireflyframework-pyfly` to
+mount the class onto the FastAPI app and register every
+`@get_mapping`/`@post_mapping` route method.
 
 ```python
 # web/controllers/extract_controller.py
@@ -153,8 +154,8 @@ Controllers never talk to handlers directly. They go through the
 `CommandBus` / `QueryBus`:
 
 ```
-controller ──CommandBus.send(cmd)──▶ pyfly dispatches by Generic ──▶ handler.do_handle(cmd)
-controller ──QueryBus.query(q)──▶ pyfly dispatches by Generic ──▶ handler.do_handle(q)
+controller ──CommandBus.send(cmd)──▶ fireflyframework-pyfly dispatches by Generic ──▶ handler.do_handle(cmd)
+controller ──QueryBus.query(q)──▶ fireflyframework-pyfly dispatches by Generic ──▶ handler.do_handle(q)
 ```
 
 Commands and queries are **frozen dataclasses** parameterised by their
@@ -171,8 +172,8 @@ class GetJobQuery(Query[JobStatusResponse | None]):
 ```
 
 The handler's class declaration carries the same Generic args
-(`CommandHandler[ExtractCommand, ExtractionResult]`), and pyfly uses
-type introspection to wire the bus.
+(`CommandHandler[ExtractCommand, ExtractionResult]`), and
+`fireflyframework-pyfly` uses type introspection to wire the bus.
 
 Why bother? Because the controller stays a thin HTTP adapter: no DB
 access, no LLM calls, no domain logic. The handler is the unit of work,
@@ -184,8 +185,8 @@ metrics, future retries).
 ## 5. The pipeline runtime
 
 The orchestrator does not run stages by hand. Each request builds a
-fresh DAG using `agentic.PipelineBuilder` and runs it through
-`PipelineEngine`:
+fresh DAG using `fireflyframework-agentic`'s `PipelineBuilder` and runs
+it through `PipelineEngine`:
 
 ```python
 builder = PipelineBuilder("flydesk-idp")
@@ -221,7 +222,7 @@ Every LLM stage's system + user prompt lives in a YAML file under
 each file via `PromptLoader.from_file`, instantiates a `PromptTemplate`,
 and registers it with the framework-wide `PromptRegistry`.
 
-The catalog is a normal pyfly bean. The LLM services receive their
+The catalog is a normal `fireflyframework-pyfly` bean. The LLM services receive their
 template through constructor injection — they never import a template
 global. Two consequences:
 
@@ -236,8 +237,8 @@ See [prompts.md](prompts.md).
 
 ## 7. The web layer
 
-Pyfly's FastAPI adapter wraps controllers in a thin shell. Three things
-worth knowing:
+`fireflyframework-pyfly`'s FastAPI adapter wraps controllers in a thin
+shell. Three things worth knowing:
 
 1. **`Valid[Body[...]]`** runs pydantic validation against the DTO and
    returns RFC 7807 problem details on failure (mapped by the
@@ -253,8 +254,8 @@ Controllers return plain DTOs; FastAPI serialises them. No manual
 
 ## 8. Observability + ops
 
-Pyfly's `@enable_core_stack` brings the observability stack in
-already-configured:
+`fireflyframework-pyfly`'s `@enable_core_stack` brings the
+observability stack in already-configured:
 
 - **Structured logs** (structlog JSON). The pipeline stamps a
   `request_id` on every line.

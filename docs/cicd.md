@@ -161,7 +161,7 @@ org.opencontainers.image.vendor      Firefly Software Solutions Inc
 | --- | --- |
 | `pre-commit-hooks` | `check-merge-conflict`, `detect-private-key`, `end-of-file-fixer`, `trailing-whitespace`, `check-yaml`, `check-toml`, `check-added-large-files` (1 MiB ceiling) |
 | `ruff-pre-commit` | `ruff-check --fix`, `ruff-format` |
-| `local` | `no-anthropic-keys` — grep for `sk-ant-…` in any staged text file so a stray key never makes it into a commit |
+| `local` | `no-anthropic-keys` — grep for Anthropic-style API keys (`sk-ant-…`) in any staged text file so a stray key never makes it into a commit. The other providers' keys (OpenAI `sk-…`, Google, Mistral, …) are caught by `detect-private-key` + `.env` being gitignored. |
 
 Install once after cloning:
 
@@ -220,6 +220,6 @@ spec:
 
 `/actuator/health/readiness` reflects the DB + EDA bus state via the
 `database_health` and `eda_health` indicators registered upstream in
-`pyfly.data.relational.health` and `pyfly.eda.health`. A failing
-indicator returns 503 and Kubernetes stops routing traffic to the
-pod automatically.
+`fireflyframework-pyfly`'s `pyfly.data.relational.health` and
+`pyfly.eda.health`. A failing indicator returns 503 and Kubernetes
+stops routing traffic to the pod automatically.

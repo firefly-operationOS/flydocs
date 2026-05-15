@@ -35,21 +35,23 @@ Blocks until the orchestrator finishes or `FLYDESK_IDP_SYNC_TIMEOUT_S`
 elapses (default 60 s). On timeout the controller returns
 `408 extraction_timeout`.
 
-The request accepts **either** a single file (`document`) or a list
-(`documents`) -- they're mutually exclusive. The legacy single-file
-shape is unchanged for backwards compatibility; the multi-file shape
-is documented in [§ 2a](#2a-multi-file-extraction).
+The request always carries a non-empty `documents` list — a single
+file is just a one-element list. See [§ 2a](#2a-multi-file-extraction)
+for the multi-file case where each file is processed independently
+and may pin its own `document_type`.
 
 ### Request
 
 ```jsonc
 {
   "intention": "KYC review for a Spanish power-of-attorney deed.",
-  "document": {
-    "filename": "deed.pdf",
-    "content_base64": "JVBERi0xLjQK...",       // base64-encoded document bytes
-    "content_type": "application/pdf"           // optional; sniffed if omitted
-  },
+  "documents": [
+    {
+      "filename": "deed.pdf",
+      "content_base64": "JVBERi0xLjQK...",     // base64-encoded document bytes
+      "content_type": "application/pdf"         // optional; sniffed if omitted
+    }
+  ],
   "docs": [
     {
       "docType": {
@@ -133,22 +135,14 @@ is documented in [§ 2a](#2a-multi-file-extraction).
 ```jsonc
 {
   "request_id": "8d6624d3-96b0-43e4-b99f-e03258a99b22",
-  "document": {                                  // legacy single-file echo; null in multi-file mode
-    "filename": "deed.pdf",
-    "media_type": "application/pdf",
-    "page_count": 21,
-    "bytes": 384112,
-    "document_type": null,                       // implicit in docs[0] for the legacy shape
-    "classification": null                       // classifier didn't run in single-file mode
-  },
   "files": [                                     // per-file summary; one entry per input file
     {
       "filename": "deed.pdf",
       "media_type": "application/pdf",
       "page_count": 21,
       "bytes": 384112,
-      "document_type": null,
-      "classification": null
+      "document_type": null,                     // null when neither pin nor classifier set one
+      "classification": null                      // null when the classifier stage was skipped
     }
   ],
   "documents": [
@@ -158,7 +152,7 @@ is documented in [§ 2a](#2a-multi-file-extraction).
       "pages": [1, 2, /* ... */ 21],
       "description": "Escritura notarial de poderes",
       "confidence": 1.0,
-      "source_file": null,                        // filename of the input file; set only in multi-file mode
+      "source_file": "deed.pdf",                  // filename of the input file this document came from
       "fields": [
         {
           "fieldGroupName": "otorgamiento",
@@ -263,8 +257,8 @@ request when assembling the response.
 | `total_cost_usd`         | Estimated USD cost using the configured price table (see operational notes below).                       |
 | `record_count`           | Number of distinct LLM calls behind this request.                                                        |
 | `total_latency_ms`       | Sum of per-call wall-clock times (with `asyncio.gather` parallelism this can exceed `latency_ms`).       |
-| `cache_creation_tokens`  | Prompt tokens written to Anthropic's prompt cache (currently always 0 — caching not yet enabled).        |
-| `cache_read_tokens`      | Prompt tokens served from cache (currently always 0).                                                    |
+| `cache_creation_tokens`  | Prompt tokens written to the provider's prompt cache (Anthropic-specific feature — non-zero only when the active provider exposes prompt caching and `FLYDESK_IDP_PROMPT_CACHE=1`). |
+| `cache_read_tokens`      | Prompt tokens served from the provider's prompt cache (same caveat).                                     |
 | `by_agent`               | Per-agent breakdown (extractor, classifier, splitter, judge, visual, content, rule-engine).             |
 | `by_model`               | Per-model breakdown — useful when fallback or escalation switched models mid-request.                   |
 
@@ -279,10 +273,13 @@ stages dominate a request's latency.
 
 #### Operational notes
 
-The cost number is an **estimate** based on a static price table; for
-the Claude 4 family (`opus-4-*`, `sonnet-4-*`, `haiku-4-*`) we maintain
-overrides in `core/observability/pricing.py`. Update there when prices
-change. The same per-call data is also emitted on the
+The cost number is a provider-agnostic **estimate** sourced from
+`genai-prices` — the same library `fireflyframework-genai` /
+`fireflyframework-agentic` use internally, so Anthropic, OpenAI,
+Google, Mistral, etc. are all priced uniformly. Local overrides for
+fast-moving Claude 4 models live in `core/observability/pricing.py`;
+add equivalents there if a new model lands before `genai-prices`
+ships the tariff. The same per-call data is also emitted on the
 ``outbound_call`` log lines (one per LLM call, with `correlation_id`,
 `in_tokens`, `out_tokens`, `cost_usd`), so spend forensics work even
 without parsing the response.
@@ -299,13 +296,14 @@ without parsing the response.
 
 ### 2a. Multi-file & sub-document discovery
 
-The pipeline accepts two complementary shapes for "documents per
-request":
+The pipeline supports two complementary shapes for getting multiple
+documents out of a single request:
 
-1. **Multi-file**: submit several files by sending `documents` (a
-   list) instead of `document` (a single object). The two shapes are
-   mutually exclusive; the request validator rejects payloads that
-   set both or neither.
+1. **Multi-file submission**: `documents` is always a list — a single
+   file is just a one-element list, and a multi-file submission is the
+   exact same payload with more entries. Each entry carries its own
+   `filename`, `content_base64`, `content_type`, and optional
+   `document_type` pin.
 2. **Sub-document discovery**: enable `options.stages.splitter` and a
    single uploaded PDF that contains several documents inside (deed
    + ID + utility bill, for example) is split into its sub-documents
@@ -316,8 +314,8 @@ The two work in any combination -- you can submit five files and turn
 on the splitter, and every file gets its own discover → classify →
 extract sub-pipeline.
 
-Each entry in `documents` carries the same fields as the legacy
-`document`, plus an optional `document_type` pin:
+Each entry in `documents` carries an optional `document_type` pin in
+addition to the file content:
 
 ```jsonc
 {
@@ -357,9 +355,8 @@ Each entry in `documents` carries the same fields as the legacy
 }
 ```
 
-The response shape is the same `ExtractionResult`, but:
+The response shape is the same `ExtractionResult`:
 
-- `document` is `null` (the legacy field).
 - `files[]` has one entry per input file. For unpinned files,
   `files[i].classification` carries the classifier verdict
   (`document_type`, `matched`, `confidence`, `description`, `notes`).
@@ -388,9 +385,10 @@ fire-and-forget workflows with a webhook callback. The submit endpoint
 returns immediately; the worker drives the same orchestrator behind
 the scenes.
 
-> **Single-file only.** The async submit endpoint currently accepts
-> the legacy `document` shape only. Multi-file workloads should use
-> the sync endpoint, or open one job per file.
+> **Multi-file is supported on async too.** Submit a non-empty
+> `documents` list exactly like the sync endpoint — the worker drives
+> the same orchestrator and refines bboxes out-of-band via the
+> `BboxRefineWorker` (see [docs/pipeline.md](pipeline.md#bbox-refinement-sync-vs-async)).
 
 ### Submit
 
@@ -401,7 +399,9 @@ Idempotency-Key: 4b2e8c70-8d10-4f04-92ee-9d8...   ; optional, replays the respon
 
 {
   "intention": "...",
-  "document": { "filename": "...", "content_base64": "...", "content_type": "..." },
+  "documents": [
+    { "filename": "...", "content_base64": "...", "content_type": "..." }
+  ],
   "docs": [ /* same as /extract */ ],
   "rules": [ /* same as /extract */ ],
   "options": { /* same as /extract */ },
@@ -631,10 +631,10 @@ and the rationale behind both types.
 Two layers, both optional.
 
 - **API keys** — set `FLYDESK_IDP_API_KEYS` to a comma-separated list
-  of secrets; pyfly enforces them via the
+  of secrets; `fireflyframework-pyfly` enforces them via the
   `security-api-key` starter when the env var is present.
-- **OIDC / OAuth2** — out of scope here; use pyfly's `security-jwt`
-  starter and add an extra `@bean` for the JWT decoder.
+- **OIDC / OAuth2** — out of scope here; use `fireflyframework-pyfly`'s
+  `security-jwt` starter and add an extra `@bean` for the JWT decoder.
 
 For development the API is open. Production deployments should set at
 least one of the two.
