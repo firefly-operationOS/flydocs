@@ -29,21 +29,23 @@ exactly what executed.
 
 ## 2. The stages, at a glance
 
-| Order | Stage                  | Mandatory? | What it does                                                                                                                             | Default timeout |
-| ----: | ---------------------- | :--------: | ---------------------------------------------------------------------------------------------------------------------------------------- | --------------: |
-|     1 | `load`                 | yes        | Sniff media type and count pages on every input file. Pure Python.                                                                       | 20 s            |
-|     2 | `discover`             | no         | LLM enumerates every sub-document inside each unpinned, multi-page file. Returns one segment per discovered sub-document with a page range. | 180 s        |
-|     3 | `classify`             | no         | LLM assigns each segment a declared `DocSpec` (or the `unmatched` sentinel). Per-segment fan-out via `asyncio.gather`.                   | 180 s           |
-|     4 | `plan_tasks`           | yes        | Pure Python: build the flat `(segment, DocSpec)` task list every downstream stage iterates.                                              | 5 s             |
-|     5 | `extract`              | yes        | LLM produces fields + normalised bboxes for every task. Fanned out with `asyncio.gather`.                                                | 300 s           |
+| Order | Stage                  | Mandatory? | What it does                                                                                                                              | Default timeout |
+| ----: | ---------------------- | :--------: | ----------------------------------------------------------------------------------------------------------------------------------------- | --------------: |
+|     1 | `load`                 | yes        | Sniff media type and count pages on every input file. Pure Python.                                                                        | 20 s            |
+|     2 | `discover`             | no         | LLM enumerates every sub-document inside each unpinned, multi-page file. One segment per sub-document with a page range.                  | 180 s           |
+|     3 | `classify`             | no         | LLM assigns each segment a declared `DocSpec` (or `unmatched`). Per-segment fan-out via `asyncio.gather`.                                 | 180 s           |
+|     4 | `plan_tasks`           | yes        | Pure Python: build the flat `(segment, DocSpec)` task list every downstream stage iterates.                                               | 5 s             |
+|     5 | `extract`              | yes        | LLM produces fields + normalised bboxes for every task. Fanned out with `asyncio.gather`.                                                 | 600 s           |
 |     6 | `bbox_validation`      | yes        | Pure-Python geometric hallucination check: stamps every bbox with a `BboxQuality` verdict + continuous `quality_score`.                   | 5 s             |
-|     7 | `field_validation`     | no         | Pure-Python validation: regex / enum / range + every `StandardValidator` declared per field.                                             | 5 s             |
-|     8 | `visual_authenticity`  | no         | LLM evaluates caller-defined visual validators (signature present, stamp present, …).                                                    | 180 s           |
-|     9 | `content_authenticity` | no         | LLM audit: dates consistent, totals add up, expected boilerplate, tampering signals.                                                     | 180 s           |
-|    10 | `judge`                | no         | Second LLM pass re-grades every extracted value against the source.                                                                       | 180 s           |
-|    11 | `judge_escalation`     | no         | When the judge's failure rate exceeds `escalation_threshold`, re-run extract + judge with `escalation_model` and keep the better result. | 300 s           |
-|    12 | `rules`                | no         | LLM evaluates the business-rule DAG, level by level.                                                                                     | 180 s           |
-|    13 | `assemble`             | yes        | Pure Python: compose the `ExtractionResult`.                                                                                              | 5 s             |
+|     7 | `bbox_refine`          | no         | Replaces LLM-estimated coordinates with grounded ones via the hybrid matcher (rapidfuzz first, LLM only for residual). Skipped inline on async — see [bbox refinement](#bbox-refinement-sync-vs-async). | 300 s           |
+|     8 | `field_validation`     | no         | Pure-Python validation: regex / enum / range + every `StandardValidator` declared per field.                                              | 5 s             |
+|     9 | `visual_authenticity`  | no         | LLM evaluates caller-defined visual validators (signature present, stamp present, …).                                                     | 180 s           |
+|    10 | `content_authenticity` | no         | LLM audit: dates consistent, totals add up, expected boilerplate, tampering signals.                                                      | 180 s           |
+|    11 | `judge`                | no         | Second LLM pass re-grades every extracted value against the source.                                                                       | 300 s           |
+|    12 | `judge_escalation`     | no         | When the judge's failure rate exceeds `escalation_threshold`, re-run extract + judge with `escalation_model` and keep the better result.  | 600 s           |
+|    13 | `transform`            | no         | Caller-declared post-extraction transformations: declarative entity resolution + free-form LLM transformations. See [transformations.md](transformations.md). | 600 s           |
+|    14 | `rules`                | no         | LLM evaluates the business-rule DAG, level by level.                                                                                      | 180 s           |
+|    15 | `assemble`             | yes        | Pure Python: compose the `ExtractionResult`.                                                                                              | 5 s             |
 
 Optional stages are caller-toggled through `ExtractionOptions.stages`.
 Other short-circuits:
@@ -56,7 +58,46 @@ Other short-circuits:
   short-circuit), and as a whole when `stages.classifier` is off.
 - `bbox_validation` is non-toggleable — it is pure geometry and runs
   on every request.
+- `bbox_refine` runs **inline only for sync** requests. On the async
+  path `JobWorker` skips it and delegates refinement to the dedicated
+  `BboxRefineWorker` (out-of-band, idempotent).
 - `judge_escalation` is silently skipped when `judge` is off.
+- `transform` is silently a no-op when `options.transformations` is
+  empty even with the toggle on.
+
+### Per-stage timeouts
+
+Every node above reads its timeout from `IDPSettings`. Override per
+deployment by setting:
+
+```
+FLYDESK_IDP_EXTRACT_TIMEOUT_S=600
+FLYDESK_IDP_JUDGE_TIMEOUT_S=300
+FLYDESK_IDP_BBOX_REFINE_INLINE_TIMEOUT_S=900
+FLYDESK_IDP_CLASSIFIER_TIMEOUT_S=180
+FLYDESK_IDP_SPLITTER_TIMEOUT_S=180
+FLYDESK_IDP_JUDGE_ESCALATION_TIMEOUT_S=600
+FLYDESK_IDP_TRANSFORM_TIMEOUT_S=600
+```
+
+The outer per-request wall is `FLYDESK_IDP_ASYNC_TIMEOUT_S` (1800 s
+default); it must exceed the sum of the inline stages you enable.
+
+### bbox refinement: sync vs. async
+
+For sync requests (`POST /api/v1/extract`) the inline `bbox_refine`
+node is the only refinement path and grounded bboxes are present in
+the response when the call returns.
+
+For async requests (`POST /api/v1/jobs`), `JobWorker` mutates the
+request to set `stages.bbox_refine = False` before invoking the
+orchestrator, then publishes `IDPBboxRefineRequested` on success.
+The dedicated `BboxRefineWorker` picks up the event and grounds
+bboxes out-of-band; the job transitions
+`SUCCEEDED → PARTIAL_SUCCEEDED → SUCCEEDED` (or
+`REFINING_BBOXES → SUCCEEDED`). The refiner is idempotent — fields
+whose `bbox.source ∈ {pdf_text, ocr}` are skipped on re-run — so
+re-running the worker after a partial result is safe.
 
 ---
 

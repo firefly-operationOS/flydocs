@@ -81,6 +81,7 @@ class IDPSettings(BaseSettings):
     classifier_timeout_s: int = 180
     splitter_timeout_s: int = 180
     judge_escalation_timeout_s: int = 600
+    transform_timeout_s: int = 600
     # Exponential backoff bounds between async job retries. The worker
     # schedules the next attempt at ``min(retry_max_delay_s,
     # retry_base_delay_s * 2^(attempt - 1))`` plus a small jitter.

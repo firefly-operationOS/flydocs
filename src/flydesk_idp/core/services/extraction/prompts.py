@@ -42,6 +42,7 @@ _PROMPT_FILES: dict[str, str] = {
     "judge": "judge.yaml",
     "rule_engine": "rule_engine.yaml",
     "bbox_matcher": "bbox_matcher.yaml",
+    "transform": "transform.yaml",
 }
 
 
@@ -102,6 +103,10 @@ class PromptCatalog:
     @property
     def bbox_matcher(self) -> PromptTemplate:
         return self._templates["bbox_matcher"]
+
+    @property
+    def transform(self) -> PromptTemplate:
+        return self._templates["transform"]
 
     # -- Generic lookup --------------------------------------------------
 

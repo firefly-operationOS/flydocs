@@ -108,11 +108,25 @@ is documented in [§ 2a](#2a-multi-file-extraction).
       "visual_authenticity": true,
       "content_authenticity": false,
       "judge": true,
+      "bbox_refine": true,
+      "transform": true,
       "rule_engine": true
-    }
+    },
+    "transformations": [
+      {
+        "type": "entity_resolution",
+        "target_group": "personas",
+        "match_by": ["dni", "nombre"],
+        "scope": "request"
+      }
+    ]
   }
 }
 ```
+
+> See [docs/transformations.md](transformations.md) for the full
+> reference on the `transform` stage (declarative entity resolution +
+> free-form LLM transformations).
 
 ### Response — 200 OK
 
@@ -540,15 +554,48 @@ Parents can be `field`, `validator`, or `rule`. See
 ```jsonc
 {
   "splitter": false,
+  "classifier": true,
   "field_validation": true,
   "visual_authenticity": false,
   "content_authenticity": false,
-  "judge": true,
-  "rule_engine": true
+  "judge": false,
+  "judge_escalation": false,
+  "bbox_refine": false,
+  "transform": false,
+  "rule_engine": false
 }
 ```
 
-The extractor is always on; assemble/load are unconditional.
+The extractor and `bbox_validation` are always on; `assemble`/`load`
+are unconditional. The `transform` toggle is a no-op when
+`options.transformations` is empty.
+
+### `Transformation` (discriminated union)
+
+Two `type` values today; the union is open for new declarative types.
+
+```jsonc
+// Declarative entity resolution
+{
+  "type": "entity_resolution",
+  "target_group": "personas",
+  "output_group": null,                  // null = mutate in place
+  "scope": "request",                    // "task" (default) | "request"
+  "match_by": ["dni", "nombre"],
+  "min_shared_tokens": 2
+}
+
+// Free-form LLM transformation
+{
+  "type": "llm",
+  "target_group": "personas",
+  "intention": "Normalize each cargo to a closed taxonomy: administrador_unico, consejero, apoderado, otros.",
+  "scope": "task"
+}
+```
+
+See [docs/transformations.md](transformations.md) for fuller examples
+and the rationale behind both types.
 
 ---
 
