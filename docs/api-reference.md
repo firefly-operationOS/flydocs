@@ -108,11 +108,25 @@ is documented in [§ 2a](#2a-multi-file-extraction).
       "visual_authenticity": true,
       "content_authenticity": false,
       "judge": true,
+      "bbox_refine": true,
+      "transform": true,
       "rule_engine": true
-    }
+    },
+    "transformations": [
+      {
+        "type": "entity_resolution",
+        "target_group": "personas",
+        "match_by": ["dni", "nombre"],
+        "scope": "request"
+      }
+    ]
   }
 }
 ```
+
+> See [docs/transformations.md](transformations.md) for the full
+> reference on the `transform` stage (declarative entity resolution +
+> free-form LLM transformations).
 
 ### Response — 200 OK
 
@@ -540,15 +554,75 @@ Parents can be `field`, `validator`, or `rule`. See
 ```jsonc
 {
   "splitter": false,
+  "classifier": true,
   "field_validation": true,
   "visual_authenticity": false,
   "content_authenticity": false,
-  "judge": true,
-  "rule_engine": true
+  "judge": false,
+  "judge_escalation": false,
+  "bbox_refine": false,
+  "transform": false,
+  "rule_engine": false
 }
 ```
 
-The extractor is always on; assemble/load are unconditional.
+The extractor and `bbox_validation` are always on; `assemble`/`load`
+are unconditional. The `transform` toggle is a no-op when
+`options.transformations` is empty.
+
+### EDA event envelopes (audit + webhook payload)
+
+Every event the service publishes — `IDPJobSubmitted`,
+`IDPJobCompleted`, `IDPBboxRefineRequested`,
+`IDPBboxRefineCompleted` — carries a typed envelope:
+
+```jsonc
+{
+  "event_id":       "f0c7b3aa-2f43-4d34-bf6c-3b09e6efbb19",  // UUID v4
+  "event_type":     "IDPJobCompleted",                       // routing discriminator
+  "version":        "1.0.0",                                 // semver of the payload shape
+  "occurred_at":    "2026-05-15T16:42:11.103Z",              // UTC ISO-8601
+  "correlation_id": "req-…",                                 // echoes inbound X-Correlation-Id
+  "tenant_id":      "tenant-…",                              // echoes X-Tenant-Id when set
+  "job_id":         "…",
+  "status":         "SUCCEEDED",                             // type-specific
+  "started_at":     "…",
+  "finished_at":    "…",
+  "attempts":       1
+}
+```
+
+Webhook deliveries surface the same envelope on the wire, plus the
+`result` (for `SUCCEEDED` / `PARTIAL_SUCCEEDED`) and `error_code` /
+`error_message` (for `FAILED`). Dedupe by `event_id` on the client
+since the publisher retries on delivery failure.
+
+### `Transformation` (discriminated union)
+
+Two `type` values today; the union is open for new declarative types.
+
+```jsonc
+// Declarative entity resolution
+{
+  "type": "entity_resolution",
+  "target_group": "personas",
+  "output_group": null,                  // null = mutate in place
+  "scope": "request",                    // "task" (default) | "request"
+  "match_by": ["dni", "nombre"],
+  "min_shared_tokens": 2
+}
+
+// Free-form LLM transformation
+{
+  "type": "llm",
+  "target_group": "personas",
+  "intention": "Normalize each cargo to a closed taxonomy: administrador_unico, consejero, apoderado, otros.",
+  "scope": "task"
+}
+```
+
+See [docs/transformations.md](transformations.md) for fuller examples
+and the rationale behind both types.
 
 ---
 

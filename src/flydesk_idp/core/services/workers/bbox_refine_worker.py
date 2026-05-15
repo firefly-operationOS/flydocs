@@ -49,6 +49,10 @@ from flydesk_idp.core.observability import log_outbound
 from flydesk_idp.core.services.bbox import BboxRefiner
 from flydesk_idp.core.services.binary import BinaryNormalizer, NormalisedBinary
 from flydesk_idp.core.services.webhook import WebhookPublisher
+from flydesk_idp.interfaces.dtos.event import (
+    IDPBboxRefineRequestedEvent,
+    envelope_for_publish,
+)
 from flydesk_idp.interfaces.dtos.extract import ExtractionResult
 from flydesk_idp.interfaces.dtos.webhook import JobWebhookPayload
 from flydesk_idp.interfaces.enums.job_status import JobStatus
@@ -187,6 +191,9 @@ class BboxRefineWorker:
                 metadata=job.metadata_json or {},
                 callback_url=job.callback_url,
                 correlation=_extract_correlation(job.metadata_json),
+                started_at=getattr(job, "bbox_refine_started_at", None),
+                finished_at=datetime.now(UTC),
+                attempts=attempts,
             )
         except Exception as exc:  # noqa: BLE001
             permanent = _is_permanent(exc)
@@ -311,10 +318,11 @@ class BboxRefineWorker:
     async def _delayed_publish(self, job_id: str, delay_s: float) -> None:
         try:
             await asyncio.sleep(delay_s)
+            republish = IDPBboxRefineRequestedEvent(job_id=job_id, attempt=2)
             await self._publisher.publish(
                 destination=self._settings.bbox_refine_topic,
                 event_type=self._settings.bbox_refine_event_type,
-                payload={"job_id": job_id},
+                payload=envelope_for_publish(republish),
             )
             log_outbound(
                 "eda",
@@ -335,18 +343,37 @@ class BboxRefineWorker:
         metadata: dict[str, Any],
         callback_url: str | None,
         correlation: dict[str, str] | None = None,
+        started_at: datetime | None = None,
+        finished_at: datetime | None = None,
+        attempts: int = 1,
+        error_code: str | None = None,
+        error_message: str | None = None,
     ) -> None:
         if not callback_url:
             return
         clean_metadata = {k: v for k, v in (metadata or {}).items() if not k.startswith("_")}
+        corr = correlation or {}
         payload = JobWebhookPayload(
+            # Bbox-refine's terminal webhook still carries the
+            # IDPJobCompleted event_type — from the consumer's POV
+            # the job has reached its FINAL terminal state at this
+            # point. The IDPBboxRefineCompleted EDA event is a
+            # separate internal signal not surfaced to webhook clients.
+            event_type="IDPJobCompleted",
             job_id=job_id,
             status=status,
             occurred_at=datetime.now(UTC),
+            started_at=started_at,
+            finished_at=finished_at,
+            attempts=attempts,
+            correlation_id=corr.get("X-Correlation-Id"),
+            tenant_id=corr.get("X-Tenant-Id"),
             metadata=clean_metadata,
             result=result,
+            error_code=error_code,
+            error_message=error_message,
         )
-        await self._webhook.deliver(callback_url, payload, extra_headers=correlation or {})
+        await self._webhook.deliver(callback_url, payload, extra_headers=corr)
 
 
 def _extract_correlation(metadata: dict[str, Any] | None) -> dict[str, str]:

@@ -65,6 +65,7 @@ from flydesk_idp.core.services.extraction.pdf_slicer import PageRange, slice_pdf
 from flydesk_idp.core.services.judge import Judge
 from flydesk_idp.core.services.rules import RuleEngine
 from flydesk_idp.core.services.splitting import DiscoveredSegment, DocumentSplitter
+from flydesk_idp.core.services.transformations import TransformationEngine
 from flydesk_idp.core.services.validation import FieldValidator
 from flydesk_idp.interfaces.dtos.authenticity import (
     ContentAuthenticity,
@@ -212,6 +213,7 @@ class PipelineOrchestrator:
         judge: Judge,
         rule_engine: RuleEngine,
         judge_escalator: JudgeEscalator,
+        transformation_engine: TransformationEngine,
         settings: IDPSettings,
         default_model: str,
     ) -> None:
@@ -227,6 +229,7 @@ class PipelineOrchestrator:
         self._judge = judge
         self._rule_engine = rule_engine
         self._judge_escalator = judge_escalator
+        self._transformation_engine = transformation_engine
         self._settings = settings
         self._default_model = default_model
 
@@ -336,6 +339,18 @@ class PipelineOrchestrator:
                 timeout_seconds=self._settings.judge_escalation_timeout_s,
             )
             chain.append("judge_escalation")
+
+        # Transform stage. Runs AFTER judge + escalation (so transformations
+        # operate on graded data) and BEFORE rules (so rules can apply to
+        # transformed groups). No-op when the toggle is on but the caller
+        # didn't declare any transformations.
+        if stages.transform and request.options.transformations:
+            builder.add_node(
+                "transform",
+                CallableStep(self._step_transform),
+                timeout_seconds=self._settings.transform_timeout_s,
+            )
+            chain.append("transform")
 
         if stages.rule_engine and request.rules:
             builder.add_node("rules", CallableStep(self._step_rules), timeout_seconds=180)
@@ -779,6 +794,47 @@ class PipelineOrchestrator:
             ctx.metadata["rule_results"] = []
             return {"failed": True}
 
+    async def _step_transform(self, ctx: PipelineContext, _inputs: dict[str, Any]) -> Any:
+        """Apply caller-declared post-extraction transformations.
+
+        Walks ``request.options.transformations`` once. For each entry
+        we dispatch to :class:`TransformationEngine`:
+
+        * ``scope=task``    mutates each task's extracted groups in
+          place (the existing groups are replaced or augmented per the
+          transformation's ``output_group``).
+        * ``scope=request`` consolidates the matching groups across
+          every task into one synthetic group, applies the
+          transformation, and stores the result on
+          ``ctx.metadata['request_transformations']`` for the assembler.
+
+        Per-transformation failures degrade -- the engine catches and
+        logs them so a bad transformation never poisons the pipeline.
+        """
+        request: ExtractionRequest = ctx.metadata["request"]
+        tasks: list[_ExtractionTask] = ctx.metadata["tasks"]
+        transformations = list(request.options.transformations or [])
+        if not transformations:
+            return {"applied": 0}
+
+        applied = 0
+        request_outputs: list[ExtractedFieldGroup] = ctx.metadata.setdefault("request_transformations", [])
+        for t in transformations:
+            if getattr(t, "scope", None) and t.scope.value == "request":
+                per_task_groups = [task.extracted_groups for task in tasks if task.extracted_groups]
+                produced = await self._transformation_engine.apply_request_scope(t, per_task_groups)
+                if produced is not None:
+                    request_outputs.append(produced)
+                    applied += 1
+            else:
+                for task in tasks:
+                    if not task.extracted_groups:
+                        continue
+                    produced = await self._transformation_engine.apply_to_task(t, task.extracted_groups)
+                    if produced is not None:
+                        applied += 1
+        return {"applied": applied, "request_outputs": len(request_outputs)}
+
     async def _step_assemble(self, _ctx: PipelineContext, _inputs: dict[str, Any]) -> Any:
         return {"assembled": True}
 
@@ -901,6 +957,7 @@ class PipelineOrchestrator:
             documents=documents,
             additional_documents=additional_documents,
             rule_results=rule_results,
+            request_transformations=ctx.metadata.get("request_transformations", []),
             model=model_id,
             latency_ms=latency_ms,
             pipeline_errors=ctx.metadata.get("pipeline_errors", []),

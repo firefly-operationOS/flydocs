@@ -22,6 +22,7 @@ from flydesk_idp.interfaces.dtos.authenticity import DocumentAuthenticity
 from flydesk_idp.interfaces.dtos.doc import DocSpec
 from flydesk_idp.interfaces.dtos.field import ExtractedFieldGroup
 from flydesk_idp.interfaces.dtos.rule import RuleResult, RuleSpec
+from flydesk_idp.interfaces.dtos.transformation import Transformation
 
 # ---------------------------------------------------------------------------
 # Document input
@@ -137,6 +138,17 @@ class StageToggles(BaseModel):
             "(``pdf_text`` / ``ocr``) from LLM-only fallbacks."
         ),
     )
+    transform: bool = Field(
+        default=False,
+        description=(
+            "Run the ``transform`` stage. The stage applies every "
+            ":class:`Transformation` declared on "
+            "``ExtractionOptions.transformations`` -- declarative entity "
+            "resolution and/or free-form LLM transformations -- after "
+            "extract+judge and before rules/assemble. No-op when the "
+            "list is empty even with the toggle on."
+        ),
+    )
 
 
 class ExtractionOptions(BaseModel):
@@ -163,6 +175,16 @@ class ExtractionOptions(BaseModel):
             "Model id used for the escalation re-run "
             "(e.g. ``anthropic:claude-opus-4-7``). Overrides "
             "``FLYDESK_IDP_ESCALATION_MODEL`` for this request."
+        ),
+    )
+    transformations: list[Transformation] = Field(
+        default_factory=list,
+        description=(
+            "Post-extraction transformations applied by the ``transform`` "
+            "stage. See :mod:`flydesk_idp.interfaces.dtos.transformation` "
+            "for the discriminated union of available types. Empty list "
+            "means the stage is a no-op even when ``stages.transform`` "
+            "is true."
         ),
     )
 
@@ -392,6 +414,19 @@ class ExtractionResult(BaseModel):
         description="Documents found in the source PDF that don't match any requested doc type.",
     )
     rule_results: list[RuleResult] = Field(default_factory=list)
+    request_transformations: list[ExtractedFieldGroup] = Field(
+        default_factory=list,
+        description=(
+            "Output of every ``scope=request`` transformation applied "
+            "by the ``transform`` stage. Each entry is a consolidated, "
+            "post-transformation field group keyed by the "
+            "``output_group`` name from the originating "
+            ":class:`Transformation` (or the ``target_group`` when "
+            "``output_group`` is null). Empty list when no "
+            "request-scope transformation ran or when none of them "
+            "produced output."
+        ),
+    )
     model: str
     latency_ms: int = Field(..., ge=0)
     pipeline_errors: list[dict[str, Any]] = Field(

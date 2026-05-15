@@ -65,6 +65,7 @@ from flydesk_idp.core.services.judge import Judge
 from flydesk_idp.core.services.pipeline import PipelineOrchestrator
 from flydesk_idp.core.services.rules import RuleEngine
 from flydesk_idp.core.services.splitting import DocumentSplitter
+from flydesk_idp.core.services.transformations import LlmTransformer, TransformationEngine
 from flydesk_idp.core.services.validation import FieldValidator, RequestValidator
 from flydesk_idp.core.services.webhook import WebhookPublisher
 from flydesk_idp.core.services.workers.job_worker import JobWorker
@@ -269,6 +270,19 @@ class IDPCoreConfiguration:
         return Judge(template=prompts.judge, model=settings.model)
 
     @bean
+    def llm_transformer(self, settings: IDPSettings, prompts: PromptCatalog) -> LlmTransformer:
+        """Free-form post-extraction transformer.
+
+        Needs explicit ``@bean`` construction because it depends on
+        a ``PromptTemplate`` (resolved through :class:`PromptCatalog`)
+        and the default model id — neither of which pyfly's autoscan
+        can resolve by type alone. :class:`TransformationEngine` is a
+        ``@service`` that autowires this bean alongside the
+        ``EntityResolutionTransformer``.
+        """
+        return LlmTransformer(template=prompts.transform, model=settings.model)
+
+    @bean
     def rule_engine(self, settings: IDPSettings, prompts: PromptCatalog) -> RuleEngine:
         return RuleEngine(template=prompts.rule_engine, model=settings.model)
 
@@ -306,6 +320,7 @@ class IDPCoreConfiguration:
         judge: Judge,
         rule_engine: RuleEngine,
         judge_escalator: JudgeEscalator,
+        transformation_engine: TransformationEngine,
         settings: IDPSettings,
     ) -> PipelineOrchestrator:
         return PipelineOrchestrator(
@@ -321,6 +336,7 @@ class IDPCoreConfiguration:
             judge=judge,
             rule_engine=rule_engine,
             judge_escalator=judge_escalator,
+            transformation_engine=transformation_engine,
             settings=settings,
             default_model=settings.model,
         )

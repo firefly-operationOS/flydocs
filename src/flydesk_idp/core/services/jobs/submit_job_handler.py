@@ -24,6 +24,7 @@ from pyfly.observability.correlation import current_correlation_context
 
 from flydesk_idp.config import IDPSettings
 from flydesk_idp.core.services.validation import RequestValidator, ValidationReport
+from flydesk_idp.interfaces.dtos.event import IDPJobSubmittedEvent, envelope_for_publish
 from flydesk_idp.interfaces.dtos.extract import ExtractionRequest
 from flydesk_idp.interfaces.dtos.job import SubmitJobRequest, SubmitJobResponse
 from flydesk_idp.interfaces.enums.job_status import JobStatus
@@ -166,15 +167,23 @@ class SubmitJobHandler(CommandHandler[SubmitJobCommand, SubmitJobResponse]):
             metadata_json=metadata,
         )
         job = await self._repository.add(job)
+        submitted_at = job.created_at or datetime.now(UTC)
+        event = IDPJobSubmittedEvent(
+            job_id=job.id,
+            submitted_at=submitted_at,
+            attempt=1,
+            correlation_id=(ctx or {}).get("X-Correlation-Id"),
+            tenant_id=(ctx or {}).get("X-Tenant-Id"),
+        )
         await self._publisher.publish(
             destination=self._settings.jobs_topic,
             event_type=self._settings.jobs_event_type,
-            payload={"job_id": job.id},
+            payload=envelope_for_publish(event),
             headers=ctx,
         )
 
         return SubmitJobResponse(
             job_id=job.id,
             status=JobStatus(job.status),
-            submitted_at=job.created_at or datetime.now(UTC),
+            submitted_at=submitted_at,
         )

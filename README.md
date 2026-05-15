@@ -121,8 +121,9 @@ DAG for each call so the audit trail reflects exactly what executed.
 ```
                 ┌──────────────────────────────────────────────────────────────────┐
    POST  ──────▶│ load → discover? → classify? → plan_tasks → extract →            │──────▶ JSON
- (PDF/PNG/…)    │ bbox_validation → field_validation? → visual_auth? →             │  (fields + bbox
-                │ content_auth? → judge? → judge_escalation? → rules? → assemble   │   + verdicts)
+ (PDF/PNG/…)    │ bbox_validation → bbox_refine? → field_validation? →             │  (fields + bbox
+                │ visual_auth? → content_auth? → judge? → judge_escalation? →      │   + verdicts)
+                │ transform? → rules? → assemble                                   │
                 └──────────────────────────────────────────────────────────────────┘
                               │
                               │  per-segment concurrency (asyncio.gather)
@@ -277,6 +278,7 @@ Cycles are rejected before any LLM call is issued. See
 | [docs/architecture.md](docs/architecture.md)   | You need to know how pyfly + agentic plug together.                      |
 | [docs/pipeline.md](docs/pipeline.md)           | You're touching the orchestrator or adding a new stage.                  |
 | [docs/api-reference.md](docs/api-reference.md) | You're integrating with the HTTP API.                                    |
+| [docs/transformations.md](docs/transformations.md) | You want to dedupe, normalise or run free-form LLM transformations on extracted data. |
 | [docs/standard-validators.md](docs/standard-validators.md) | You want to know what validators are built-in.               |
 | [docs/rule-engine.md](docs/rule-engine.md)     | You're designing business rules.                                         |
 | [docs/prompts.md](docs/prompts.md)             | You're editing or adding YAML prompt templates.                          |
