@@ -41,6 +41,7 @@ from flydesk_idp.core.services.bbox import (
     BboxValidator,
     NoneOcrEngine,
     OcrEngine,
+    TesseractOcrEngine,
 )
 from flydesk_idp.core.services.binary import (
     ArchiveUnpacker,
@@ -153,13 +154,15 @@ class IDPCoreConfiguration:
 
     @bean
     def ocr_engine(self, settings: IDPSettings) -> OcrEngine:
-        kind = (settings.bbox_refine_ocr_engine or "none").lower()
+        kind = (settings.bbox_refine_ocr_engine or "tesseract").lower()
+        if kind == "tesseract":
+            return TesseractOcrEngine(settings=settings)
         if kind == "none":
             return NoneOcrEngine()
-        # Future: paddle / mistral / tesseract adapters route here.
+        # Future: ``paddle`` / ``mistral`` adapters route here.
         raise ValueError(
             f"unknown FLYDESK_IDP_BBOX_REFINE_OCR_ENGINE={settings.bbox_refine_ocr_engine!r}; "
-            "expected 'none' (paddle / mistral adapters not yet bundled)"
+            "expected 'tesseract' or 'none' (paddle / mistral adapters not yet bundled)"
         )
 
     @bean

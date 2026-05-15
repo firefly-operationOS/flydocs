@@ -20,6 +20,7 @@ from flydesk_idp.core.services.bbox.bbox_refiner import BboxRefiner, RefineCount
 from flydesk_idp.core.services.bbox.bbox_validator import BboxValidator
 from flydesk_idp.core.services.bbox.ocr_engine import NoneOcrEngine, OcrEngine
 from flydesk_idp.core.services.bbox.pymupdf_words import PyMuPDFWordExtractor
+from flydesk_idp.core.services.bbox.tesseract_engine import TesseractOcrEngine
 from flydesk_idp.core.services.bbox.value_matcher import MatchResult, ValueMatcher
 from flydesk_idp.core.services.bbox.word_extractor import PageWords, Word, WordExtractor
 from flydesk_idp.core.services.bbox.word_router import WordRouter
@@ -33,6 +34,7 @@ __all__ = [
     "PageWords",
     "PyMuPDFWordExtractor",
     "RefineCounters",
+    "TesseractOcrEngine",
     "ValueMatcher",
     "Word",
     "WordExtractor",

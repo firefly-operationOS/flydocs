@@ -198,7 +198,15 @@ def _value_as_string(value: object) -> str:
 
 
 def _page_source(page: int, pages: list[PageWords]) -> BboxSource:
+    """Return the extractor that produced the words on ``page``.
+
+    The discriminator is recorded by the extractor itself
+    (PyMuPDF -> PDF_TEXT, Tesseract / Mistral / Paddle -> OCR) so the
+    refiner can tag refined bboxes with their true origin. Falls back
+    to ``PDF_TEXT`` when the page isn't in the supplied list (defensive
+    -- the matcher only matches against pages it actually saw).
+    """
     for p in pages:
         if p.page == page:
-            return BboxSource.PDF_TEXT if p.has_text_layer else BboxSource.OCR
+            return p.source
     return BboxSource.PDF_TEXT

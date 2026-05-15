@@ -95,6 +95,14 @@ RUN apt-get update \
         libpango-1.0-0 \
         libpangocairo-1.0-0 \
         libgdk-pixbuf-2.0-0 \
+        tesseract-ocr \
+        tesseract-ocr-spa \
+        tesseract-ocr-eng \
+        tesseract-ocr-fra \
+        tesseract-ocr-deu \
+        tesseract-ocr-ita \
+        tesseract-ocr-por \
+        tesseract-ocr-cat \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --uid 10001 --shell /usr/sbin/nologin --no-create-home idp
 
