@@ -44,6 +44,17 @@ class IDPSettings(BaseSettings):
     jobs_topic: str = "flydesk.idp.jobs"
     jobs_event_type: str = "IDPJobSubmitted"
     jobs_completed_event_type: str = "IDPJobCompleted"
+    # Second-stage destination for the out-of-band bbox refiner. Triggered
+    # by ``JobWorker`` after main extraction succeeds AND
+    # ``options.stages.bbox_refine == true``. Consumed by
+    # ``BboxRefineWorker``.
+    bbox_refine_topic: str = "flydesk.idp.bbox.refine"
+    bbox_refine_event_type: str = "IDPBboxRefineRequested"
+    # Retry budget + timeout for the bbox refine leg, independent of the
+    # main extraction. Refinement is CPU-bound (PyMuPDF / OCR) so the
+    # default ceiling is generous.
+    bbox_refine_max_attempts: int = 3
+    bbox_refine_timeout_s: int = 600
 
     # -- Extraction -----------------------------------------------------
     model: str = "anthropic:claude-sonnet-4-6"

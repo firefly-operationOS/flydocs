@@ -159,9 +159,18 @@ class JobWorker:
             result = await asyncio.wait_for(
                 self._orchestrator.execute(request), timeout=self._settings.async_timeout_s
             )
-            await self._repository.mark_succeeded(
-                job.id, result=result.model_dump(mode="json", by_alias=True)
-            )
+            result_payload = result.model_dump(mode="json", by_alias=True)
+            # Branch on bbox_refine: when the caller asked for grounded
+            # coordinates, the job becomes ``PARTIAL_SUCCEEDED`` here and
+            # the actual grounding is delegated to ``BboxRefineWorker`` via
+            # a second EDA event. The result is already readable -- only
+            # the bboxes change between PARTIAL_SUCCEEDED and SUCCEEDED.
+            wants_bbox_refine = bool(getattr(request.options.stages, "bbox_refine", False))
+            terminal_status = JobStatus.PARTIAL_SUCCEEDED if wants_bbox_refine else JobStatus.SUCCEEDED
+            if wants_bbox_refine:
+                await self._repository.mark_partial_succeeded(job.id, result=result_payload)
+            else:
+                await self._repository.mark_succeeded(job.id, result=result_payload)
             log_outbound(
                 "worker",
                 op="job.run",
@@ -169,15 +178,31 @@ class JobWorker:
                 latency_ms=(time.monotonic() - started) * 1000,
                 job_id=job.id,
                 attempt=attempts,
+                terminal=terminal_status.value,
             )
             await self._fire_webhook(
                 job_id=job.id,
-                status=JobStatus.SUCCEEDED,
+                status=terminal_status,
                 result=result,
                 metadata=job.metadata_json or {},
                 callback_url=job.callback_url,
                 correlation=_extract_correlation(job.metadata_json),
             )
+            if wants_bbox_refine:
+                await self._publisher.publish(
+                    destination=self._settings.bbox_refine_topic,
+                    event_type=self._settings.bbox_refine_event_type,
+                    payload={"job_id": job.id},
+                    headers=_extract_correlation(job.metadata_json),
+                )
+                log_outbound(
+                    "eda",
+                    op="publish.bbox_refine",
+                    status="ok",
+                    latency_ms=0.0,
+                    job_id=job.id,
+                    destination=self._settings.bbox_refine_topic,
+                )
         except Exception as exc:  # noqa: BLE001
             permanent = _is_permanent(exc)
             exhausted = attempts >= self._settings.job_max_attempts
