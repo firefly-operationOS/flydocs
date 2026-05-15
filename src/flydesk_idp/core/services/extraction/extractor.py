@@ -94,10 +94,7 @@ class MultimodalExtractor:
             model=model,
             op="extract",
         )
-        if (
-            self._retry_arrays_template is not None
-            and page_count >= self._ARRAY_RETRY_MIN_PAGES
-        ):
+        if self._retry_arrays_template is not None and page_count >= self._ARRAY_RETRY_MIN_PAGES:
             empty_arrays = self._suspicious_empty_arrays(doc, groups)
             if empty_arrays:
                 logger.info(
@@ -148,9 +145,7 @@ class MultimodalExtractor:
         )
         model_id = model or self._model
         output_model = build_extraction_output_model(doc)
-        agent = self._build_agent(
-            model_id, output_model, instructions=retry_prompt.system
-        )
+        agent = self._build_agent(model_id, output_model, instructions=retry_prompt.system)
         # Append the schema JSON so the LLM still knows the contract,
         # but keep the user prompt itself short and action-oriented --
         # verbose retry prompts have been observed to re-trigger the
@@ -161,9 +156,7 @@ class MultimodalExtractor:
             user_text,
             BinaryContent(data=document_bytes, media_type=media_type),
         ]
-        result = await timed_agent_run(
-            agent, content, op="extract.retry_arrays", model=model_id
-        )
+        result = await timed_agent_run(agent, content, op="extract.retry_arrays", model=model_id)
         return normalise_doc(result.output, doc), model_id
 
     async def _extract_once(
@@ -205,9 +198,7 @@ class MultimodalExtractor:
                 exc,
                 self._fallback_model,
             )
-            fallback_agent = self._build_agent(
-                self._fallback_model, output_model, instructions=prompt.system
-            )
+            fallback_agent = self._build_agent(self._fallback_model, output_model, instructions=prompt.system)
             result = await timed_agent_run(
                 fallback_agent, content, op=f"{op}.fallback", model=self._fallback_model
             )
@@ -218,9 +209,7 @@ class MultimodalExtractor:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _suspicious_empty_arrays(
-        doc: DocSpec, groups: list[ExtractedFieldGroup]
-    ) -> list[str]:
+    def _suspicious_empty_arrays(doc: DocSpec, groups: list[ExtractedFieldGroup]) -> list[str]:
         """Names of array fields that look like a structured-output
         empty-default rather than a legitimately empty result.
 
@@ -233,10 +222,7 @@ class MultimodalExtractor:
         not a genuine zero-evidence document).
         """
         array_field_names: set[str] = {
-            f.fieldName
-            for g in doc.fieldGroups
-            for f in g.fieldGroupFields
-            if f.fieldType == FieldType.ARRAY
+            f.fieldName for g in doc.fieldGroups for f in g.fieldGroupFields if f.fieldType == FieldType.ARRAY
         }
         if not array_field_names:
             return []
@@ -268,9 +254,7 @@ class MultimodalExtractor:
     ) -> list[ExtractedFieldGroup]:
         """Keep retry's results for the targeted array fields; preserve
         originals for everything else."""
-        retry_by_group: dict[str, ExtractedFieldGroup] = {
-            g.fieldGroupName: g for g in retry
-        }
+        retry_by_group: dict[str, ExtractedFieldGroup] = {g.fieldGroupName: g for g in retry}
         merged: list[ExtractedFieldGroup] = []
         for orig_group in original:
             retry_group = retry_by_group.get(orig_group.fieldGroupName)
@@ -337,7 +321,7 @@ class MultimodalExtractor:
         if len(cleaned) <= limit:
             return cleaned
         # Cut on the nearest sentence boundary before the limit.
-        cut = cleaned[: limit].rsplit(". ", 1)[0]
+        cut = cleaned[:limit].rsplit(". ", 1)[0]
         return cut.rstrip(".") + "."
 
     def _schema_payload(self, doc: DocSpec) -> str:
@@ -351,9 +335,7 @@ class MultimodalExtractor:
 
     def _compress_group(self, group: Any) -> dict[str, Any]:
         raw = group.model_dump(mode="json", exclude_none=True)
-        raw["fieldGroupDesc"] = self._compress(
-            raw.get("fieldGroupDesc"), self._SCHEMA_GROUP_DESC_MAX
-        )
+        raw["fieldGroupDesc"] = self._compress(raw.get("fieldGroupDesc"), self._SCHEMA_GROUP_DESC_MAX)
         for field in raw.get("fieldGroupFields", []):
             field["fieldDescription"] = self._compress(
                 field.get("fieldDescription"), self._SCHEMA_FIELD_DESC_MAX

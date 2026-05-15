@@ -65,14 +65,10 @@ class HybridValueMatcher:
         fuzzy_results = await self._fuzzy.locate_all(pages=pages, fields=fields)
 
         residual = [
-            (fid, value, candidate)
-            for (fid, value, candidate) in fields
-            if fuzzy_results.get(fid) is None
+            (fid, value, candidate) for (fid, value, candidate) in fields if fuzzy_results.get(fid) is None
         ]
         if not residual:
-            logger.debug(
-                "bbox.hybrid_matcher: all %d fields resolved by fuzzy pass", len(fields)
-            )
+            logger.debug("bbox.hybrid_matcher: all %d fields resolved by fuzzy pass", len(fields))
             return fuzzy_results
 
         logger.info(

@@ -70,9 +70,7 @@ class ListJobsHandler(QueryHandler[ListJobsQuery, JobListResponse]):
             )
             for r in rows
         ]
-        return JobListResponse(
-            items=items, total=total, limit=query.limit, offset=query.offset
-        )
+        return JobListResponse(items=items, total=total, limit=query.limit, offset=query.offset)
 
 
 __all__ = ["ListJobsQuery", "ListJobsHandler"]
