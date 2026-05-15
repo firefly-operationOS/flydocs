@@ -98,7 +98,7 @@ class BboxRefiner:
         # not re-locate it. Re-running the matcher would burn LLM
         # tokens / OCR CPU and risk replacing a high-confidence
         # rectangle with a weaker one. Count those as already-grounded.
-        for idx, field in enumerate(leaves):
+        for field in leaves:
             src = field.bbox.source
             if src == BboxSource.PDF_TEXT:
                 counters.grounded_pdf_text += 1

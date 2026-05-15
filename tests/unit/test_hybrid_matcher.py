@@ -16,7 +16,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from dataclasses import field as dc_field
-from typing import Any
 
 import pytest
 
