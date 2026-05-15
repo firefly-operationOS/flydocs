@@ -56,6 +56,16 @@ class ExtractionJob(Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    # Bbox-refine leg state -- populated only when the caller enabled
+    # ``options.stages.bbox_refine``. ``null`` for jobs that never asked
+    # for grounding. See ``interfaces/enums/job_status.py::BboxRefineStatus``.
+    bbox_refine_status: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    bbox_refine_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    bbox_refine_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    bbox_refine_finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    bbox_refine_error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    bbox_refine_error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     __table_args__ = (
         Index(
             "uq_extraction_jobs_idempotency_key",
