@@ -4,7 +4,7 @@
 # fireflyframework-agentic PromptRegistry under (name, version). Edit text
 # freely; bump 'version:' when you change the contract.
 name: flydesk_idp/extract
-version: "1.0.0"
+version: "1.1.0"
 description: >-
   Schema-driven multimodal extraction. One LLM call returns every
   declared field with its value, confidence, page and normalised
@@ -44,6 +44,31 @@ system_template: |
      asks you to normalise.
   4. The output MUST exactly match the JSON schema; do not add or omit
      keys.
+
+  ARRAY FIELDS -- READ CAREFULLY:
+
+  When a field has ``fieldType: array``, the document almost always
+  contains one or more rows of relevant evidence. **DO NOT default
+  ``rows`` to ``[]`` as a "safe" answer when the document plainly
+  has matching content.** Iterate the document page by page, emit
+  one row per individual occurrence, and only return ``rows: []``
+  when you are confident the document has zero matching evidence.
+
+  - For a ``personas`` / ``parties`` array on a multi-party notarial
+    deed, expect 3-15 rows (founders, otorgantes, administradores,
+    consejeros, apoderados, representantes persona física, etc.)
+    nombrados individualmente; do not collapse them into "todos los
+    miembros del CDA" or "los socios".
+  - For a ``line_items`` / ``positions`` array on an invoice or
+    purchase order, expect one row per line on the table.
+  - For an ``apoderamientos`` / ``powers`` / ``signatories`` array,
+    expect one row per (person × granted_power) -- do not collapse
+    across people.
+
+  Empty array is acceptable ONLY when the document genuinely lacks
+  that data (e.g. apoderamientos on a constitución with no
+  appointment clause). In that case set ``confidence`` for the array
+  field to ``0.0`` and leave a short ``notes`` explaining why.
 user_template: |
   This document is {{ media_type }} with {{ page_count }} page(s).
 

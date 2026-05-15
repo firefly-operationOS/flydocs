@@ -67,8 +67,11 @@ pyfly:
   eda:
     enabled: true
     provider: ${FLYDESK_IDP_EDA_ADAPTER:postgres}
-    destinations: flydesk.idp.jobs
-    group: flydesk-idp-workers
+    # Both knobs are env-overridable so the ``bbox-worker`` container can
+    # subscribe to ``flydesk.idp.bbox.refine`` under its own consumer
+    # group while the main ``worker`` keeps consuming ``flydesk.idp.jobs``.
+    destinations: ${FLYDESK_IDP_EDA_DESTINATIONS:flydesk.idp.jobs}
+    group: ${FLYDESK_IDP_EDA_GROUP:flydesk-idp-workers}
     postgres:
       dsn: ${FLYDESK_IDP_DATABASE_URL:postgresql+asyncpg://idp:idp@localhost:5432/flydesk_idp}
       channel: flydesk_idp_eda

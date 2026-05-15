@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from flydesk_idp.models.entities.extraction_job import ExtractionJob
@@ -62,6 +62,45 @@ class ExtractionJobRepository:
         async with self._session_factory() as session:
             result = await session.execute(select(ExtractionJob).where(ExtractionJob.idempotency_key == key))
             return result.scalars().first()
+
+    async def list_jobs(
+        self,
+        *,
+        statuses: list[str] | None = None,
+        bbox_refine_statuses: list[str] | None = None,
+        created_after: datetime | None = None,
+        created_before: datetime | None = None,
+        idempotency_key: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[ExtractionJob], int]:
+        """Return ``(rows, total_count)`` for jobs matching the filters.
+
+        Rows are ordered ``created_at DESC`` (newest first). The total
+        count reflects the filtered set, not the page; callers paginate
+        with ``limit`` / ``offset`` against that total.
+        """
+        conditions: list[Any] = []
+        if statuses:
+            conditions.append(ExtractionJob.status.in_(statuses))
+        if bbox_refine_statuses:
+            conditions.append(ExtractionJob.bbox_refine_status.in_(bbox_refine_statuses))
+        if created_after is not None:
+            conditions.append(ExtractionJob.created_at >= created_after)
+        if created_before is not None:
+            conditions.append(ExtractionJob.created_at <= created_before)
+        if idempotency_key:
+            conditions.append(ExtractionJob.idempotency_key == idempotency_key)
+        async with self._session_factory() as session:
+            count_stmt = select(func.count()).select_from(ExtractionJob)
+            data_stmt = select(ExtractionJob).order_by(ExtractionJob.created_at.desc())
+            for c in conditions:
+                count_stmt = count_stmt.where(c)
+                data_stmt = data_stmt.where(c)
+            data_stmt = data_stmt.limit(limit).offset(offset)
+            total = int((await session.execute(count_stmt)).scalar_one() or 0)
+            rows = list((await session.execute(data_stmt)).scalars().all())
+        return rows, total
 
     # -- mutations -----------------------------------------------------
 

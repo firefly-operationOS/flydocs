@@ -88,17 +88,30 @@ class GetJobResultHandler(QueryHandler[GetJobResultQuery, JobResult | None]):
         )
 
     async def _poll_for_terminal(self, query: GetJobResultQuery):
-        """Block until status hits SUCCEEDED / FAILED / CANCELLED or timeout.
+        """Block until the job reaches a stable, no-more-progress state.
 
-        Returns whatever's currently persisted; never raises on timeout
-        (the partial result is still a valid response shape).
+        Stable states (any one of these stops the loop):
+          * Main pipeline is terminal: ``SUCCEEDED`` / ``FAILED`` /
+            ``CANCELLED``.
+          * Bbox-refine leg has finished one way or the other:
+            ``bbox_refine_status in {'succeeded', 'failed'}``. Once the
+            refiner has succeeded the job is also ``SUCCEEDED``; once
+            it has permanently failed the job stays
+            ``PARTIAL_SUCCEEDED`` -- in either case there is no further
+            asynchronous progress to wait for, so callers that asked
+            for ``wait_for_bboxes`` should be unblocked immediately
+            instead of polling until ``timeout_s`` elapses.
+
+        Returns whatever's currently persisted; never raises on
+        timeout (the partial result is still a valid response shape).
         """
         deadline = asyncio.get_running_loop().time() + max(0.0, query.timeout_s)
         interval = max(0.1, query.poll_interval_s)
         last = await self._repository.get(query.job_id)
         while last is not None:
             status = JobStatus(last.status)
-            if status.is_terminal:
+            bbox_status = getattr(last, "bbox_refine_status", None)
+            if status.is_terminal or bbox_status in ("succeeded", "failed"):
                 return last
             if asyncio.get_running_loop().time() >= deadline:
                 return last

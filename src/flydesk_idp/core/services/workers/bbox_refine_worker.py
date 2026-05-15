@@ -237,18 +237,46 @@ class BboxRefineWorker:
 
         schema = job.schema_json or {}
         # ``schema_json`` carries the original document bytes the submit
-        # handler stored. Single-file shape is the only one persisted
-        # today (multi-file requests fan out at orchestrator time).
-        encoded = schema.get("document_content_base64") or ""
-        if not encoded:
-            raise ValueError(f"job {job.id} has no document_content_base64 in schema_json")
-        document_bytes = base64.b64decode(encoded)
+        # handler stored. Two shapes are supported:
+        #   * multi-file (``documents=[{filename, content_base64, ...}]``)
+        #   * legacy single-file (``document_content_base64``/``_type``)
+        # We normalise each input file independently so the refiner has
+        # one ``NormalisedBinary`` row per ``source_file`` to look up.
+        sources: list[tuple[bytes, str | None, str]] = []
+        documents_payload = schema.get("documents")
+        if isinstance(documents_payload, list) and documents_payload:
+            for entry in documents_payload:
+                encoded_one = entry.get("content_base64") or ""
+                if not encoded_one:
+                    continue
+                sources.append(
+                    (
+                        base64.b64decode(encoded_one),
+                        entry.get("content_type"),
+                        entry.get("filename") or job.filename,
+                    )
+                )
+        else:
+            encoded = schema.get("document_content_base64") or ""
+            if not encoded:
+                raise ValueError(f"job {job.id} has no document bytes in schema_json")
+            sources.append(
+                (
+                    base64.b64decode(encoded),
+                    schema.get("document_content_type"),
+                    job.filename,
+                )
+            )
 
-        normalised: list[NormalisedBinary] = await self._normalizer.normalise(
-            document_bytes,
-            declared_media_type=schema.get("document_content_type"),
-            filename=job.filename,
-        )
+        normalised: list[NormalisedBinary] = []
+        for raw_bytes, media_type, name in sources:
+            normalised.extend(
+                await self._normalizer.normalise(
+                    raw_bytes,
+                    declared_media_type=media_type,
+                    filename=name,
+                )
+            )
         # Index by filename for source_file lookups. Multi-row inputs
         # carry their normalised filename in ``row.filename``.
         by_filename: dict[str, NormalisedBinary] = {row.filename: row for row in normalised}

@@ -145,6 +145,12 @@ services:
       FLYDESK_IDP_DATABASE_URL: postgresql+asyncpg://idp:idp@postgres:5432/flydesk_idp
       FLYDESK_IDP_REDIS_URL: redis://redis:6379/0
       FLYDESK_IDP_EDA_ADAPTER: postgres
+      # Subscribe to the bbox-refine topic under a dedicated consumer
+      # group so the offset advances independently of the main worker.
+      # Without these the bus would default to ``flydesk.idp.jobs`` and
+      # the bbox-refine events would never reach this container.
+      FLYDESK_IDP_EDA_DESTINATIONS: flydesk.idp.bbox.refine
+      FLYDESK_IDP_EDA_GROUP: flydesk-idp-bbox-workers
       FLYDESK_IDP_MODEL: ${FLYDESK_IDP_MODEL:-anthropic:claude-sonnet-4-6}
       FLYDESK_IDP_OFFICE_CONVERTER: ${FLYDESK_IDP_OFFICE_CONVERTER:-gotenberg}
       FLYDESK_IDP_GOTENBERG_URL: http://gotenberg:3000
