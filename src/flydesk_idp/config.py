@@ -203,6 +203,17 @@ class IDPSettings(BaseSettings):
             "to its 3-letter equivalent."
         ),
     )
+    bbox_refine_matcher: str = Field(
+        default="llm",
+        description=(
+            "Strategy that maps each extracted value to OCR / text-layer "
+            "word indices. ``llm`` (default) is generic + multilingual + "
+            "format-agnostic -- one focused LLM call per page handles every "
+            "field at once. ``fuzzy`` is the deterministic rapidfuzz "
+            "fallback for callers that want zero per-request LLM cost on "
+            "the refine path."
+        ),
+    )
     bbox_refine_max_text_pages: int = Field(
         default=200,
         ge=1,

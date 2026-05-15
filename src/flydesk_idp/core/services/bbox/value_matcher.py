@@ -101,6 +101,24 @@ class ValueMatcher:
     def __init__(self, settings: IDPSettings) -> None:
         self._threshold = settings.bbox_refine_threshold
 
+    async def locate_all(
+        self,
+        *,
+        pages: list[PageWords],
+        fields: list[tuple[str, str, list[int] | None]],
+    ) -> dict[str, MatchResult | None]:
+        """Batched interface -- iterate :meth:`locate` per field.
+
+        Provided so both fuzzy and LLM matchers expose the same
+        ``BboxValueMatcher`` protocol to the refiner. The fuzzy path
+        is CPU-bound (cheap rapidfuzz scoring) and runs sequentially
+        in the asyncio loop -- no thread offload needed at this size.
+        """
+        out: dict[str, MatchResult | None] = {}
+        for field_id, value, candidate in fields:
+            out[field_id] = self.locate(value, pages=pages, candidate_pages=candidate)
+        return out
+
     def locate(
         self,
         value: str,

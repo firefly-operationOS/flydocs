@@ -1,15 +1,18 @@
 # Copyright 2026 Firefly Software Solutions Inc
 """``BboxRefiner`` -- replace LLM-estimated bboxes with grounded ones.
 
-Walks every :class:`ExtractedField` in every group, asks the
-:class:`ValueMatcher` to locate the value against the document's word
-stream, and rewrites the bbox in place when a hit lands above the
-configured threshold. Misses keep the LLM bbox tagged
+Walks every :class:`ExtractedField` in every group, asks the configured
+:class:`BboxValueMatcher` (LLM-driven by default; deterministic fuzzy
+matcher is the opt-in alternative) to locate each value against the
+document's word stream, and rewrites the bbox in place when a hit
+lands above the configured threshold. Misses keep the LLM bbox tagged
 ``source=llm, refinement_confidence=null`` -- documented fallback,
 never silently drop a coordinate.
 
 Sub-fields of array-typed parents are recursed into; the matcher runs
-per leaf value.
+per leaf value. The refiner collects every leaf into one batched call
+so an LLM matcher can issue a single per-page request covering every
+field instead of one call per field.
 """
 
 from __future__ import annotations
@@ -22,7 +25,8 @@ from dataclasses import dataclass
 from pyfly.container import service
 
 from flydesk_idp.core.observability import log_outbound
-from flydesk_idp.core.services.bbox.value_matcher import MatchResult, ValueMatcher
+from flydesk_idp.core.services.bbox.matcher_protocol import BboxValueMatcher
+from flydesk_idp.core.services.bbox.value_matcher import MatchResult
 from flydesk_idp.core.services.bbox.word_extractor import PageWords
 from flydesk_idp.core.services.bbox.word_router import WordRouter
 from flydesk_idp.interfaces.dtos.bbox import BboxSource, BoundingBox
@@ -43,9 +47,9 @@ class RefineCounters:
 
 @service
 class BboxRefiner:
-    """Orchestrate text-layer / OCR word collection + per-field matching."""
+    """Orchestrate text-layer / OCR word collection + batched field matching."""
 
-    def __init__(self, *, router: WordRouter, matcher: ValueMatcher) -> None:
+    def __init__(self, *, router: WordRouter, matcher: BboxValueMatcher) -> None:
         self._router = router
         self._matcher = matcher
 
@@ -72,10 +76,40 @@ class BboxRefiner:
             page_count=page_count,
             language_hint=language_hint,
         )
-        counters = _Counters()
+        # Walk every leaf and collect (field_id, value, candidate_pages)
+        # so the matcher can batch them into a single per-page LLM call
+        # (or a single fuzzy sweep, depending on the backend).
+        leaves: list[ExtractedField] = []
+        targets: list[tuple[str, str, list[int] | None]] = []
         for group in groups:
             for field in group.fieldGroupFields:
-                self._refine_field(field, pages, counters)
+                self._collect_leaves(field, leaves)
+        for idx, field in enumerate(leaves):
+            value_str = _value_as_string(field.fieldValueFound)
+            if not value_str:
+                self._stamp_no_source(field.bbox)
+                continue
+            targets.append((str(idx), value_str, field.pagesFound or None))
+
+        counters = _Counters()
+        counters.fields_seen = len(leaves)
+        if targets:
+            results = await self._matcher.locate_all(pages=pages, fields=targets)
+            for field_id, _value, _candidate in targets:
+                field = leaves[int(field_id)]
+                match = results.get(field_id)
+                if match is None:
+                    field.bbox.source = BboxSource.LLM
+                    field.bbox.refinement_confidence = None
+                    counters.kept_llm += 1
+                    continue
+                page_source = _page_source(match.page, pages)
+                self._replace_bbox(field, match, page_source)
+                if page_source == BboxSource.PDF_TEXT:
+                    counters.grounded_pdf_text += 1
+                else:
+                    counters.grounded_ocr += 1
+
         elapsed_ms = (time.monotonic() - started) * 1000
         log_outbound(
             "bbox-refiner",
@@ -97,50 +131,14 @@ class BboxRefiner:
 
     # ------------------------------------------------------------------
 
-    def _refine_field(
-        self,
-        field: ExtractedField,
-        pages: list[PageWords],
-        counters: _Counters,
-    ) -> None:
-        # Recurse into array-typed parents first; per-leaf matching only.
+    def _collect_leaves(self, field: ExtractedField, sink: list[ExtractedField]) -> None:
+        """Flatten array parents -- only leaf scalar fields are matched."""
         if isinstance(field.fieldValueFound, list):
             for child in field.fieldValueFound:
                 if isinstance(child, ExtractedField):
-                    if isinstance(child.fieldValueFound, list):
-                        for sub in child.fieldValueFound:
-                            if isinstance(sub, ExtractedField):
-                                self._refine_field(sub, pages, counters)
-                    else:
-                        self._refine_field(child, pages, counters)
+                    self._collect_leaves(child, sink)
             return
-
-        counters.fields_seen += 1
-
-        value_str = _value_as_string(field.fieldValueFound)
-        if not value_str:
-            self._stamp_no_source(field.bbox)
-            return
-
-        match = self._matcher.locate(
-            value_str,
-            pages=pages,
-            candidate_pages=field.pagesFound or None,
-        )
-        if match is None:
-            # No grounding -- keep the LLM bbox shape, tag the source so
-            # callers know the coordinates are an estimate.
-            field.bbox.source = BboxSource.LLM
-            field.bbox.refinement_confidence = None
-            counters.kept_llm += 1
-            return
-
-        page_source = _page_source(match.page, pages)
-        self._replace_bbox(field, match, page_source)
-        if page_source == BboxSource.PDF_TEXT:
-            counters.grounded_pdf_text += 1
-        else:
-            counters.grounded_ocr += 1
+        sink.append(field)
 
     @staticmethod
     def _replace_bbox(field: ExtractedField, match: MatchResult, source: BboxSource) -> None:
