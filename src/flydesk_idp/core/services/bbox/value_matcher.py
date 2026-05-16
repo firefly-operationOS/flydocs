@@ -218,6 +218,7 @@ class ValueMatcher:
         # outer loop bounded for very long values).
         max_window = min(12, max(target_word_count * 3, target_word_count + 2))
         best_score = 0.0
+        best_order: float = float("inf")
         best_window: tuple[int, int] | None = None
         normalised_words = [(_normalise(w.text), w) for w in words]
         for start in range(len(words)):
@@ -229,8 +230,15 @@ class ValueMatcher:
                 if not joined:
                     continue
                 score = fuzz.ratio(target, joined) / 100.0  # pyright: ignore[reportAttributeAccessIssue]
-                if score > best_score:
+                order = _first_reading_order(words[start:end])
+                # Tie-break by reading order: when two windows score the
+                # same, prefer the one that appears earlier in the
+                # document (lower reading_order). Words without a
+                # reading_order (PyMuPDF / Tesseract) sort by their
+                # array index, which is already reading-order-ish.
+                if score > best_score or (score == best_score and order < best_order):
                     best_score = score
+                    best_order = order
                     best_window = (start, end)
         if best_window is None or best_score < self._threshold:
             return None
@@ -259,6 +267,7 @@ class ValueMatcher:
             return None
         max_window = min(80, max(len(target) + 4, 6))
         best_score = 0.0
+        best_order: float = float("inf")
         best_window: tuple[int, int] | None = None
         for start in range(len(chars)):
             for size in range(max(1, len(target) - 2), max_window + 1):
@@ -267,8 +276,10 @@ class ValueMatcher:
                     break
                 joined = "".join(c for c, _ in chars[start:end])
                 score = fuzz.ratio(target, joined) / 100.0  # pyright: ignore[reportAttributeAccessIssue]
-                if score > best_score:
+                order = _first_reading_order([w for _, w in chars[start:end]])
+                if score > best_score or (score == best_score and order < best_order):
                     best_score = score
+                    best_order = order
                     best_window = (start, end)
         if best_window is None or best_score < self._threshold:
             return None
@@ -289,3 +300,21 @@ def _union_bbox(words: list[Word], score: float, page: int) -> MatchResult:
         ymax=ymax,
         score=round(min(1.0, max(0.0, score)), 4),
     )
+
+
+def _first_reading_order(words: list[Word]) -> float:
+    """Lowest reading_order across a word slice, or ``+inf`` if none set.
+
+    Returning ``+inf`` when no word carries reading_order keeps the
+    tie-break comparison a strict ``<`` -- legacy engines that don't
+    populate the field never *win* a tie, but they also never lose to
+    nothing, so the matcher's behaviour stays unchanged when every
+    word lacks the metadata.
+    """
+    best: float = float("inf")
+    for w in words:
+        if w.reading_order is None:
+            continue
+        if w.reading_order < best:
+            best = float(w.reading_order)
+    return best

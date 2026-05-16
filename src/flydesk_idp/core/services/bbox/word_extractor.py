@@ -28,6 +28,18 @@ class Word:
     Coordinates are normalised to ``[0, 1]`` with ``(0, 0)`` at the
     top-left of the page. ``page`` is 1-indexed to match the rest of
     the response shape.
+
+    Optional structural metadata is populated only by layout-aware
+    engines (e.g. :class:`DoclingOcrEngine`); PyMuPDF and Tesseract
+    leave every optional field as ``None``. Downstream consumers must
+    treat absence as "structure unknown", not "definitely not in a
+    table" -- the legacy engines never tag it either way.
+
+    * ``reading_order``  -- monotonically increasing per page in
+      visual reading order. Tie-break signal for the value matcher.
+    * ``table_id``       -- stable identifier for the table the word
+      lives in. ``None`` for non-tabular words.
+    * ``row_idx`` / ``col_idx`` -- 0-indexed position inside the table.
     """
 
     text: str
@@ -36,6 +48,10 @@ class Word:
     ymin: float
     xmax: float
     ymax: float
+    reading_order: int | None = None
+    table_id: str | None = None
+    row_idx: int | None = None
+    col_idx: int | None = None
 
 
 @dataclass(slots=True, frozen=True)
