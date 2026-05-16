@@ -16,6 +16,16 @@ def _words(*pairs: tuple[str, float, float, float, float]) -> list[Word]:
     return [Word(text=t, page=1, xmin=x0, ymin=y0, xmax=x1, ymax=y1) for t, x0, y0, x1, y1 in pairs]
 
 
+def _words_with_order(
+    *pairs: tuple[str, float, float, float, float, int],
+) -> list[Word]:
+    """Variant of ``_words`` that stamps ``reading_order`` on each word."""
+    return [
+        Word(text=t, page=1, xmin=x0, ymin=y0, xmax=x1, ymax=y1, reading_order=order)
+        for t, x0, y0, x1, y1, order in pairs
+    ]
+
+
 def _page(words: list[Word]) -> PageWords:
     return PageWords(page=1, width=100.0, height=100.0, words=words, has_text_layer=True)
 
@@ -161,3 +171,50 @@ def test_empty_value_returns_none() -> None:
 
 def test_no_pages_returns_none() -> None:
     assert ValueMatcher(_settings()).locate("anything", pages=[]) is None
+
+
+# --------------------------------------------------------- reading-order tie-break
+
+
+def test_tie_break_prefers_earlier_reading_order() -> None:
+    """Two equally-scored windows on the same page -- prefer the one
+    that comes earlier in the document's reading order. This is what
+    layout-aware engines (Docling) give us when the same value
+    appears in a header AND a body paragraph.
+    """
+    # Two identical "Madrid" matches: the LAYOUT-earlier one carries
+    # reading_order=0, the second one reading_order=5. The matcher
+    # without the tie-break would pick whichever comes first in the
+    # array. We arrange them so the LATER (higher reading_order) word
+    # appears earlier in the array -- forcing the tie-break to matter.
+    page = _page(
+        _words_with_order(
+            # Body paragraph match (reading_order=5) comes first in array.
+            ("Madrid", 0.4, 0.7, 0.5, 0.72, 5),
+            # Header match (reading_order=0) comes second in array.
+            ("Madrid", 0.4, 0.1, 0.5, 0.12, 0),
+        )
+    )
+    match = ValueMatcher(_settings()).locate("Madrid", pages=[page])
+    assert match is not None
+    # The HEADER match (reading_order=0, ymin=0.1) wins despite being
+    # second in the array.
+    assert match.ymin == 0.1
+    assert match.ymax == 0.12
+
+
+def test_tie_break_is_inert_when_reading_order_unset() -> None:
+    """When no word carries reading_order (PyMuPDF, Tesseract path)
+    the tie-break degrades to "first encountered wins" -- the existing
+    behaviour, no regression for legacy engines.
+    """
+    page = _page(
+        _words(
+            ("Madrid", 0.4, 0.1, 0.5, 0.12),
+            ("Madrid", 0.4, 0.7, 0.5, 0.72),
+        )
+    )
+    match = ValueMatcher(_settings()).locate("Madrid", pages=[page])
+    assert match is not None
+    # First array entry wins (existing behaviour).
+    assert match.ymin == 0.1

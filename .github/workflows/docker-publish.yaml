@@ -48,8 +48,23 @@ env:
 
 jobs:
   publish:
-    name: Build + push (amd64, arm64)
+    name: Build + push (amd64, arm64) -- ${{ matrix.variant }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Canonical slim image -- the one most consumers want.
+          - variant: slim
+            with_docling: "false"
+            tag_prefix: ""
+          # Heavy variant with the layout-aware Docling OCR + Markdown
+          # text-anchor baked in. Pulls PyTorch + HF models (~2.5 GB).
+          # Use only when ``FLYDESK_IDP_BBOX_REFINE_OCR_ENGINE=docling``
+          # or ``FLYDESK_IDP_EXTRACTION_TEXT_ANCHOR=docling`` is set.
+          - variant: docling
+            with_docling: "true"
+            tag_prefix: "docling-"
     steps:
       - uses: actions/checkout@v4
 
@@ -87,23 +102,32 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ steps.ns.outputs.image }}
+          # Slim variant uses unprefixed tags (``latest``, ``main``,
+          # ``v1.2.3``). The docling variant pins everything under a
+          # ``docling-`` prefix so the two never collide -- pulling
+          # ``:latest`` always lands on slim; pulling
+          # ``:docling-latest`` lands on the heavy variant.
+          flavor: |
+            latest=${{ matrix.with_docling == 'false' && format('auto') || format('false') }}
+            prefix=${{ matrix.tag_prefix }},onlatest=true
           tags: |
             type=ref,event=branch
             type=ref,event=tag
-            type=sha,format=short,prefix=sha-
+            type=sha,format=short,prefix=${{ matrix.tag_prefix }}sha-
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
-            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
-            type=raw,value=manual-${{ github.run_id }},enable=${{ github.event_name == 'workflow_dispatch' }}
+            type=raw,value=${{ matrix.tag_prefix }}latest,enable=${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+            type=raw,value=${{ matrix.tag_prefix }}manual-${{ github.run_id }},enable=${{ github.event_name == 'workflow_dispatch' }}
           labels: |
-            org.opencontainers.image.title=flydesk-idp
-            org.opencontainers.image.description=Firefly Desk -- Intelligent Document Processing service. Pure multimodal extraction with bbox.
+            org.opencontainers.image.title=flydesk-idp${{ matrix.with_docling == 'true' && ' (docling)' || '' }}
+            org.opencontainers.image.description=Firefly Desk -- Intelligent Document Processing service. Pure multimodal extraction with bbox.${{ matrix.with_docling == 'true' && ' Layout-aware OCR + Markdown text-anchor baked in.' || '' }}
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.licenses=Apache-2.0
             org.opencontainers.image.vendor=Firefly Software Solutions Inc
+            io.flydesk.idp.variant=${{ matrix.variant }}
 
-      - name: Build + push (linux/amd64, linux/arm64)
+      - name: Build + push (linux/amd64, linux/arm64) -- ${{ matrix.variant }}
         id: build
         uses: docker/build-push-action@v6
         with:
@@ -115,11 +139,13 @@ jobs:
           sbom: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            WITH_DOCLING=${{ matrix.with_docling }}
           build-contexts: |
             pyfly=./vendor/pyfly
             fireflyframework-agentic=./vendor/fireflyframework-agentic
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ matrix.variant }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.variant }}
 
       # ``actions/attest-build-provenance`` requires Build & Validate
       # Attestations to be enabled on the GitHub organisation (paid /
@@ -139,9 +165,10 @@ jobs:
       - name: Summary
         run: |
           {
-            echo "### Published image"
+            echo "### Published image -- ${{ matrix.variant }}"
             echo
             echo "**Image**: \`${{ steps.ns.outputs.image }}\`"
+            echo "**Variant**: \`${{ matrix.variant }}\` (WITH_DOCLING=${{ matrix.with_docling }})"
             echo "**Digest**: \`${{ steps.build.outputs.digest }}\`"
             echo
             echo "**Tags:**"
@@ -151,8 +178,8 @@ jobs:
             echo
             echo "Pull on either architecture:"
             echo '```bash'
-            echo "docker pull ${{ steps.ns.outputs.image }}:latest      # arm64 + amd64 manifest"
-            echo "docker pull --platform linux/arm64 ${{ steps.ns.outputs.image }}:latest"
-            echo "docker pull --platform linux/amd64 ${{ steps.ns.outputs.image }}:latest"
+            echo "docker pull ${{ steps.ns.outputs.image }}:${{ matrix.tag_prefix }}latest      # arm64 + amd64 manifest"
+            echo "docker pull --platform linux/arm64 ${{ steps.ns.outputs.image }}:${{ matrix.tag_prefix }}latest"
+            echo "docker pull --platform linux/amd64 ${{ steps.ns.outputs.image }}:${{ matrix.tag_prefix }}latest"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"

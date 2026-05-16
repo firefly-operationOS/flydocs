@@ -57,6 +57,19 @@ FLYDESK_IDP_SYNC_TIMEOUT_S=60
 FLYDESK_IDP_ASYNC_TIMEOUT_S=300
 FLYDESK_IDP_JOB_MAX_ATTEMPTS=3
 
+# Optional pre-extraction text rendering. ``none`` (default) sends only the
+# binary to the LLM. ``docling`` runs Docling over the document first and
+# splices the resulting Markdown into the user prompt ahead of the binary
+# so the multimodal LLM can cross-reference layout against a cleaned-up
+# textual view -- useful on multilingual scans and long tabular documents.
+# Requires the ``docling`` extra (use the ``docling-`` image variant).
+# See docs/docling.md.
+FLYDESK_IDP_EXTRACTION_TEXT_ANCHOR=none
+# Hard ceiling on the anchor length. Truncated on a paragraph boundary
+# when in reach, otherwise hard-cut with a visible ``[anchor truncated]``
+# sentinel. Set to 0 to silently disable even when the engine is set.
+FLYDESK_IDP_EXTRACTION_TEXT_ANCHOR_MAX_CHARS=12000
+
 # Provider credentials are picked up from the standard env vars (OPENAI_API_KEY,
 # ANTHROPIC_API_KEY, AWS_*). Set only the ones you need.
 # OPENAI_API_KEY=
@@ -76,6 +89,30 @@ FLYDESK_IDP_WEBHOOK_MAX_ATTEMPTS=5
 # Optional shared-secret HMAC signing of webhooks (X-Flydesk-Signature header).
 # Leave blank to disable.
 FLYDESK_IDP_WEBHOOK_HMAC_SECRET=
+
+# ----------------------------------------------------------------------------
+# Bbox refinement
+# ----------------------------------------------------------------------------
+# OCR engine for image-PDFs and raster inputs consumed by the bbox refiner.
+#   * ``tesseract`` (default) -- shells out to the local ``tesseract`` binary.
+#     The runtime Dockerfile installs it plus common European language packs.
+#   * ``docling`` -- IBM Docling's layout-aware pipeline (Heron layout +
+#     RapidOCR by default). Surfaces table-cell + reading-order metadata
+#     the matcher uses as a tie-break signal. Requires the ``docling``
+#     extra (use the ``docling-`` image variant). See docs/docling.md.
+#   * ``none`` -- skip OCR; image pages keep the LLM bbox.
+FLYDESK_IDP_BBOX_REFINE_OCR_ENGINE=tesseract
+# DPI for PDF→image rasterisation. Only used by the Tesseract path;
+# Docling rasterises internally.
+FLYDESK_IDP_BBOX_REFINE_OCR_DPI=200
+# Default Tesseract ``-l`` argument. Also consumed by Docling as the default
+# OCR language hint when no per-request ``language_hint`` is supplied.
+FLYDESK_IDP_BBOX_REFINE_TESSERACT_LANG=spa+eng
+# Strategy that maps each extracted value to OCR/text-layer word indices.
+#   * ``hybrid`` (default) -- rapidfuzz first, LLM only for residual.
+#   * ``llm`` -- one LLM call per page over every field.
+#   * ``fuzzy`` -- rapidfuzz only, no LLM fallback.
+FLYDESK_IDP_BBOX_REFINE_MATCHER=hybrid
 
 # ----------------------------------------------------------------------------
 # Security (optional -- only used if you front the service with an auth gate)

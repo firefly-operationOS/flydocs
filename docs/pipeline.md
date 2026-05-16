@@ -39,7 +39,7 @@ reflect exactly what executed.
 |     4 | `plan_tasks`           | yes        | Pure Python: build the flat `(segment, DocSpec)` task list every downstream stage iterates.                                               | 5 s             |
 |     5 | `extract`              | yes        | LLM produces fields + normalised bboxes for every task. Fanned out with `asyncio.gather`.                                                 | 600 s           |
 |     6 | `bbox_validation`      | yes        | Pure-Python geometric hallucination check: stamps every bbox with a `BboxQuality` verdict + continuous `quality_score`.                   | 5 s             |
-|     7 | `bbox_refine`          | no         | Replaces LLM-estimated coordinates with grounded ones via the hybrid matcher (rapidfuzz first, LLM only for residual). Skipped inline on async — see [bbox refinement](#bbox-refinement-sync-vs-async). | 300 s           |
+|     7 | `bbox_refine`          | no         | Replaces LLM-estimated coordinates with grounded ones via the hybrid matcher (rapidfuzz first, LLM only for residual). Pluggable OCR engine: ``tesseract`` (default), ``docling`` (layout-aware, see [docling.md](docling.md)), or ``none``. Skipped inline on async — see [bbox refinement](#bbox-refinement-sync-vs-async). | 300 s           |
 |     8 | `field_validation`     | no         | Pure-Python validation: regex / enum / range + every `StandardValidator` declared per field.                                              | 5 s             |
 |     9 | `visual_authenticity`  | no         | LLM evaluates caller-defined visual validators (signature present, stamp present, …).                                                     | 180 s           |
 |    10 | `content_authenticity` | no         | LLM audit: dates consistent, totals add up, expected boilerplate, tampering signals.                                                      | 180 s           |
@@ -255,9 +255,17 @@ For each call:
    to enforce structured output.
 2. Render the `flydesk_idp/extract` prompt with the JSON schema, media
    type, page count, intention, and optional language hint.
-3. Call `FireflyAgent.run([prompt.user, BinaryContent(...)])` — the
-   document bytes go inline as multimodal content.
-4. Post-process the output with `normalise_doc` — clamp every bbox to
+3. Compose the user-side multimodal content list via
+   `_build_user_content` -- ``[user_text, anchor?, BinaryContent]``.
+   When `FLYDESK_IDP_EXTRACTION_TEXT_ANCHOR=docling` and the configured
+   `TextAnchor` returns a non-empty Markdown render, it slots between
+   the instruction text and the binary so the LLM has both modalities
+   to cross-reference. See [docling.md § Text anchor](docling.md#2b-doclingtextanchor--pre-extraction-markdown-anchor)
+   for the trade-offs (Anthropic cache implications, max-chars
+   ceiling, degraded-on-error semantics).
+4. Call `FireflyAgent.run(content)` -- the document bytes go inline as
+   multimodal content.
+5. Post-process the output with `normalise_doc` -- clamp every bbox to
    `[0, 1]`, coerce types, populate `pagesFound`.
 
 Fallback: if the primary model fails (timeout, content policy, etc.)
@@ -292,17 +300,26 @@ This is a cheap geometric defence -- not a full OCR-grounded check. A
 prove the LLM correctly anchored the value. Pair it with `judge` for
 semantic anchoring.
 
-> **Known limitation — near-future improvement.** LLM-estimated bboxes
-> are imprecise: they land in roughly the right region of the page but
-> routinely miss the actual text by one or more lines. The geometric
-> validator cannot catch this. The planned fix is **text-layer
-> grounding**: extract word-level coordinates with `pdfplumber` for
-> born-digital PDFs and Tesseract OCR for scanned PDFs / images, then
-> replace the LLM's box with the union of the words that match the
-> extracted value. Once in place the response will distinguish the two
-> via a `bbox.source: "llm" | "ocr"` discriminator. Until that ships,
-> treat bboxes as a "where to look" hint, not a precise locator -- see
-> the warning in `interfaces/dtos/bbox.py`.
+> **Where the grounded bbox comes from.** LLM-estimated bboxes
+> (`bbox.source = "llm"`) are imprecise -- they land in roughly the
+> right region of the page but routinely miss the actual text by one
+> or more lines. The geometric validator cannot catch this. The
+> `bbox_refine` stage (section 7 of the pipeline table) fixes it by
+> grounding every value against the document's real text layer:
+>
+> * Born-digital PDFs go through **PyMuPDF** for sub-pixel-accurate
+>   word coordinates (`bbox.source = "pdf_text"`).
+> * Image-PDFs and rasters go through the configured `OcrEngine`
+>   (`bbox.source = "ocr"`):
+>   * `tesseract` (default) -- shells out to the local binary.
+>   * `docling` -- IBM Docling's Heron layout model + RapidOCR.
+>     Surfaces table-cell + reading-order metadata on `Word` that
+>     the matcher uses as a tie-break signal. See [docling.md](docling.md).
+>   * `none` -- skip OCR; image pages keep `bbox.source = "llm"`.
+>
+> When the matcher cannot locate the value above its threshold the
+> LLM bbox is **kept**, tagged `source = "llm", refinement_confidence
+> = null` -- we never silently drop coordinates.
 
 ### 4g. `field_validation`
 

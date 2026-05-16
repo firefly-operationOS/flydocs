@@ -278,6 +278,16 @@ that bundles a deed + an ID + a utility bill comes out as three
 separate routed documents without the caller having to know what's
 inside.
 
+The `bbox_refine` stage grounds the LLM's bounding boxes against the
+document's real text. PDF text layers go through PyMuPDF (sub-pixel
+accurate); image-PDFs and rasters route to a pluggable `OcrEngine`.
+Pick `tesseract` (default), `docling` (layout-aware, surfaces
+table-cell + reading-order metadata -- see
+[docs/docling.md](docs/docling.md)), or `none`. The extractor can also
+splice a Markdown text-anchor (`FLYDESK_IDP_EXTRACTION_TEXT_ANCHOR=docling`)
+into the user prompt for the LLM to cross-reference -- useful for
+multilingual scans and dense tabular documents.
+
 See [docs/pipeline.md](docs/pipeline.md) for the deep dive.
 
 ---

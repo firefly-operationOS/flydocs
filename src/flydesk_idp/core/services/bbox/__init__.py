@@ -18,6 +18,7 @@
 
 from flydesk_idp.core.services.bbox.bbox_refiner import BboxRefiner, RefineCounters
 from flydesk_idp.core.services.bbox.bbox_validator import BboxValidator
+from flydesk_idp.core.services.bbox.docling_engine import DoclingOcrEngine
 from flydesk_idp.core.services.bbox.hybrid_matcher import HybridValueMatcher
 from flydesk_idp.core.services.bbox.llm_matcher import LlmValueMatcher
 from flydesk_idp.core.services.bbox.matcher_protocol import BboxValueMatcher
@@ -32,6 +33,7 @@ __all__ = [
     "BboxRefiner",
     "BboxValidator",
     "BboxValueMatcher",
+    "DoclingOcrEngine",
     "HybridValueMatcher",
     "LlmValueMatcher",
     "MatchResult",

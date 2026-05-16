@@ -59,6 +59,33 @@ class IDPSettings(BaseSettings):
     # -- Extraction -----------------------------------------------------
     model: str = "anthropic:claude-sonnet-4-6"
     fallback_model: str | None = "openai:gpt-4o"
+    # Optional pre-extraction text rendering. ``"none"`` (default) keeps
+    # the historical binary-only behaviour. ``"docling"`` runs Docling
+    # over the document and splices the resulting Markdown into the
+    # user message ahead of the binary content so the multimodal LLM
+    # can cross-reference layout against a cleaned-up textual view --
+    # measurably reduces hallucinations on multilingual scans and long
+    # tabular documents. Requires the ``docling`` extra.
+    extraction_text_anchor: str = Field(
+        default="none",
+        description=(
+            "Pre-extraction text rendering. ``none`` (default) sends the "
+            "binary only; ``docling`` runs Docling and splices a Markdown "
+            "anchor into the user prompt for cross-reference. Install the "
+            "``docling`` extra to enable."
+        ),
+    )
+    extraction_text_anchor_max_chars: int = Field(
+        default=12000,
+        ge=0,
+        description=(
+            "Hard ceiling on the Markdown anchor length (in characters). "
+            "Anything above is truncated on a paragraph boundary when one "
+            "is in reach, otherwise hard-cut, with a visible ``[anchor "
+            "truncated]`` sentinel. Keeps prompt cost predictable on long "
+            "documents."
+        ),
+    )
     # Page count threshold above which the sync path returns 413 and asks the
     # caller to use the async API. The LLM sees the document directly so we
     # can no longer enforce DPI here.
@@ -194,9 +221,11 @@ class IDPSettings(BaseSettings):
             "OCR engine used for image-PDFs and raster inputs. ``tesseract`` "
             "(default) shells out to the local ``tesseract`` binary -- the "
             "runtime Dockerfile installs it plus the most common European "
-            "language packs (spa/eng/fra/deu/ita/por). ``none`` skips OCR "
-            "entirely (image pages keep the LLM bbox); ``paddle`` / "
-            "``mistral`` adapters land in follow-ups and slot in here."
+            "language packs (spa/eng/fra/deu/ita/por). ``docling`` runs IBM "
+            "Docling's layout-aware pipeline (Heron layout + pluggable OCR) "
+            "for cleaner words on noisy scans; install the ``docling`` extra. "
+            "``none`` skips OCR entirely (image pages keep the LLM bbox); "
+            "``paddle`` / ``mistral`` adapters land in follow-ups."
         ),
     )
     bbox_refine_ocr_dpi: int = Field(

@@ -17,9 +17,21 @@
 # See docker-compose.yml for the canonical invocation.
 
 ARG PYTHON_VERSION=3.13
+# Opt-in: bake the optional ``docling`` extra into the image so the
+# layout-aware OCR engine + Markdown text-anchor are available
+# without a runtime ``pip install``. Default is OFF -- the slim image
+# stays small (PyTorch + HF models add ~2.5 GB). Build the docling
+# variant with:
+#
+#     docker buildx build --build-arg WITH_DOCLING=true ...
+#
+# In CI both variants are published as separate tags (see
+# ``.github/workflows/docker-publish.yaml``).
+ARG WITH_DOCLING=false
 
 # ---- Stage 1: builder -----------------------------------------------------
 FROM python:${PYTHON_VERSION}-slim AS builder
+ARG WITH_DOCLING
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
@@ -53,8 +65,17 @@ RUN sed -i \
         -e 's|path = "\.\./\.\./fireflyframework/fireflyframework-agentic"|path = "/build/fireflyframework-agentic"|' \
         /app/pyproject.toml
 
+# Compose the optional-extras list once so both ``uv sync`` calls stay
+# in lock-step. Docling adds PyTorch + Hugging Face models; everything
+# else is in the default deps already.
+RUN if [ "${WITH_DOCLING}" = "true" ]; then \
+        echo "--extra docling" > /tmp/uv-extras; \
+    else \
+        : > /tmp/uv-extras; \
+    fi
+
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --no-install-project --no-dev --no-editable
+    uv sync --no-install-project --no-dev --no-editable $(cat /tmp/uv-extras)
 
 # Copy the application source + migrations and finalise the install.
 COPY src/         /app/src/
@@ -65,16 +86,19 @@ COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 RUN chmod +x /app/docker-entrypoint.sh
 
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --no-dev --no-editable
+    uv sync --no-dev --no-editable $(cat /tmp/uv-extras)
 
 
 # ---- Stage 2: runtime -----------------------------------------------------
 FROM python:${PYTHON_VERSION}-slim AS runtime
+ARG WITH_DOCLING
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     UV_PROJECT_ENVIRONMENT=/app/.venv \
     PATH="/app/.venv/bin:${PATH}"
+# Surface the build flag for boot-time logging + actuator info.
+ENV FLYDESK_IDP_IMAGE_VARIANT=${WITH_DOCLING:+docling}
 
 # System libs required by the binary normalizer's image adapters:
 # * ``libheif1``                                -- pillow-heif (HEIC / HEIF / AVIF)
