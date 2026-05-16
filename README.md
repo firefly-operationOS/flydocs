@@ -51,17 +51,22 @@ out of the box, and clean failure isolation per pipeline stage.
 You give the service one HTTP request. The response is a single JSON
 object containing, for every document you asked about:
 
-| Layer                       | What it tells you                                                                              |
-| --------------------------- | ---------------------------------------------------------------------------------------------- |
-| **Fields**                  | The extracted value, page number, normalised bounding box (with a geometric quality verdict), model confidence, and free-text notes. |
-| **Field validation**        | Per-field PASS / FAIL plus a verdict from any built-in `StandardValidator` (IBAN, NIF, IBAN, Luhn, phone, postal code, …). |
-| **Visual authenticity**     | Yes/no verdicts on caller-defined visual validators (signature present, stamp present, photo present, …). |
-| **Content authenticity**    | Document-level integrity audit: date consistency, totals tally, expected boilerplate, tampering signals. |
-| **Judge**                   | A second LLM pass re-checks each extracted value against the document and stamps PASS / FAIL / UNCERTAIN with evidence. |
-| **Business rules**          | Boolean / categorical decisions over the data, evaluated as a DAG — _"is this KYC-complete?"_, _"escalate to manual review?"_, _"approve / reject"_. |
-| **Audit trail**             | Request id, per-stage latencies, per-doc model used, structured logs.                          |
-| **Cost telemetry**          | Aggregated `usage` block in every response: input/output tokens + estimated USD cost — sourced from `genai-prices`, which is **provider-agnostic** (Anthropic, OpenAI, Google, Mistral, …). Broken down by agent and by model. Plus a per-call `cost_usd` on every `outbound_call` log line. |
-| **Prompt caching**          | Provider-aware. Anthropic prompt caching is on by default (system prompt + last user-message block cached with a 5-minute TTL). For non-Anthropic providers the cache middleware is a no-op until a provider-specific shim lands. Cache writes / reads surface as `cache_creation_tokens` / `cache_read_tokens` on the response. Toggle with `FLYDESK_IDP_PROMPT_CACHE`. |
+| Layer                          | What it tells you                                                                              |
+| ------------------------------ | ---------------------------------------------------------------------------------------------- |
+| **Fields**                     | The extracted value, page number, normalised bounding box (with a geometric quality verdict, a `source` discriminator — `llm` / `pdf_text` / `ocr` — and a `refinement_confidence`), model confidence, and free-text notes. Array fields nest recursively (rows of sub-fields). |
+| **Field validation**           | Per-field PASS / FAIL plus the verdict of every built-in `StandardValidator` (IBAN, BIC, NIF/NIE/CIF, VAT, SSN, Luhn, phone (E.164), country / language / postal code, lat/lon, IPv4/IPv6, URI/URL/email/domain/slug, UUID, JSON, hex color, date / time / datetime / ISO 8601, currency code, amount, passport). Each spec carries a `severity` (`error` flips the field invalid; `warning` records the finding but keeps the field valid). |
+| **Visual authenticity**        | Yes/no verdicts on caller-defined visual validators (signature present, stamp present, photo present, …). |
+| **Content authenticity**       | Document-level integrity audit: date consistency, totals tally, expected boilerplate, tampering signals. |
+| **Judge**                      | A second LLM pass re-checks each extracted value against the document and stamps PASS / FAIL / UNCERTAIN with evidence and a `flag_for_review` bit. |
+| **Judge escalation**           | Optional re-run of `extract` + `judge` with a stronger `escalation_model` when the judge's first pass fails too many fields. The `escalation` block in the response audits the trigger (`primary_fail_rate`, `escalation_fail_rate`, `accepted`). |
+| **Post-extraction transforms** | Declarative entity resolution (dedupe people across documents by DNI + name variants) and free-form LLM transformations (closed-taxonomy normalisation, role mapping, …). Per-document outputs land in the affected `documents[].fields[]`; cross-document outputs land in `request_transformations[]`. |
+| **Business rules**             | Boolean / categorical decisions over fields, validator outcomes, and other rules' results — evaluated as a DAG with `graphlib.TopologicalSorter`, batched per level into one LLM call. _"Is this KYC-complete?"_, _"Escalate to manual review?"_, _"Approve / reject"_. |
+| **Multi-file summary**         | `files[]` carries one entry per input file (filename, MIME type, page count, byte size, final `document_type`, classifier verdict). Files that don't match any declared `DocSpec` show up in `additional_documents[]` instead of being dropped. |
+| **Pipeline errors**            | Non-fatal per-stage failures are surfaced in `pipeline_errors[]` (one entry per failed node with `code`, `message`, `node`) — the request still returns the partial result instead of failing the whole call. |
+| **Execution trace**            | `trace[]` lists every executed pipeline node in DAG order with `started_at`, `completed_at`, `latency_ms`, and `status` (`success` / `failed` / `skipped`) — drop-in latency breakdown for ops dashboards. |
+| **Audit trail**                | Request id, per-stage latencies, per-doc model used, structured `outbound_call` log lines for every LLM / webhook / queue call, W3C trace context (`traceparent`, `tracestate`, `X-Correlation-Id`, `X-Tenant-Id`) propagated end-to-end. |
+| **Cost telemetry**             | Aggregated `usage` block in every response: input/output tokens + estimated USD cost — sourced from `genai-prices`, which is **provider-agnostic** (Anthropic, OpenAI, Google, Mistral, …). Broken down by agent and by model. Plus a per-call `cost_usd` on every `outbound_call` log line. |
+| **Prompt caching**             | Provider-aware. Anthropic prompt caching is on by default (system prompt + last user-message block cached with a 5-minute TTL). For non-Anthropic providers the cache middleware is a no-op until a provider-specific shim lands. Cache writes / reads surface as `cache_creation_tokens` / `cache_read_tokens` on the response. Toggle with `FLYDESK_IDP_PROMPT_CACHE`. |
 
 A single request always carries a non-empty `documents` list — a
 single file is just a one-element list. Submit several entries to ship
@@ -69,7 +74,7 @@ a multi-file pack at once: pin each file's `document_type` when you
 know it, or let the LLM classifier decide. Each extracted document
 carries a `source_file` field so callers can map output back to the
 input file that produced it. The full multi-file shape is documented
-in [docs/api-reference.md § 2a](docs/api-reference.md#2a-multi-file--sub-document-discovery).
+in [docs/api-reference.md § 2c](docs/api-reference.md#2c-multi-file--sub-document-discovery).
 
 The same call works **synchronously** (`POST /api/v1/extract`, blocks
 until done) or as a **queued job** with a webhook
