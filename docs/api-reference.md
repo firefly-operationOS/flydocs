@@ -8,24 +8,53 @@ machine-readable OpenAPI 3.1 spec from the same DTOs.
 
 ## 1. Surface at a glance
 
-| Method   | Path                            | Purpose                                                    |
-| -------- | ------------------------------- | ---------------------------------------------------------- |
-| `POST`   | `/api/v1/extract`               | Synchronous extraction. Blocks until pipeline finishes.    |
-| `POST`   | `/api/v1/extract:validate`      | Dry-run the semantic validator (no LLM call, no DB write). |
-| `POST`   | `/api/v1/jobs`                  | Submit a queued extraction. Returns `202` + job id.         |
-| `GET`    | `/api/v1/jobs/{id}`             | Current status of a job.                                    |
-| `GET`    | `/api/v1/jobs/{id}/result`      | Final `ExtractionResult` (when `SUCCEEDED`).               |
-| `DELETE` | `/api/v1/jobs/{id}`             | Cancel a job that is still `QUEUED`.                        |
-| `GET`    | `/api/v1/version`               | Build + model info.                                         |
-| `GET`    | `/actuator/health`              | Composite health.                                           |
-| `GET`    | `/actuator/health/liveness`     | Liveness probe.                                             |
-| `GET`    | `/actuator/health/readiness`    | Readiness probe.                                            |
-| `GET`    | `/actuator/metrics`             | Prometheus metrics.                                         |
-| `GET`    | `/docs`                         | Swagger UI (OpenAPI 3.1).                                   |
+| Method   | Path                            | Purpose                                                                |
+| -------- | ------------------------------- | ---------------------------------------------------------------------- |
+| `POST`   | `/api/v1/extract`               | Synchronous extraction. Blocks until the pipeline finishes.            |
+| `POST`   | `/api/v1/extract:validate`      | Dry-run the semantic validator (no LLM call, no DB write).             |
+| `POST`   | `/api/v1/jobs`                  | Submit a queued extraction. Returns `202` + job id.                    |
+| `GET`    | `/api/v1/jobs`                  | Filtered, paginated listing of jobs.                                   |
+| `GET`    | `/api/v1/jobs/{id}`             | Current status of a job (including bbox-refine sub-state).             |
+| `GET`    | `/api/v1/jobs/{id}/result`      | Final `ExtractionResult`. Long-poll for grounded bboxes via `wait_for_bboxes`. |
+| `DELETE` | `/api/v1/jobs/{id}`             | Cancel a job that is still `QUEUED`.                                   |
+| `GET`    | `/api/v1/version`               | Build + model + EDA-adapter info.                                      |
+| `GET`    | `/actuator/health`              | Composite health (DB + EDA).                                           |
+| `GET`    | `/actuator/health/liveness`     | Liveness probe (always responds while the process is alive).           |
+| `GET`    | `/actuator/health/readiness`    | Readiness probe — `503` when `database_health` or `eda_health` is `DOWN`. |
+| `GET`    | `/actuator/metrics`             | Prometheus metrics.                                                    |
+| `GET`    | `/admin`                        | PyFly Admin dashboard — beans, mappings, env, CQRS, traces, loggers, health. |
+| `GET`    | `/docs`                         | Swagger UI (OpenAPI 3.1).                                              |
+| `GET`    | `/openapi.json`                 | Machine-readable OpenAPI 3.1 spec.                                     |
 
-Errors follow RFC 7807. The advice at `web/advice/exception_advice.py`
-maps domain exceptions to `{type, title, status, detail, code, ...}`
-JSON bodies.
+Errors follow RFC 7807 (`application/problem+json`). The advice at
+`web/advice/exception_advice.py` maps domain exceptions to bodies
+shaped as:
+
+```jsonc
+{
+  "type":    "https://flydesk.dev/problems/<slug>",   // URI reference identifying the problem class
+  "title":   "Short human-readable summary",
+  "status":  409,                                     // mirrors the HTTP status
+  "detail":  "Human-readable explanation for this occurrence.",
+  "code":    "job_not_ready",                         // stable application code (snake_case)
+  "instance": null,                                   // optional URI for this specific occurrence
+  "extensions": { /* arbitrary extra context */ }
+}
+```
+
+See [§ 6 (Error codes)](#6-error-codes) for the full catalogue.
+
+### Request headers honoured
+
+| Header              | Surface(s)                              | Meaning                                                                                                  |
+| ------------------- | --------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `Idempotency-Key`   | `POST /api/v1/jobs`                     | Replays the original `SubmitJobResponse` when the same key is seen twice (no duplicate job created).      |
+| `X-Correlation-Id`  | every endpoint                          | Propagated through every pipeline stage, every `outbound_call` log line, and every EDA event / webhook.   |
+| `X-Request-Id`      | every endpoint                          | Echoed back in the response. Generated server-side when absent.                                          |
+| `X-Tenant-Id`       | every endpoint                          | Echoed back; copied into the EDA event and webhook envelopes as `tenant_id`.                              |
+| `traceparent`       | every endpoint                          | W3C trace context. Propagated to OTLP spans and downstream HTTP calls.                                   |
+| `tracestate`        | every endpoint                          | W3C trace state. Same propagation as `traceparent`.                                                      |
+| `Authorization`     | every endpoint (when API keys enabled)  | `Bearer <key>` or the configured scheme. See [§ 5 (Authentication)](#5-authentication).                  |
 
 ---
 
@@ -36,7 +65,7 @@ elapses (default 60 s). On timeout the controller returns
 `408 extraction_timeout`.
 
 The request always carries a non-empty `documents` list — a single
-file is just a one-element list. See [§ 2a](#2a-multi-file-extraction)
+file is just a one-element list. See [§ 2c](#2c-multi-file--sub-document-discovery)
 for the multi-file case where each file is processed independently
 and may pin its own `document_type`.
 
@@ -286,15 +315,54 @@ without parsing the response.
 
 ### Error responses
 
-| Status | Code                   | When                                                               |
-| -----: | ---------------------- | ------------------------------------------------------------------ |
-|    400 | _various_              | Pydantic validation failed (RFC 7807 body with field errors).      |
-|    408 | `extraction_timeout`   | Sync pipeline exceeded `FLYDESK_IDP_SYNC_TIMEOUT_S`.                |
-|    413 | `document_too_large`   | Decoded document exceeds `FLYDESK_IDP_MAX_BYTES` (default 32 MiB).  |
-|    422 | `invalid_base64`       | A `content_base64` field failed strict base64 parsing.             |
-|    422 | `invalid_request`      | Semantic validator rejected the payload (e.g. a `document_type` pin references an undeclared docType, rule points at an unknown field). The body includes the full report so the caller can fix every issue at once. |
+See [§ 6 (Error codes)](#6-error-codes) for the full catalogue. The
+sync endpoint can return:
 
-### 2a. Multi-file & sub-document discovery
+| Status | Code                          | When                                                                                                              |
+| -----: | ----------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+|    400 | _various_                     | Pydantic validation failed (RFC 7807 body with field errors).                                                     |
+|    408 | `extraction_timeout`          | Sync pipeline exceeded `FLYDESK_IDP_SYNC_TIMEOUT_S`.                                                              |
+|    413 | `document_too_large`          | Decoded document exceeds `FLYDESK_IDP_MAX_BYTES` (default 32 MiB).                                                |
+|    422 | `invalid_base64`              | A `content_base64` field failed strict base64 parsing.                                                            |
+|    422 | `invalid_request`             | Semantic validator rejected the payload (a `document_type` pin references an undeclared docType, rule points at an unknown field, …). The body embeds the full report so the caller can fix every issue at once. |
+|    422 | `encrypted_pdf`               | The submitted PDF is password-protected. Decrypt it before submitting.                                            |
+|    422 | `unsupported_binary`          | The submitted media type is not on the supported list (and could not be sniffed).                                 |
+|    422 | `office_conversion_failed`    | The Office adapter (Gotenberg / LibreOffice) refused to convert the file.                                         |
+|    422 | `archive_extraction_failed`   | A submitted archive (ZIP / 7z / TAR / GZIP / EML / MSG) could not be unpacked.                                    |
+|    422 | `image_conversion_failed`     | Pillow / pillow-heif / cairosvg could not normalise the image into a provider-readable raster.                    |
+
+### 2b. Dry-run the validator — `POST /api/v1/extract:validate`
+
+Runs only the semantic [`RequestValidator`](#5-authentication) — no
+LLM call, no document load, no DB write. Use it to check a payload
+from a CI pipeline, a UI before submit, or while iterating on rule
+definitions. Always returns `200`; the caller inspects `ok` to decide
+whether to proceed.
+
+```jsonc
+// Request body is exactly the same shape as POST /api/v1/extract.
+
+// Response body
+{
+  "ok": false,
+  "error_count": 2,
+  "warning_count": 1,
+  "errors": [
+    {"severity": "error",   "code": "document_type_unknown", "message": "Pin 'utility_bill' is not declared in docs[].", "path": "documents[2].document_type"},
+    {"severity": "error",   "code": "rule_unknown_field",    "message": "Rule 'kyc_complete' references field 'nif' which is not declared on docType 'passport'.", "path": "rules[0]"}
+  ],
+  "warnings": [
+    {"severity": "warning", "code": "no_field_groups",       "message": "DocSpec 'cover_page' has only one field group; consider grouping.", "path": "docs[1]"}
+  ]
+}
+```
+
+The same payload shape is embedded under `extensions` of the `422
+invalid_request` response that the real `/extract` and `/jobs`
+endpoints emit, so a 422 carries everything you would see from a
+dry-run validate call.
+
+### 2c. Multi-file & sub-document discovery
 
 The pipeline supports two complementary shapes for getting multiple
 documents out of a single request:
@@ -421,32 +489,89 @@ Content-Type: application/json
 }
 ```
 
-### Poll status
+### List jobs — `GET /api/v1/jobs`
+
+Filterable, paginated listing. All filters are optional and combine
+with `AND`. Newest-first ordering (`created_at DESC`).
+
+| Query param          | Type             | Default | Meaning                                                                                       |
+| -------------------- | ---------------- | ------: | --------------------------------------------------------------------------------------------- |
+| `status`             | CSV of statuses  |   `""`  | Match any of the listed values. Valid: `QUEUED`, `RUNNING`, `PARTIAL_SUCCEEDED`, `REFINING_BBOXES`, `SUCCEEDED`, `FAILED`, `CANCELLED`. |
+| `bbox_refine_status` | CSV of sub-states|   `""`  | Match the bbox-refine leg. Valid: `pending`, `running`, `succeeded`, `failed`.                |
+| `idempotency_key`    | string           |   `""`  | Exact match against the submit-time `Idempotency-Key` header.                                 |
+| `created_after`      | RFC 3339         |  `null` | Inclusive lower bound on `created_at`.                                                        |
+| `created_before`     | RFC 3339         |  `null` | Inclusive upper bound on `created_at`.                                                        |
+| `limit`              | int (1–500)      |    `50` | Page size. Capped server-side at 500.                                                         |
+| `offset`             | int ≥ 0          |     `0` | Skip this many rows. Pair with `total` to paginate.                                           |
 
 ```http
-GET /api/v1/jobs/01HEM2ZZ7M0Q8...
+GET /api/v1/jobs?status=SUCCEEDED,PARTIAL_SUCCEEDED&bbox_refine_status=failed&limit=25
 ```
 
 ```jsonc
 {
-  "job_id": "01HEM2ZZ7M0Q8...",
-  "status": "RUNNING",         // QUEUED | RUNNING | SUCCEEDED | FAILED | CANCELLED
-  "attempts": 1,
-  "submitted_at": "2026-05-14T10:42:00Z",
-  "started_at":   "2026-05-14T10:42:03Z",
-  "finished_at":  null,
-  "error_code":   null,
-  "error_message": null
+  "items": [ /* JobStatusResponse[] — same shape as the single-job GET below */ ],
+  "total":  187,                    // filtered count, ignores limit/offset
+  "limit":  25,
+  "offset": 0
 }
 ```
 
-### Fetch the result
+### Poll status — `GET /api/v1/jobs/{id}`
 
-Only valid once `status == SUCCEEDED`. While the job is still running,
-the controller returns `409 job_not_ready`.
+```jsonc
+{
+  "job_id":        "01HEM2ZZ7M0Q8...",
+  "status":        "PARTIAL_SUCCEEDED",   // QUEUED | RUNNING | PARTIAL_SUCCEEDED | REFINING_BBOXES | SUCCEEDED | FAILED | CANCELLED
+  "submitted_at":  "2026-05-14T10:42:00Z",
+  "started_at":    "2026-05-14T10:42:03Z",
+  "finished_at":   "2026-05-14T10:42:48Z",
+  "attempts":      1,
+  "error_code":    null,
+  "error_message": null,
+
+  // Bbox-refine sub-state — populated only when options.stages.bbox_refine=true
+  "bbox_refine_status":         "running",         // pending | running | succeeded | failed | null
+  "bbox_refine_attempts":       1,
+  "bbox_refine_started_at":     "2026-05-14T10:42:49Z",
+  "bbox_refine_finished_at":    null,
+  "bbox_refine_error_code":     null,
+  "bbox_refine_error_message":  null
+}
+```
+
+The two state machines:
+
+```text
+default flow (bbox_refine off):
+  QUEUED ─▶ RUNNING ─▶ SUCCEEDED | FAILED
+  QUEUED ─▶ CANCELLED     (only while still QUEUED)
+
+bbox-refine flow (bbox_refine on):
+  QUEUED ─▶ RUNNING ─▶ PARTIAL_SUCCEEDED ─▶ REFINING_BBOXES ─▶ SUCCEEDED
+                                          \─▶ stays PARTIAL_SUCCEEDED if
+                                              bbox refine fails (the
+                                              LLM-bbox result is still
+                                              readable; bbox_refine_status
+                                              column carries the failure).
+```
+
+Unknown `job_id` → `404 JOB_NOT_FOUND`.
+
+### Fetch the result — `GET /api/v1/jobs/{id}/result`
+
+Returns the `ExtractionResult` when the job is in `SUCCEEDED`,
+`PARTIAL_SUCCEEDED`, or `REFINING_BBOXES`. While the job is still
+queued / running / cancelled / failed, the controller returns
+`409 job_not_ready`. Unknown `job_id` → `404 JOB_NOT_FOUND`.
+
+| Query param        | Type     | Default | Meaning                                                                                                              |
+| ------------------ | -------- | ------: | -------------------------------------------------------------------------------------------------------------------- |
+| `wait_for_bboxes`  | bool     | `false` | Long-poll the row until the bbox refiner finishes (`status` -> `SUCCEEDED`) or `timeout` elapses.                    |
+| `timeout`          | float, s |  `60.0` | Long-poll ceiling in seconds. On timeout the partial result (LLM bboxes) is returned with `200`.                     |
 
 ```http
-GET /api/v1/jobs/01HEM2ZZ7M0Q8.../result
+GET /api/v1/jobs/01HEM2ZZ7M0Q8.../result?wait_for_bboxes=true&timeout=120
 ```
 
 ```jsonc
@@ -456,42 +581,57 @@ GET /api/v1/jobs/01HEM2ZZ7M0Q8.../result
 }
 ```
 
-### Cancel
+### Cancel — `DELETE /api/v1/jobs/{id}`
 
 Only valid while `status == QUEUED`. After that the worker has started
 on the job and there is no mid-flight cancellation hook.
 
 ```http
 DELETE /api/v1/jobs/01HEM2ZZ7M0Q8...
-→ 200 { "job_id": "...", "status": "CANCELLED", ... }
-→ 409 { "code": "job_not_cancellable", ... }       // already RUNNING / done
+→ 200 { "job_id": "...", "status": "CANCELLED", ... }     // JobStatusResponse shape
+→ 409 { "code": "job_not_cancellable", ... }              // already RUNNING / done
+→ 404 { "code": "JOB_NOT_FOUND", ... }
 ```
 
 ### Webhook
 
-When the job leaves a terminal state and `callback_url` is set, the
-worker POSTs:
+When the job leaves a terminal state (`SUCCEEDED` / `PARTIAL_SUCCEEDED`
+/ `FAILED` / `CANCELLED`) and `callback_url` is set, the worker POSTs
+the full envelope. The payload mirrors the EDA event so external
+consumers see the same identity + lifecycle surface as the in-cluster
+workers.
 
 ```http
 POST <callback_url>
 Content-Type: application/json
-X-FLYDESK-Signature: sha256=<hex>
+X-Flydesk-Signature: sha256=<hex>
 
 {
-  "job_id": "01HEM2ZZ7M0Q8...",
-  "status": "SUCCEEDED",
-  "occurred_at": "2026-05-14T10:43:01Z",
-  "metadata": { "tenant_id": "acme", ... },
-  "result": { /* full ExtractionResult */ },
-  "error_code": null,
-  "error_message": null
+  "event_id":       "f0c7b3aa-2f43-4d34-bf6c-3b09e6efbb19",  // UUID v4 — dedupe by this on the client
+  "event_type":     "IDPJobCompleted",                       // mirrors the EDA event type that triggered delivery
+  "version":        "1.0.0",                                 // semver of the payload shape
+  "job_id":         "01HEM2ZZ7M0Q8...",
+  "status":         "SUCCEEDED",                             // JobStatus value
+  "occurred_at":    "2026-05-14T10:43:01Z",                  // UTC ISO-8601 — when the producer emitted the event
+  "started_at":     "2026-05-14T10:42:03Z",                  // when the worker first picked the job up
+  "finished_at":    "2026-05-14T10:43:01Z",                  // terminal-state timestamp
+  "attempts":       1,                                       // worker attempts consumed
+  "correlation_id": "req-…",                                 // echoes inbound X-Correlation-Id
+  "tenant_id":      "acme",                                  // echoes X-Tenant-Id when set
+  "metadata":       { "external_id": "...", "..." },         // verbatim copy of submit-time metadata
+  "result":         { /* full ExtractionResult */ },          // null on FAILED / CANCELLED
+  "error_code":     null,
+  "error_message":  null
 }
 ```
 
-`X-FLYDESK-Signature` is an HMAC-SHA256 of the raw body using
+`X-Flydesk-Signature` is an HMAC-SHA256 of the raw body using
 `FLYDESK_IDP_WEBHOOK_HMAC_SECRET`. The publisher retries on `5xx` and
-`429` up to `FLYDESK_IDP_WEBHOOK_MAX_ATTEMPTS`; anything else `4xx` is
-treated as permanent.
+`429` up to `FLYDESK_IDP_WEBHOOK_MAX_ATTEMPTS` with exponential
+back-off + jitter; anything else `4xx` is treated as permanent.
+**Dedupe by `event_id` on the client** — the publisher's at-least-once
+delivery semantics mean the same `event_id` may arrive more than once
+if the receiver returned a 5xx or timed out.
 
 ---
 
@@ -624,6 +764,195 @@ Two `type` values today; the union is open for new declarative types.
 See [docs/transformations.md](transformations.md) for fuller examples
 and the rationale behind both types.
 
+### `DocumentInput`
+
+Every entry in `documents[]`:
+
+```jsonc
+{
+  "filename":       "deed.pdf",                     // required, non-empty
+  "content_base64": "JVBERi0xLjQK...",              // required; base64 (data: URLs accepted, prefix stripped)
+  "content_type":   "application/pdf",              // optional MIME hint; sniffed when omitted
+  "document_type":  "escritura_poderes"              // optional pin; must match a docs[].docType.documentType
+}
+```
+
+Accepted binary inputs (the `BinaryNormalizer` turns the rest into
+provider-readable rasters before extraction):
+
+| Family               | Formats                                                                          | Path                           |
+| -------------------- | -------------------------------------------------------------------------------- | ------------------------------ |
+| PDF                  | PDF/A, encrypted-on-failure                                                       | passthrough (or 422 `encrypted_pdf`) |
+| Raster the LLM reads | PNG, JPEG, GIF, WebP                                                              | passthrough                    |
+| Raster the LLM doesn't read | HEIC/HEIF, AVIF, multi-frame TIFF, SVG, BMP                                  | Pillow + pillow-heif + cairosvg |
+| Office               | DOCX, XLSX, PPTX, RTF, ODT, HTML                                                  | `OfficeConverter` (Gotenberg / LibreOffice) |
+| Archive / bundle     | ZIP, 7z, TAR, GZIP, EML, MSG                                                      | fanned out into multiple `documents[]` entries |
+
+### `BoundingBox`
+
+```jsonc
+{
+  "xmin": 0.15,                                // all values in [0, 1]
+  "ymin": 0.26,
+  "xmax": 0.85,
+  "ymax": 0.30,
+  "quality":        "good",                    // "good" | "poor" | "suspicious" | "invalid" | "empty" | null
+  "quality_score":  0.94,                      // continuous geometric score in [0, 1]
+  "source":         "pdf_text",                // "llm" | "pdf_text" | "ocr" | "none" | null
+  "refinement_confidence": 0.91                // null for source in {llm, none}
+}
+```
+
+`source` is the discriminator that lets strict callers filter
+grounded-only boxes (`pdf_text` / `ocr`) and treat `llm` boxes as
+approximate region hints. `quality` reflects geometric plausibility,
+not whether the box actually fences the real text — see
+[docs/pipeline.md](pipeline.md) on LLM bbox imprecision.
+
+### `ExtractedField` (recursive)
+
+```jsonc
+{
+  "fieldName":       "iban",                    // alias: "name"
+  "fieldValueFound": "ES7600491500051234567892", // alias: "value" — string | int | float | bool | ExtractedField[] | null
+  "confidence":      0.98,                      // model confidence in [0, 1]
+  "pagesFound":      [3],
+  "bbox":            { /* BoundingBox */ },
+  "notes":           "Bottom-right block on the invoice header.",
+  "field_validation": {
+    "valid":  true,
+    "errors": [
+      // { "rule": "type"|"pattern"|"format"|"enum"|"minimum"|"maximum"|"standard", "message": "..." }
+    ]
+  },
+  "judge": {
+    "status":          "PASS",                  // "PASS" | "FAIL" | "UNCERTAIN"
+    "confidence":      0.99,
+    "evidence":        "ES76 0049 1500 0512 3456 7892",
+    "notes":           "Matches the IBAN on the bottom-right block.",
+    "flag_for_review": false
+  }
+}
+```
+
+For `fieldType: "array"`, `fieldValueFound` is a list of
+`ExtractedField` rows whose `fieldName`s mirror the request-side
+`items[].fieldName`s. The structure recurses to arbitrary depth.
+
+### `DocumentInfo` (per-input-file summary)
+
+One entry per submitted file in `files[]`:
+
+```jsonc
+{
+  "filename":      "deed.pdf",
+  "media_type":    "application/pdf",
+  "page_count":    21,
+  "bytes":         384112,
+  "document_type": "escritura_poderes",         // caller pin OR classifier verdict; null when neither resolved
+  "classification": {                           // null when classifier was skipped (pin set OR stage off)
+    "document_type": "escritura_poderes",
+    "matched":       true,
+    "confidence":    0.97,
+    "description":   "Spanish notarial power of attorney.",
+    "notes":         ""
+  }
+}
+```
+
+### `EscalationInfo`
+
+Top-level `escalation` block. `null` unless `stages.judge_escalation`
+is on AND the judge's first pass exceeded the threshold:
+
+```jsonc
+{
+  "triggered":            true,
+  "primary_model":        "anthropic:claude-haiku-4-5",
+  "escalation_model":     "anthropic:claude-opus-4-7",
+  "primary_fail_rate":    0.66,
+  "escalation_fail_rate": 0.10,
+  "accepted":             true                  // true ⇒ escalation result replaced the primary in the response
+}
+```
+
+### `UsageBreakdown`
+
+Top-level `usage` block. See [§ 2 → `usage` block](#usage-block) for
+the per-field meaning and aggregation rules.
+
+### `TraceEntry`
+
+One entry per executed pipeline node, in DAG order:
+
+```jsonc
+{
+  "node":          "extract",                   // load | discover | classify | plan_tasks | extract | bbox_validation | bbox_refine | field_validation | visual_authenticity | content_authenticity | judge | judge_escalation | transform | rules | assemble
+  "started_at":    "2026-05-15T16:42:03.140Z",
+  "completed_at":  "2026-05-15T16:42:24.493Z",
+  "latency_ms":    21352.88,
+  "status":        "success"                    // "success" | "failed" | "skipped"
+}
+```
+
+### `StandardValidatorSpec`
+
+Pinned to a `FieldSpec.standard_validators[]`. See
+[docs/standard-validators.md](standard-validators.md) for every
+built-in's behaviour and params.
+
+```jsonc
+{
+  "type":     "iban",                           // see § 4 → StandardValidatorType for the full enum
+  "params":   {"country": "ES"},                // validator-specific (most are empty)
+  "severity": "warning"                         // "error" (default) flips field.valid=false; "warning" records but keeps valid
+}
+```
+
+Enum values (all from `interfaces.enums.standard_validator.StandardValidatorType`):
+
+- **Network**: `email`, `uri`, `url`, `domain`, `slug`, `ipv4`, `ipv6`
+- **Temporal**: `date`, `datetime`, `time`, `iso_8601`
+- **Identifiers**: `uuid`, `json`, `hex_color`
+- **Finance**: `iban`, `bic`, `credit_card`, `currency_code`, `amount`
+- **Telephony**: `phone_e164`
+- **Geographic**: `country_code`, `language_code`, `postal_code`, `latitude`, `longitude`
+- **National IDs**: `nif`, `nie`, `cif`, `vat_id`, `ssn`, `passport_number`
+
+### `FieldType` enum
+
+`FieldSpec.fieldType` and `FieldItem.fieldType` accept:
+
+`string` · `integer` · `number` · `boolean` · `date` · `datetime` ·
+`time` · `array` · `object`
+
+`array` requires `items[]` (the columns of every repeating row). All
+other types reject `items`.
+
+### `JobStatus` enum
+
+`QUEUED` · `RUNNING` · `PARTIAL_SUCCEEDED` · `REFINING_BBOXES` ·
+`SUCCEEDED` · `FAILED` · `CANCELLED`. The state machine is documented
+under [§ 3 → Poll status](#poll-status--get-apiv1jobsid).
+
+### `BboxRefineStatus` enum
+
+`pending` · `running` · `succeeded` · `failed`. Populated on the
+`bbox_refine_status` column / API field only when the job was
+submitted with `options.stages.bbox_refine=true`; `null` otherwise.
+
+### `VersionInfo` — `GET /api/v1/version`
+
+```jsonc
+{
+  "service":        "flydesk-idp",
+  "version":        "0.1.0",                    // semantic version baked into the wheel
+  "model":          "anthropic:claude-sonnet-4-6",
+  "fallback_model": "openai:gpt-4o",            // "" disables the fallback
+  "eda_adapter":    "postgres"                  // postgres | memory | redis | kafka
+}
+```
+
 ---
 
 ## 5. Authentication
@@ -638,3 +967,32 @@ Two layers, both optional.
 
 For development the API is open. Production deployments should set at
 least one of the two.
+
+---
+
+## 6. Error codes
+
+Every error response is RFC 7807 `application/problem+json` with a
+stable `code` that callers can branch on. The catalogue:
+
+| Status | `code`                          | Endpoint(s)                              | When                                                                                                              |
+| -----: | ------------------------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+|    400 | `invalid_request`               | every endpoint                           | Generic `ValueError` raised before the handler — typically a hand-rolled cross-field check that pydantic couldn't express. |
+|    400 | _various_ (pydantic field path) | every endpoint                           | Pydantic validation failed. The body lists every offending path.                                                  |
+|    404 | `JOB_NOT_FOUND`                 | `/api/v1/jobs/{id}*`                     | Unknown `job_id`.                                                                                                 |
+|    408 | `extraction_timeout`            | `POST /api/v1/extract`                   | Sync pipeline exceeded `FLYDESK_IDP_SYNC_TIMEOUT_S` (default 60 s). Retry as an async job.                        |
+|    409 | `job_not_ready`                 | `GET /api/v1/jobs/{id}/result`           | Job is in `QUEUED` / `RUNNING` / `FAILED` / `CANCELLED`. Body includes the current status under `extensions`.     |
+|    409 | `job_not_cancellable`           | `DELETE /api/v1/jobs/{id}`               | Job has already started or terminated. Only `QUEUED` jobs can be cancelled.                                       |
+|    413 | `document_too_large`            | `POST /api/v1/extract`, `POST /jobs`     | Decoded per-file size exceeds `FLYDESK_IDP_MAX_BYTES` (default 32 MiB). The body names the offending file.        |
+|    422 | `invalid_base64`                | `POST /api/v1/extract`, `POST /jobs`     | A `content_base64` field failed strict base64 parsing.                                                            |
+|    422 | `invalid_request`               | `POST /api/v1/extract`, `POST /jobs`     | Semantic validator rejected the payload. Body embeds the full `ValidationReport` (`errors[]` + `warnings[]`).      |
+|    422 | `encrypted_pdf`                 | `POST /api/v1/extract`, `POST /jobs`     | Submitted PDF is password-protected.                                                                              |
+|    422 | `unsupported_binary`            | `POST /api/v1/extract`, `POST /jobs`     | MIME type not on the supported list and could not be sniffed.                                                     |
+|    422 | `office_conversion_failed`      | `POST /api/v1/extract`, `POST /jobs`     | Office adapter (Gotenberg / LibreOffice) rejected the conversion.                                                 |
+|    422 | `archive_extraction_failed`     | `POST /api/v1/extract`, `POST /jobs`     | Archive bundle (ZIP / 7z / TAR / GZIP / EML / MSG) failed to unpack.                                              |
+|    422 | `image_conversion_failed`       | `POST /api/v1/extract`, `POST /jobs`     | Image normaliser failed to produce a provider-readable raster (corrupt HEIC / SVG / etc.).                        |
+|    503 | _composite_                     | `GET /actuator/health/readiness`         | At least one of `database_health` / `eda_health` reported `DOWN`. Body lists every indicator.                     |
+
+Non-fatal pipeline-stage failures don't surface as HTTP errors — they
+land in `ExtractionResult.pipeline_errors[]` so the request still
+returns the partial result.
