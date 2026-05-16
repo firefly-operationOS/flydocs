@@ -44,10 +44,10 @@ CLI subcommand starts them (`flydesk-idp serve` vs.
 
 Two flavors are published on every release. Pick one per deployment.
 
-| Tag prefix | What's inside | When to pull |
-| --- | --- | --- |
-| _(none)_ -- `latest`, `vX.Y.Z`, `main` | Slim runtime: PyMuPDF + Tesseract OCR, no PyTorch. The canonical artifact. | Default. Use unless you need layout-aware OCR or Markdown text-anchor. |
-| `docling-` -- `docling-latest`, `docling-vX.Y.Z` | Slim image **plus** the `docling` extra: PyTorch + HF model loaders (~2.5 GB). Unlocks `FLYDESK_IDP_BBOX_REFINE_OCR_ENGINE=docling` and `FLYDESK_IDP_EXTRACTION_TEXT_ANCHOR=docling`. | When you want the Heron layout model grounding bboxes on noisy scans, or a Markdown anchor spliced into the extract prompt for multilingual / dense tabular documents. Details in [docling.md](docling.md). |
+| Tag prefix | Architectures | What's inside | When to pull |
+| --- | --- | --- | --- |
+| _(none)_ -- `latest`, `vX.Y.Z`, `main` | `linux/amd64` + `linux/arm64` | Slim runtime: PyMuPDF + Tesseract OCR, no PyTorch. The canonical artifact. | Default. Use unless you need layout-aware OCR or Markdown text-anchor. |
+| `docling-` -- `docling-latest`, `docling-vX.Y.Z` | `linux/amd64` **only** | Slim image **plus** the `docling` extra: PyTorch + HF model loaders (~2.5 GB). Unlocks `FLYDESK_IDP_BBOX_REFINE_OCR_ENGINE=docling` and `FLYDESK_IDP_EXTRACTION_TEXT_ANCHOR=docling`. | When you want the Heron layout model grounding bboxes on noisy scans, or a Markdown anchor spliced into the extract prompt for multilingual / dense tabular documents. arm64 users build locally with `--build-arg WITH_DOCLING=true`. Details in [docling.md](docling.md). |
 
 The `docling` variant is **not** distroless-friendly (writable
 `~/.cache/docling`, `libstdc++` runtime). Stay on the slim image for
