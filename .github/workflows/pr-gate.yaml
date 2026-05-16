@@ -138,10 +138,76 @@ jobs:
           AWS_DEFAULT_REGION: eu-west-1
         run: uv run pytest -q tests/unit
 
+  docling-tests:
+    # Layout-aware bbox-refiner + text-anchor adapters are gated behind
+    # an optional ``docling`` extra (PyTorch + HF models, ~2.5 GB on
+    # disk). The slim ``unit`` lane above does NOT install it -- it
+    # exercises the mocked-docling tests. This lane installs the extra
+    # for real and runs ``tests/integration/test_docling_real.py``,
+    # which loads the Heron layout model and the RapidOCR backend
+    # against reportlab-synthesized PDFs. Marked ``continue-on-error``
+    # for the first weeks so a flaky model download doesn't block
+    # merges; flip to required once the lane has run green for a
+    # sustained window.
+    name: Docling integration (advisory)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081 # v5
+        with:
+          enable-cache: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Check out sibling firefly framework repos
+        run: |
+          git clone --depth=1 --branch "$PYFLY_REF" \
+            https://github.com/fireflyframework/fireflyframework-pyfly.git \
+            ./vendor/pyfly
+          git clone --depth=1 --branch "$AGENTIC_REF" \
+            https://github.com/fireflyframework/fireflyframework-agentic.git \
+            ./vendor/fireflyframework-agentic
+      - name: Repoint uv path sources at ./vendor
+        run: |
+          sed -i \
+            -e 's|path = "\.\./\.\./fireflyframework/fireflyframework-pyfly"|path = "./vendor/pyfly"|' \
+            -e 's|path = "\.\./\.\./fireflyframework/fireflyframework-agentic"|path = "./vendor/fireflyframework-agentic"|' \
+            pyproject.toml
+      - name: Cache Docling / RapidOCR model weights
+        # The first run downloads ~50 MB of weights from modelscope +
+        # hugging-face; cache them so subsequent runs are seconds.
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/docling
+            ~/.cache/huggingface
+            ~/.cache/rapidocr
+          key: docling-models-${{ runner.os }}-v1
+      - name: uv sync (dev + docling)
+        run: uv sync --extra dev --extra docling
+      - name: pytest tests/integration/test_docling_real.py
+        env:
+          ANTHROPIC_API_KEY: sk-dummy-key
+          AWS_DEFAULT_REGION: eu-west-1
+        run: uv run pytest -q tests/integration/test_docling_real.py
+
   docker-build:
     name: Docker build smoke (single-arch)
     runs-on: ubuntu-latest
     needs: [lint, unit]
+    strategy:
+      fail-fast: false
+      matrix:
+        # Build both image variants on every PR so a Dockerfile change
+        # cannot break the docling lane silently. The default image
+        # stays the canonical artifact; ``docling`` is the heavy
+        # opt-in variant used by deployments that want layout-aware
+        # OCR / text-anchor without a runtime pip install.
+        variant:
+          - slim
+          - docling
     steps:
       - uses: actions/checkout@v4
       - name: Check out sibling firefly framework repos
@@ -160,10 +226,12 @@ jobs:
           file: ./Dockerfile
           push: false
           load: true
-          tags: flydesk-idp:pr-${{ github.event.pull_request.number }}
+          tags: flydesk-idp:pr-${{ github.event.pull_request.number }}-${{ matrix.variant }}
           platforms: linux/amd64
+          build-args: |
+            WITH_DOCLING=${{ matrix.variant == 'docling' && 'true' || 'false' }}
           build-contexts: |
             pyfly=./vendor/pyfly
             fireflyframework-agentic=./vendor/fireflyframework-agentic
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ matrix.variant }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.variant }}
