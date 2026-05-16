@@ -78,10 +78,22 @@ default slim image keeps the canonical tags; the heavy Docling
 variant gets a parallel set under the `docling-` prefix so the two
 namespaces never collide.
 
-| Flavor (`WITH_DOCLING`) | Canonical tags on main | What it contains |
-| --- | --- | --- |
-| `slim` (`false`) | `latest`, `main`, `sha-<short>`, `v1.2.3`, `v1.2`, `v1` | Default runtime: Tesseract OCR, no PyTorch. |
-| `docling` (`true`) | `docling-latest`, `docling-main`, `docling-sha-<short>`, `docling-v1.2.3`, … | Slim image **plus** the `docling` extra: PyTorch + HF models (~2.5 GB). Unlocks `FLYDESK_IDP_BBOX_REFINE_OCR_ENGINE=docling` and `FLYDESK_IDP_EXTRACTION_TEXT_ANCHOR=docling`. |
+| Flavor (`WITH_DOCLING`) | Architectures | Canonical tags on main | What it contains |
+| --- | --- | --- | --- |
+| `slim` (`false`) | `linux/amd64` + `linux/arm64` | `latest`, `main`, `sha-<short>`, `v1.2.3`, `v1.2`, `v1` | Default runtime: Tesseract OCR, no PyTorch. |
+| `docling` (`true`) | `linux/amd64` **only** | `docling-latest`, `docling-main`, `docling-sha-<short>`, `docling-v1.2.3`, … | Slim image **plus** the `docling` extra: PyTorch + HF models (~2.5 GB). Unlocks `FLYDESK_IDP_BBOX_REFINE_OCR_ENGINE=docling` and `FLYDESK_IDP_EXTRACTION_TEXT_ANCHOR=docling`. |
+
+> **Why amd64-only for the docling variant?** A multi-arch
+> (`amd64` + `arm64`) build of the docling image exceeds the
+> ~14 GB free disk a default `ubuntu-latest` runner provides --
+> BuildKit unpacks PyTorch wheels twice (once per architecture) and
+> the second `dpkg` run dies with `No space left on device`. Pruning
+> the runner's tool caches buys ~25 GB but still isn't enough for
+> the dual-arch build. We publish amd64 only here; arm64 consumers
+> can build the variant locally with
+> `docker buildx build --build-arg WITH_DOCLING=true --platform linux/arm64 ...`.
+> Flip back to multi-arch once we migrate to a larger runner
+> (e.g. `ubuntu-latest-l` paid tier).
 
 ```bash
 # Both arches land on the same tag:

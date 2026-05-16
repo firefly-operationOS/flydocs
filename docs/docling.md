@@ -106,10 +106,10 @@ Docling OCR (cheap multimodal cross-reference only).
 The CI publishes two image variants on every push to `main` and on
 every SemVer tag:
 
-| Tag pattern | What's in it | Pull |
-|---|---|---|
-| `:latest`, `:vX.Y.Z`, `:sha-<short>` | **Slim**. Default `tesseract` OCR engine; no PyTorch. | `docker pull ghcr.io/firefly-operationos/flydesk-idp:latest` |
-| `:docling-latest`, `:docling-vX.Y.Z`, `:docling-sha-<short>` | **Docling**. Heavy variant with PyTorch + HF models baked in. | `docker pull ghcr.io/firefly-operationos/flydesk-idp:docling-latest` |
+| Tag pattern | Architectures | What's in it | Pull |
+|---|---|---|---|
+| `:latest`, `:vX.Y.Z`, `:sha-<short>` | `linux/amd64` + `linux/arm64` | **Slim**. Default `tesseract` OCR engine; no PyTorch. | `docker pull ghcr.io/firefly-operationos/flydesk-idp:latest` |
+| `:docling-latest`, `:docling-vX.Y.Z`, `:docling-sha-<short>` | `linux/amd64` **only** | **Docling**. Heavy variant with PyTorch + HF models baked in. Multi-arch publish doesn't fit a default GHA runner's disk; arm64 users can `buildx build --platform linux/arm64 --build-arg WITH_DOCLING=true` locally. | `docker pull ghcr.io/firefly-operationos/flydesk-idp:docling-latest` |
 
 Set the env vars in the docling variant and you're done:
 
