@@ -353,19 +353,27 @@ src/flydesk_idp/
 
 | Endpoint                                  | Purpose                                                |
 | ----------------------------------------- | ------------------------------------------------------ |
-| `POST   /api/v1/extract`                  | Synchronous extraction. Blocks until done.             |
-| `POST   /api/v1/extract:validate`         | Dry-run the semantic validator on a payload (no LLM).  |
-| `POST   /api/v1/jobs`                     | Submit an async extraction. Returns `202` + job id.    |
-| `GET    /api/v1/jobs/{id}`                | Status of an async job.                                |
-| `GET    /api/v1/jobs/{id}/result`         | Final `ExtractionResult` (when `SUCCEEDED`).           |
+| **Extraction**                            |                                                        |
+| `POST   /api/v1/extract`                  | Synchronous extraction. Blocks until the pipeline finishes. |
+| `POST   /api/v1/extract:validate`         | Dry-run the semantic validator on a payload (no LLM call, no DB write). |
+| **Jobs (async)**                          |                                                        |
+| `POST   /api/v1/jobs`                     | Submit a queued extraction. Returns `202` + job id.    |
+| `GET    /api/v1/jobs`                     | Filtered, paginated listing (`status`, `bbox_refine_status`, `idempotency_key`, `created_after` / `before`, `limit`, `offset`). |
+| `GET    /api/v1/jobs/{id}`                | Current status of a job (includes bbox-refine sub-state). |
+| `GET    /api/v1/jobs/{id}/result`         | Final `ExtractionResult`. Long-poll for grounded bboxes via `?wait_for_bboxes=true&timeout=…`. |
 | `DELETE /api/v1/jobs/{id}`                | Cancel a job that is still `QUEUED`.                   |
-| `GET    /api/v1/version`                  | Build + model info.                                    |
-| `GET    /actuator/health`                 | Composite health.                                      |
-| `GET    /actuator/metrics`                | Prometheus metrics.                                    |
-| `GET    /admin`                           | PyFly Admin dashboard — beans, mappings, env, CQRS, traces, loggers, health. |
+| **Service metadata**                      |                                                        |
+| `GET    /api/v1/version`                  | Build + model + EDA-adapter info.                      |
+| `GET    /openapi.json`                    | Machine-readable OpenAPI 3.1 spec.                     |
 | `GET    /docs`                            | Swagger UI (OpenAPI 3.1).                              |
+| `GET    /admin`                           | PyFly Admin dashboard — beans, mappings, env, CQRS, traces, loggers, health. |
+| **Actuator (ops)**                        |                                                        |
+| `GET    /actuator/health`                 | Composite health (DB + EDA).                           |
+| `GET    /actuator/health/liveness`        | Kubernetes liveness probe.                             |
+| `GET    /actuator/health/readiness`       | Kubernetes readiness probe — `503` when `database_health` or `eda_health` is `DOWN`. |
+| `GET    /actuator/metrics`                | Prometheus metrics.                                    |
 
-Full request / response shapes in [docs/api-reference.md](docs/api-reference.md).
+Full request / response shapes in [docs/api-reference.md](docs/api-reference.md). Errors follow RFC 7807 (`application/problem+json`) — see the [error-code catalogue](docs/api-reference.md#6-error-codes).
 
 ---
 
