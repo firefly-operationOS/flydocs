@@ -286,8 +286,8 @@ request when assembling the response.
 | `total_cost_usd`         | Estimated USD cost using the configured price table (see operational notes below).                       |
 | `record_count`           | Number of distinct LLM calls behind this request.                                                        |
 | `total_latency_ms`       | Sum of per-call wall-clock times (with `asyncio.gather` parallelism this can exceed `latency_ms`).       |
-| `cache_creation_tokens`  | Prompt tokens written to the provider's prompt cache (Anthropic-specific feature — non-zero only when the active provider exposes prompt caching and `FLYDESK_IDP_PROMPT_CACHE=1`). |
-| `cache_read_tokens`      | Prompt tokens served from the provider's prompt cache (same caveat).                                     |
+| `cache_creation_tokens`  | Prompt tokens written to the provider's prompt cache. Populated by Anthropic (direct + Bedrock-hosted) when `cache_control` breakpoints fire; by Google Gemini when a `CachedContent` resource is referenced. OpenAI's automatic caching does not surface "creation" tokens distinctly. Always 0 when `FLYDESK_IDP_PROMPT_CACHE=off`. |
+| `cache_read_tokens`      | Prompt tokens served from the provider's prompt cache. Populated by all three first-class providers when their respective cache backends hit (Anthropic ~10% of input cost on hit; OpenAI ~50%; Google ~25%). |
 | `by_agent`               | Per-agent breakdown (extractor, classifier, splitter, judge, visual, content, rule-engine).             |
 | `by_model`               | Per-model breakdown — useful when fallback or escalation switched models mid-request.                   |
 

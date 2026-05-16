@@ -542,41 +542,56 @@ knows about are priced uniformly. The full Claude 4 family
 USD figures in the response's `usage` block reflect each provider's
 current published tariffs without any local override.
 
-**Prompt caching (Anthropic-specific).** Every `FireflyAgent` we
+**Prompt caching (multi-provider).** Every `FireflyAgent` we
 construct ships with a shared `PromptCacheMiddleware` from
 `core/observability/agent_middleware.py::DEFAULT_MIDDLEWARE`. The
-middleware injects pydantic-ai's `anthropic_cache_instructions` +
-`anthropic_cache_messages` settings on every request, which Anthropic
-honours: it caches the system prompt and the last user-message block
-on the first call (5-minute TTL by default), and subsequent calls
-within the TTL pay ~10% on cached tokens. Other providers either
-ignore the hints or expose their own cache primitive — the middleware
-is a no-op there until we add a provider-specific shim. The
-`outbound_call` log line carries the per-call `cache_write` /
-`cache_read` counts; the same data is aggregated into
-`usage.cache_creation_tokens` / `usage.cache_read_tokens` on the
-response (always 0 for non-Anthropic providers today).
+middleware detects the active provider via
+`fireflyframework_agentic.model_utils.detect_model_family` and writes
+the right cache hints into pydantic-ai's `model_settings`:
 
-> **Cache hits depend on prompt stability.** Anthropic caches by
-> exact byte prefix of (instructions + tools + messages). Our system
-> prompts are rendered through Jinja per call -- if the rendered text
-> changes between calls (e.g. classifier with a different
-> `targets_json`), the cache key changes and the next call writes a
-> fresh cache instead of hitting the previous one. Cache writes show
-> up immediately (`cache_write_tokens` > 0); cache reads
+| Provider (model id pattern) | Hint written | Effect |
+| --- | --- | --- |
+| `anthropic:claude-*`, `bedrock:anthropic.claude-*` | `anthropic_cache_instructions`, `anthropic_cache_messages` (5m default, 1h on request) | Explicit `cache_control` breakpoints. ~90% cost reduction on cached input, 5m TTL extended on hits. |
+| `openai:gpt-*`, `azure:gpt-*` | `openai_prompt_cache_key = ffa-{agent_name}` | Automatic caching (≥1024 input tokens) still applies; the key makes concurrent requests from the same agent stick to the same cache backend so the hit rate stays high under load. ~50% cost reduction on cached input. |
+| `google:gemini-*` | `google_cached_content` (only when the caller supplies a resource id) | Pre-created `CachedContent` resources are passed through. Caller owns lifecycle. ~25% cost reduction on the cached portion. |
+| `mistral:*`, `cohere:*`, `deepseek:*`, unknown | (none) | Debug log only -- no upstream cache primitive currently exposed via pydantic-ai. |
+
+The same `outbound_call` log line carries the per-call
+`cache_write` / `cache_read` counts; aggregated values land on
+`usage.cache_creation_tokens` / `usage.cache_read_tokens` in the
+response.
+
+> **Cache hits depend on prompt stability.** All three providers
+> match by exact byte prefix of (instructions + tools + messages).
+> Our system prompts are rendered through Jinja per call -- if the
+> rendered text changes between calls (e.g. classifier with a
+> different `targets_json`), the cache key changes and the next call
+> writes a fresh cache instead of hitting the previous one. Cache
+> writes show up immediately (`cache_write_tokens` > 0); cache reads
 > (`cache_read_tokens` > 0) only appear when the same agent runs
-> twice in a row with an identical rendered system prompt. Stabilising
-> the templates -- moving per-call variables into the user message --
-> is tracked as a follow-up.
+> twice in a row with an identical rendered prefix. Stabilising the
+> templates -- moving per-call variables into the user message -- is
+> tracked as a follow-up.
+
+> **OpenAI routing key**: defaults to `ffa-{agent_name}` so the
+> extractor, judge, classifier, etc. each get a stable backend
+> affinity. Override per-deployment by constructing the middleware
+> explicitly with `openai_cache_key=...` (a string or a callable
+> taking the middleware context). Pass the empty string to opt out.
+
+> **Gemini CachedContent**: the middleware does NOT create or
+> refresh `CachedContent` resources -- it just forwards a resource
+> id that the caller has already created via the GenAI SDK. Plumb
+> the id through DI when you want Google caching active.
 
 **Disabling the cache.** Set `FLYDESK_IDP_PROMPT_CACHE=off` (or `0` /
 `false` / `no`) in the service env to attach the middleware list
 empty for the next process start. Useful for A/B benchmarking, for
-quick rollback when caching misbehaves, when running against a
-provider that does not support Anthropic's cache hints, and for
-low-volume workloads where the per-call write premium (`+25%` over
-normal input) can exceed the read discount (`-90%` of input) if cache
-hit-rate is low.
+quick rollback when caching misbehaves, for low-volume workloads
+where the per-call write premium can exceed the read discount when
+hit-rate is low, and for providers in the no-op row of the table
+above (the toggle removes the negligible per-call detection overhead
+entirely).
 
 **Observed cost characteristics.** In our bastanteo benchmark on
 Anthropic (1 request -> ~27 LLM calls, mostly-unique per-call prompts)

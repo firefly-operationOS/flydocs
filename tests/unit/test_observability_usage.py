@@ -122,14 +122,27 @@ def test_genai_prices_resolves_our_anthropic_models() -> None:
     already swallows the same ImportError silently -- so skipping here
     only loses test coverage, not service behaviour.
     """
-    pytest.importorskip(
-        "fireflyframework_agentic.observability.cost",
-        reason="cost module not exported on this fireflyframework-agentic ref",
-    )
-    from fireflyframework_agentic.observability.cost import (
-        CostContext,
-        genai_prices_cost,
-    )
+    # ``fireflyframework_agentic`` shipped the cost helpers under two
+    # module paths over its lifetime: the legacy ``observability.cost``
+    # package (Foundation v25-26) and the flat
+    # ``observability.cost_resolvers`` module (Foundation v26.6+). Try
+    # both so the test survives a framework upgrade either way; skip
+    # only when both paths are absent (the cost feature itself is
+    # optional -- the production extractor swallows the same
+    # ImportError silently).
+    try:
+        from fireflyframework_agentic.observability.cost_resolvers import (  # type: ignore[no-redef]
+            CostContext,
+            genai_prices_cost,
+        )
+    except ImportError:
+        try:
+            from fireflyframework_agentic.observability.cost import (  # type: ignore[no-redef]
+                CostContext,
+                genai_prices_cost,
+            )
+        except ImportError:
+            pytest.skip("cost helpers not exported on this fireflyframework-agentic ref")
 
     # 1 M input + 1 M output. Exact numbers are not asserted (genai-prices
     # tracks the live tariff and changes over time); we only require that
