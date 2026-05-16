@@ -78,6 +78,7 @@ Pick the entry point that matches what you're trying to do:
 | [standard-validators.md](standard-validators.md)               | You want to know what built-in validators are bundled and their `params`.                  |
 | [rule-engine.md](rule-engine.md)                               | You're designing business rules or want to understand the DAG evaluator.                   |
 | [prompts.md](prompts.md)                                       | You're editing or adding YAML prompt templates.                                            |
+| [docling.md](docling.md)                                       | You want layout-aware OCR or a Markdown text-anchor in the extract prompt (Docling extra). |
 | [deployment.md](deployment.md)                                 | You're shipping the service to a real environment.                                         |
 | [cicd.md](cicd.md)                                             | You're touching the build, the multi-arch publish, or the pre-commit hooks.                |
 | [troubleshooting.md](troubleshooting.md)                       | A real-world problem just blew up.                                                         |
@@ -91,7 +92,8 @@ Where to read about each topic that spans multiple documents:
 
 | Topic                          | Primary                                                                                                     | Secondary                                                                                                 |
 | ------------------------------ | ----------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| Bounding boxes (LLM + grounded) | [pipeline.md § bbox_refine](pipeline.md), [api-reference.md § `BoundingBox`](api-reference.md#boundingbox)   | [pipeline.md § Bbox refinement: sync vs. async](pipeline.md#bbox-refinement-sync-vs-async)                |
+| Bounding boxes (LLM + grounded) | [pipeline.md § bbox_refine](pipeline.md), [api-reference.md § `BoundingBox`](api-reference.md#boundingbox)   | [pipeline.md § Bbox refinement: sync vs. async](pipeline.md#bbox-refinement-sync-vs-async), [docling.md](docling.md) |
+| Layout-aware OCR + text anchor | [docling.md](docling.md)                                                                                    | [pipeline.md § bbox_refine](pipeline.md), [deployment.md § Docling image variant](deployment.md)          |
 | Provider-agnostic LLM calls     | [pipeline.md § 7c (Pricing & prompt caching)](pipeline.md#7c-pricing--prompt-caching)                       | [deployment.md § 2 (Environment)](deployment.md#2-environment)                                            |
 | Prompt caching (Anthropic-only) | [pipeline.md § 7c](pipeline.md#7c-pricing--prompt-caching)                                                  | [api-reference.md § `usage` block](api-reference.md#usage-block)                                          |
 | EDA / typed event envelopes     | [api-reference.md § EDA event envelopes](api-reference.md#eda-event-envelopes-audit--webhook-payload)       | [overview.md § Async path](overview.md), [deployment.md § 1 (Topology)](deployment.md#1-topology)          |
