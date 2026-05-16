@@ -205,11 +205,36 @@ jobs:
         # stays the canonical artifact; ``docling`` is the heavy
         # opt-in variant used by deployments that want layout-aware
         # OCR / text-anchor without a runtime pip install.
-        variant:
-          - slim
-          - docling
+        include:
+          - variant: slim
+            advisory: false
+          - variant: docling
+            # Docling pulls PyTorch + HF model loaders (~2.5 GB
+            # cumulative wheel size). Free GHA runners (~14 GB free
+            # disk after the default tool image) sit close to the
+            # edge; mark this variant advisory until we add a paid
+            # larger-disk runner so a transient disk-space exhaustion
+            # doesn't block merges. The image is still smoke-built --
+            # we just don't fail the gate on it.
+            advisory: true
+    continue-on-error: ${{ matrix.advisory }}
     steps:
       - uses: actions/checkout@v4
+      - name: Free disk space (advisory variants)
+        # PyTorch + HF wheels need ~6 GB of free disk space during
+        # ``uv sync``. The default GHA runner image fills disk with
+        # Android SDK + .NET + Haskell + dotnet -- 25+ GB of tools we
+        # never touch. Reclaim it on the docling lane only so the slim
+        # lane stays fast.
+        if: matrix.variant == 'docling'
+        uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be # v1.3.1
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: false
+          swap-storage: false
       - name: Check out sibling firefly framework repos
         run: |
           git clone --depth=1 --branch "$PYFLY_REF" \
