@@ -26,6 +26,7 @@ from fireflyframework_agentic.types import BinaryContent
 from flydesk_idp.core.observability import DEFAULT_MIDDLEWARE, timed_agent_run
 from flydesk_idp.core.services.extraction.postprocess import normalise_doc
 from flydesk_idp.core.services.extraction.schema import build_extraction_output_model
+from flydesk_idp.core.services.extraction.text_anchor import NoOpTextAnchor, TextAnchor
 from flydesk_idp.interfaces.dtos.doc import DocSpec
 from flydesk_idp.interfaces.dtos.field import ExtractedField, ExtractedFieldGroup
 from flydesk_idp.interfaces.enums.field_type import FieldType
@@ -44,12 +45,19 @@ class MultimodalExtractor:
         model: str,
         fallback_model: str | None = None,
         agent_name: str = "flydesk-idp-extractor",
+        text_anchor: TextAnchor | None = None,
     ) -> None:
         self._template = template
         self._retry_arrays_template = retry_arrays_template
         self._model = model
         self._fallback_model = fallback_model
         self._agent_name = agent_name
+        # When ``text_anchor`` returns a non-empty string the extractor
+        # splices it into the user message ahead of the binary content,
+        # giving the LLM two modalities to cross-reference. The default
+        # :class:`NoOpTextAnchor` returns ``None`` so the slim image
+        # without the optional dep keeps the binary-only behaviour.
+        self._text_anchor: TextAnchor = text_anchor or NoOpTextAnchor()
 
     # ------------------------------------------------------------------
     # Array-empty retry parameters
@@ -152,10 +160,11 @@ class MultimodalExtractor:
         # same empty-array default we are trying to recover from.
         schema_json = self._schema_payload(doc)
         user_text = f"{retry_prompt.user.strip()}\n\nSchema:\n```json\n{schema_json}\n```"
-        content: list[Any] = [
-            user_text,
-            BinaryContent(data=document_bytes, media_type=media_type),
-        ]
+        content = self._build_user_content(
+            user_text=user_text,
+            document_bytes=document_bytes,
+            media_type=media_type,
+        )
         result = await timed_agent_run(agent, content, op="extract.retry_arrays", model=model_id)
         return normalise_doc(result.output, doc), model_id
 
@@ -182,10 +191,11 @@ class MultimodalExtractor:
             language_hint=language_hint or "",
         )
         agent = self._build_agent(model_id, output_model, instructions=prompt.system)
-        content: list[Any] = [
-            prompt.user,
-            BinaryContent(data=document_bytes, media_type=media_type),
-        ]
+        content = self._build_user_content(
+            user_text=prompt.user,
+            document_bytes=document_bytes,
+            media_type=media_type,
+        )
         try:
             result = await timed_agent_run(agent, content, op=op, model=model_id)
             return normalise_doc(result.output, doc), model_id
@@ -203,6 +213,48 @@ class MultimodalExtractor:
                 fallback_agent, content, op=f"{op}.fallback", model=self._fallback_model
             )
             return normalise_doc(result.output, doc), self._fallback_model
+
+    # ------------------------------------------------------------------
+    # User content composition (text anchor + binary)
+    # ------------------------------------------------------------------
+
+    def _build_user_content(
+        self,
+        *,
+        user_text: str,
+        document_bytes: bytes,
+        media_type: str,
+    ) -> list[Any]:
+        """Compose the user-side multimodal content block list.
+
+        Layout: ``[user_text, (optional anchor), BinaryContent]``. The
+        anchor sits between the instruction text and the binary so the
+        model sees the instruction, the cleaned-up textual view of the
+        document, and finally the raw bytes -- in that order.
+        """
+        content: list[Any] = [user_text]
+        anchor_text = self._render_anchor(document_bytes, media_type)
+        if anchor_text:
+            content.append(anchor_text)
+        content.append(BinaryContent(data=document_bytes, media_type=media_type))
+        return content
+
+    def _render_anchor(self, document_bytes: bytes, media_type: str) -> str | None:
+        try:
+            rendered = self._text_anchor.produce(document_bytes, media_type=media_type)
+        except Exception as exc:  # noqa: BLE001 -- never block extract on a degraded anchor
+            logger.warning("text-anchor produce() raised %s; continuing without anchor", exc)
+            return None
+        if not rendered:
+            return None
+        # Fence the anchor so the model recognises it as a derived view,
+        # not part of its own instructions.
+        return (
+            "Text-layer anchor (Docling pre-extraction, for cross-reference only):\n"
+            "```markdown\n"
+            f"{rendered}\n"
+            "```"
+        )
 
     # ------------------------------------------------------------------
     # Empty-array detection & retry helpers

@@ -40,6 +40,7 @@ from flydesk_idp.core.services.bbox import (
     BboxRefiner,
     BboxValidator,
     BboxValueMatcher,
+    DoclingOcrEngine,
     HybridValueMatcher,
     LlmValueMatcher,
     NoneOcrEngine,
@@ -61,6 +62,11 @@ from flydesk_idp.core.services.classification import DocumentClassifier
 from flydesk_idp.core.services.escalation import JudgeEscalator
 from flydesk_idp.core.services.extraction.extractor import MultimodalExtractor
 from flydesk_idp.core.services.extraction.prompts import PromptCatalog
+from flydesk_idp.core.services.extraction.text_anchor import (
+    DoclingTextAnchor,
+    NoOpTextAnchor,
+    TextAnchor,
+)
 from flydesk_idp.core.services.judge import Judge
 from flydesk_idp.core.services.pipeline import PipelineOrchestrator
 from flydesk_idp.core.services.rules import RuleEngine
@@ -124,12 +130,37 @@ class IDPCoreConfiguration:
     # ------------------------------------------------------------------
 
     @bean
-    def extractor(self, settings: IDPSettings, prompts: PromptCatalog) -> MultimodalExtractor:
+    def text_anchor(self, settings: IDPSettings) -> TextAnchor:
+        """Optional pre-extraction text-anchor service.
+
+        ``none`` (default) returns ``None`` for every call -- zero
+        overhead. ``docling`` runs Docling over the document so the
+        extractor can splice a Markdown view into the user prompt.
+        See :class:`DoclingTextAnchor` for the trade-offs.
+        """
+        kind = (settings.extraction_text_anchor or "none").lower()
+        if kind in {"none", "", "off"}:
+            return NoOpTextAnchor()
+        if kind == "docling":
+            return DoclingTextAnchor(settings=settings)
+        raise ValueError(
+            f"unknown FLYDESK_IDP_EXTRACTION_TEXT_ANCHOR={settings.extraction_text_anchor!r}; "
+            "expected 'none' or 'docling'"
+        )
+
+    @bean
+    def extractor(
+        self,
+        settings: IDPSettings,
+        prompts: PromptCatalog,
+        text_anchor: TextAnchor,
+    ) -> MultimodalExtractor:
         return MultimodalExtractor(
             template=prompts.extract,
             retry_arrays_template=prompts.extract_retry_arrays,
             model=settings.model,
             fallback_model=settings.fallback_model,
+            text_anchor=text_anchor,
         )
 
     @bean
@@ -165,10 +196,16 @@ class IDPCoreConfiguration:
             return TesseractOcrEngine(settings=settings)
         if kind == "none":
             return NoneOcrEngine()
+        if kind == "docling":
+            # Layout-aware adapter. Pulls in PyTorch + HF models at first
+            # use; install via the ``docling`` extra. See
+            # ``DoclingOcrEngine`` docstring for the trade-offs.
+            return DoclingOcrEngine(settings=settings)
         # Future: ``paddle`` / ``mistral`` adapters route here.
         raise ValueError(
             f"unknown FLYDESK_IDP_BBOX_REFINE_OCR_ENGINE={settings.bbox_refine_ocr_engine!r}; "
-            "expected 'tesseract' or 'none' (paddle / mistral adapters not yet bundled)"
+            "expected 'tesseract', 'docling', or 'none' "
+            "(paddle / mistral adapters not yet bundled)"
         )
 
     @bean

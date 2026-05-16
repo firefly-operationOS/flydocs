@@ -25,8 +25,9 @@ push cancels the previous run.
 | --- | --- |
 | **lint** | `ruff check` + `ruff format --check` against the working tree. |
 | **typecheck** *(advisory)* | `pyright src/flydesk_idp`. `continue-on-error: true` so it doesn't block merges yet — flip the flag once the codebase is fully typed. |
-| **unit** | `pytest -q tests/unit` — 94 tests, in-memory SQLite + in-memory EDA bus, no real Postgres. |
-| **docker-build** | `docker buildx build --platform linux/amd64 --load` against the real `Dockerfile`. Smoke-tests that the image still builds after the PR's changes. No push. |
+| **unit** | `pytest -q tests/unit` — in-memory SQLite + in-memory EDA bus, no real Postgres. Docling-touching tests use a mocked `docling` module so this lane stays slim. |
+| **docling-tests** *(advisory)* | `uv sync --extra docling` then `pytest -q tests/integration/test_docling_real.py`. Loads the real Heron layout model + RapidOCR backend against reportlab-synthesized PDFs. Model weights cached in `~/.cache/docling`, `~/.cache/huggingface`, `~/.cache/rapidocr`. `continue-on-error: true` for the first weeks; flip once it runs green sustainedly. |
+| **docker-build** | `docker buildx build --platform linux/amd64 --load` against the real `Dockerfile`, matrixed over both image variants (`slim`, `docling`). Smoke-tests that both flavors still build after the PR's changes. No push. |
 
 All four jobs check out the **sibling firefly-framework repos** into
 `./vendor/` and rewrite the path sources in `pyproject.toml`:
@@ -72,9 +73,22 @@ Platforms: **`linux/amd64`** and **`linux/arm64`**. QEMU sets up
 cross-arch emulation; buildx publishes a single multi-arch manifest
 list so consumers pull the right variant transparently.
 
+The publish workflow is **matrixed** over two image flavors. The
+default slim image keeps the canonical tags; the heavy Docling
+variant gets a parallel set under the `docling-` prefix so the two
+namespaces never collide.
+
+| Flavor (`WITH_DOCLING`) | Canonical tags on main | What it contains |
+| --- | --- | --- |
+| `slim` (`false`) | `latest`, `main`, `sha-<short>`, `v1.2.3`, `v1.2`, `v1` | Default runtime: Tesseract OCR, no PyTorch. |
+| `docling` (`true`) | `docling-latest`, `docling-main`, `docling-sha-<short>`, `docling-v1.2.3`, … | Slim image **plus** the `docling` extra: PyTorch + HF models (~2.5 GB). Unlocks `FLYDESK_IDP_BBOX_REFINE_OCR_ENGINE=docling` and `FLYDESK_IDP_EXTRACTION_TEXT_ANCHOR=docling`. |
+
 ```bash
 # Both arches land on the same tag:
 docker pull ghcr.io/firefly-operationos/flydesk-idp:latest
+
+# Heavy variant with Docling baked in:
+docker pull ghcr.io/firefly-operationos/flydesk-idp:docling-latest
 
 # Force a specific arch (useful for cross-arch testing on a workstation):
 docker pull --platform linux/amd64 ghcr.io/firefly-operationos/flydesk-idp:latest

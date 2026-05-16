@@ -105,6 +105,14 @@ dev = [
     "python-docx>=1.1",  # synthesise sample DOCX in fixtures
 ]
 
+# Optional layout-aware OCR engine for the bbox refiner. Drops in as an
+# alternative to ``tesseract`` via ``FLYDESK_IDP_BBOX_REFINE_OCR_ENGINE=docling``.
+# Pulls PyTorch + Hugging Face models -- gated behind this extra so the
+# distroless / slim runtime images don't pay the footprint by default.
+docling = [
+    "docling>=2.93",
+]
+
 [build-system]
 requires = ["hatchling>=1.18"]
 build-backend = "hatchling.build"
