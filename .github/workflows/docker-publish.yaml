@@ -48,25 +48,51 @@ env:
 
 jobs:
   publish:
-    name: Build + push (amd64, arm64) -- ${{ matrix.variant }}
+    name: Build + push (${{ matrix.platforms_label }}) -- ${{ matrix.variant }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
-          # Canonical slim image -- the one most consumers want.
+          # Canonical slim image -- the one most consumers want. Built
+          # for both architectures so arm64 hosts (Apple Silicon, AWS
+          # Graviton, ...) pull the right manifest transparently.
           - variant: slim
             with_docling: "false"
             tag_prefix: ""
+            platforms: "linux/amd64,linux/arm64"
+            platforms_label: "amd64+arm64"
           # Heavy variant with the layout-aware Docling OCR + Markdown
-          # text-anchor baked in. Pulls PyTorch + HF models (~2.5 GB).
-          # Use only when ``FLYDESK_IDP_BBOX_REFINE_OCR_ENGINE=docling``
-          # or ``FLYDESK_IDP_EXTRACTION_TEXT_ANCHOR=docling`` is set.
+          # text-anchor baked in. Pulls PyTorch + HF models (~2.5 GB
+          # per architecture). Multi-arch BuildKit + QEMU exceeds the
+          # default GHA runner's disk; we publish amd64 only here and
+          # let arm64 consumers build locally with WITH_DOCLING=true.
+          # When we migrate to larger paid runners we can flip this
+          # back to both architectures.
           - variant: docling
             with_docling: "true"
             tag_prefix: "docling-"
+            platforms: "linux/amd64"
+            platforms_label: "amd64"
     steps:
       - uses: actions/checkout@v4
+
+      - name: Free disk space (docling variant only)
+        # Docling adds PyTorch + HF wheels (~2.5 GB per architecture)
+        # to the image, plus BuildKit keeps intermediate layers in
+        # /var/lib/docker. The default GHA runner image fills disk
+        # with Android SDK / .NET / Haskell / dotnet caches (25+ GB)
+        # we never use. Reclaim those before the docling build so the
+        # multi-stage BuildKit copy step does not run out of space.
+        if: matrix.with_docling == 'true'
+        uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be # v1.3.1
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: false
+          swap-storage: false
 
       - name: Normalise GHCR namespace to lower-case
         id: ns
@@ -86,7 +112,7 @@ jobs:
 
       - uses: docker/setup-qemu-action@v3
         with:
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ matrix.platforms }}
 
       - uses: docker/setup-buildx-action@v3
 
@@ -127,13 +153,13 @@ jobs:
             org.opencontainers.image.vendor=Firefly Software Solutions Inc
             io.flydesk.idp.variant=${{ matrix.variant }}
 
-      - name: Build + push (linux/amd64, linux/arm64) -- ${{ matrix.variant }}
+      - name: Build + push (${{ matrix.platforms_label }}) -- ${{ matrix.variant }}
         id: build
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ matrix.platforms }}
           push: true
           provenance: true
           sbom: true
