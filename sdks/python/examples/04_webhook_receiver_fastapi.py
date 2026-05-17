@@ -35,7 +35,7 @@ async def on_webhook(request: Request) -> JSONResponse:
     try:
         verifier.verify(body, signature)
     except WebhookVerificationError as exc:
-        raise HTTPException(status_code=403, detail=str(exc))
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
 
     payload = JobWebhookPayload.model_validate_json(body)
     if payload.status == JobStatus.SUCCEEDED and payload.result is not None:

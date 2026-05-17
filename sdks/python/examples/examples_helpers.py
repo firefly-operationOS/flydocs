@@ -40,18 +40,16 @@ INVOICE_DOC_SPEC = DocSpec(
                 field_type=FieldType.STRING,
                 required=True,
                 standard_validators=[
-                    StandardValidatorSpec(
-                        type=StandardValidatorType.VAT_ID, params={"country": "ES"}
-                    ),
+                    StandardValidatorSpec(type=StandardValidatorType.VAT_ID, params={"country": "ES"}),
                 ],
             ),
         ),
         FieldGroup.of(
             "totals",
-            FieldSpec(field_name="subtotal",     field_type=FieldType.NUMBER, required=True, minimum=0.0),
-            FieldSpec(field_name="tax_amount",   field_type=FieldType.NUMBER, required=True, minimum=0.0),
+            FieldSpec(field_name="subtotal", field_type=FieldType.NUMBER, required=True, minimum=0.0),
+            FieldSpec(field_name="tax_amount", field_type=FieldType.NUMBER, required=True, minimum=0.0),
             FieldSpec(field_name="total_amount", field_type=FieldType.NUMBER, required=True, minimum=0.0),
-            FieldSpec(field_name="currency",     field_type=FieldType.STRING, required=True),
+            FieldSpec(field_name="currency", field_type=FieldType.STRING, required=True),
         ),
         FieldGroup.of(
             "line_items_block",
@@ -60,9 +58,9 @@ INVOICE_DOC_SPEC = DocSpec(
                 field_type=FieldType.ARRAY,
                 items=[
                     FieldItem(field_name="description", field_type=FieldType.STRING),
-                    FieldItem(field_name="quantity",    field_type=FieldType.NUMBER),
-                    FieldItem(field_name="unit_price",  field_type=FieldType.NUMBER),
-                    FieldItem(field_name="line_total",  field_type=FieldType.NUMBER),
+                    FieldItem(field_name="quantity", field_type=FieldType.NUMBER),
+                    FieldItem(field_name="unit_price", field_type=FieldType.NUMBER),
+                    FieldItem(field_name="line_total", field_type=FieldType.NUMBER),
                 ],
             ),
         ),
@@ -73,10 +71,12 @@ INVOICE_RULES = [
     RuleSpec(
         id="totals_consistent",
         predicate="subtotal + tax_amount equals total_amount within 0.01",
-        parents=[RuleFieldParent(
-            document_type="invoice",
-            field_names=["subtotal", "tax_amount", "total_amount"],
-        )],
+        parents=[
+            RuleFieldParent(
+                document_type="invoice",
+                field_names=["subtotal", "tax_amount", "total_amount"],
+            )
+        ],
     ),
     RuleSpec(
         id="vat_id_valid",

@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 
 from examples_helpers import INVOICE_DOC_SPEC, INVOICE_RULES  # type: ignore[import-not-found]
+
 from flydocs_sdk import (
     AsyncFlydocsClient,
     DocumentInput,

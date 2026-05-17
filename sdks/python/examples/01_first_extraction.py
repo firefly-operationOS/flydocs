@@ -30,7 +30,7 @@ async def main(path: Path) -> int:
             FieldGroup.of(
                 "totals",
                 FieldSpec(field_name="total_amount", field_type=FieldType.NUMBER, required=True),
-                FieldSpec(field_name="currency",     field_type=FieldType.STRING, required=True),
+                FieldSpec(field_name="currency", field_type=FieldType.STRING, required=True),
             )
         ],
     )
