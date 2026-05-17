@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/assets/logo.png" alt="Firefly OperationOS" width="260" />
+<img src="docs/assets/logo.png" alt="flydocs — document intelligence" width="320" />
 
 # flydocs
 
