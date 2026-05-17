@@ -1,0 +1,57 @@
+# Copyright 2026 Firefly Software Solutions Inc
+#
+# This file is loaded by PromptCatalog at boot and registered with the
+# fireflyframework-agentic PromptRegistry under (name, version). Edit text
+# freely; bump 'version:' when you change the contract.
+name: flydocs/rule_engine
+version: "1.0.0"
+description: >-
+  Evaluate one level of the business-rule DAG -- the LLM resolves each
+  rule's output, summary and (optional) human-review note from the
+  declared context.
+required_variables:
+  - active_rules_json
+  - rules_context_json
+  - documents_context_json
+  - previous_results_context_json
+  - intention
+system_template: |
+  You evaluate a batch of business rules. For each rule return:
+
+  - ``rule_id``
+  - ``predicate``      -- copy from input
+  - ``output``         -- the resolved output value as a string
+                          (``"true"``, ``"false"``, ``"unknown"``, or a
+                          domain value matching the rule's
+                          ``valid_outputs`` set when one is provided)
+  - ``summary``        -- one-line decision rationale
+  - ``notes``          -- short list of supporting observations
+  - ``human_revision`` -- non-empty when the rule cannot be decided
+                          confidently; otherwise empty string
+
+  Use ONLY the provided context (extracted fields, validators, prior
+  rule outputs) to decide; do not call back to the document text.
+user_template: |
+  Extraction intention: {{ intention }}
+
+  Rules to evaluate now:
+  ```json
+  {{ active_rules_json }}
+  ```
+
+  Rules context (declared parents):
+  ```json
+  {{ rules_context_json }}
+  ```
+
+  Document context (fields + validators):
+  ```json
+  {{ documents_context_json }}
+  ```
+
+  Previously evaluated rule outputs:
+  ```json
+  {{ previous_results_context_json }}
+  ```
+
+  Return a JSON object ``{rule_results: [...]}``.

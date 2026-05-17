@@ -6,14 +6,14 @@
 #   - webhook-sink    -- catches outbound webhook deliveries for assertion
 #
 # Both API and worker are pointed at the mock LLM via OPENAI_BASE_URL +
-# the test's chosen FLYDESK_IDP_MODEL.
+# the test's chosen FLYDOCS_MODEL.
 
 services:
   mock-llm:
     build:
       context: tests/fixtures/mock_llm
       dockerfile: Dockerfile
-    container_name: flydesk-idp-mock-llm
+    container_name: flydocs-mock-llm
     ports:
       - "${MOCK_LLM_PORT:-8500}:8500"
     healthcheck:
@@ -24,7 +24,7 @@ services:
 
   webhook-sink:
     image: python:3.13-slim
-    container_name: flydesk-idp-webhook-sink
+    container_name: flydocs-webhook-sink
     working_dir: /app
     command: ["python", "-u", "/app/webhook_sink.py"]
     volumes:
@@ -40,8 +40,8 @@ services:
 
   api:
     environment:
-      FLYDESK_IDP_MODEL: "openai:flydesk-mock"
-      FLYDESK_IDP_FALLBACK_MODEL: ""
+      FLYDOCS_MODEL: "openai:flydocs-mock"
+      FLYDOCS_FALLBACK_MODEL: ""
       OPENAI_API_KEY: "mock-key"
       OPENAI_BASE_URL: "http://mock-llm:8500/v1"
     depends_on:
@@ -54,8 +54,8 @@ services:
 
   worker:
     environment:
-      FLYDESK_IDP_MODEL: "openai:flydesk-mock"
-      FLYDESK_IDP_FALLBACK_MODEL: ""
+      FLYDOCS_MODEL: "openai:flydocs-mock"
+      FLYDOCS_FALLBACK_MODEL: ""
       OPENAI_API_KEY: "mock-key"
       OPENAI_BASE_URL: "http://mock-llm:8500/v1"
     depends_on:

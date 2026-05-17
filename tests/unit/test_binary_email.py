@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from email.message import EmailMessage
 
-from flydesk_idp.core.services.binary.email import EmailUnpacker
+from flydocs.core.services.binary.email import EmailUnpacker
 
 
 def _eml_with_attachment() -> bytes:

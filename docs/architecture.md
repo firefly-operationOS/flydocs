@@ -9,7 +9,7 @@ plumbing you don't see.
 
 ## 1. Two frameworks, one application
 
-flydesk-idp builds on two complementary Firefly Framework libraries.
+flydocs builds on two complementary Firefly Framework libraries.
 
 | Library                       | Provides                                                                                  |
 | ----------------------------- | ----------------------------------------------------------------------------------------- |
@@ -17,7 +17,7 @@ flydesk-idp builds on two complementary Firefly Framework libraries.
 | `fireflyframework-agentic`    | Multimodal LLM agents (`FireflyAgent`), prompt templates + registry, pipeline DAG runtime (`PipelineEngine`), tool registry. |
 
 Pyfly owns the **service runtime** (boot, DI, HTTP, EDA, health,
-W3C trace context). Agentic owns the **AI runtime** (prompts, agents, pipeline). flydesk-idp
+W3C trace context). Agentic owns the **AI runtime** (prompts, agents, pipeline). flydocs
 is the glue that turns a `POST /api/v1/extract` into a pipeline of
 multimodal LLM calls, with the results validated, judged, and rule-checked
 on the way out.
@@ -27,10 +27,10 @@ on the way out.
 ## 2. Boot sequence
 
 ```
-uvicorn flydesk_idp.main:app
+uvicorn flydocs.main:app
          │
          ▼
-   flydesk_idp.main         ← builds PyFlyApplication(FlydeskIDPApplication)
+   flydocs.main         ← builds PyFlyApplication(FlydocsApplication)
          │                    ▲
          │                    └── reads fireflyframework-pyfly config + env vars
          ▼
@@ -66,7 +66,7 @@ repositories) is already wired and warm.
 ## 3. Dependency injection — the four mechanisms
 
 `fireflyframework-pyfly` has four complementary ways to put a class in
-the container. flydesk-idp uses all four, and the choice is significant.
+the container. flydocs uses all four, and the choice is significant.
 
 ### 3a. `@configuration` + `@bean`
 
@@ -75,7 +75,7 @@ the prompt catalog, the LLM stages, the orchestrator, the health
 indicators. Each `@bean` method becomes a singleton; its parameter
 annotations are how the container injects dependencies. (The EDA
 `EventPublisher` is provided by `pyfly.eda.auto_configuration.EdaAutoConfiguration`
-upstream; flydesk-idp just declares it as a constructor parameter
+upstream; flydocs just declares it as a constructor parameter
 where needed.)
 
 ```python
@@ -189,7 +189,7 @@ fresh DAG using `fireflyframework-agentic`'s `PipelineBuilder` and runs
 it through `PipelineEngine`:
 
 ```python
-builder = PipelineBuilder("flydesk-idp")
+builder = PipelineBuilder("flydocs")
 builder.add_node("load",      CallableStep(self._step_load),      timeout_seconds=10)
 builder.add_node("split",     CallableStep(self._step_split),     timeout_seconds=60)
 builder.add_node("extract",   CallableStep(self._step_extract),   timeout_seconds=240)
@@ -218,7 +218,7 @@ concern.
 ## 6. Prompts as data
 
 Every LLM stage's system + user prompt lives in a YAML file under
-`src/flydesk_idp/resources/prompts/`. At boot, `PromptCatalog` reads
+`src/flydocs/resources/prompts/`. At boot, `PromptCatalog` reads
 each file via `PromptLoader.from_file`, instantiates a `PromptTemplate`,
 and registers it with the framework-wide `PromptRegistry`.
 

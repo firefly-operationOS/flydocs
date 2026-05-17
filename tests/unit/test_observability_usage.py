@@ -24,13 +24,13 @@ from typing import Any
 
 import pytest
 
-from flydesk_idp.core.observability import (
+from flydocs.core.observability import (
     get_correlation_id,
     reset_correlation_id,
     set_correlation_id,
 )
-from flydesk_idp.core.services.pipeline import orchestrator as orch
-from flydesk_idp.interfaces.dtos.extract import TraceEntry, UsageBreakdown
+from flydocs.core.services.pipeline import orchestrator as orch
+from flydocs.interfaces.dtos.extract import TraceEntry, UsageBreakdown
 
 # ---------------------------------------------------------------------------
 # correlation id contextvar
@@ -63,7 +63,7 @@ async def test_correlation_id_propagates_into_agent_run(
             captured["context"] = context
             return SimpleNamespace(usage=lambda: None)
 
-    from flydesk_idp.core.observability import outbound_log
+    from flydocs.core.observability import outbound_log
 
     token = set_correlation_id("req-abc")
     try:
@@ -81,14 +81,14 @@ async def test_correlation_id_propagates_into_agent_run(
 
 def _reload_middleware_module() -> Any:
     """Force re-import so the module-level env var read is re-run."""
-    from flydesk_idp.core.observability import agent_middleware
+    from flydocs.core.observability import agent_middleware
 
     return importlib.reload(agent_middleware)
 
 
 def test_prompt_cache_default_on(monkeypatch: pytest.MonkeyPatch) -> None:
     """No env var set -> caching is on, one middleware in the list."""
-    monkeypatch.delenv("FLYDESK_IDP_PROMPT_CACHE", raising=False)
+    monkeypatch.delenv("FLYDOCS_PROMPT_CACHE", raising=False)
     mod = _reload_middleware_module()
     assert mod._prompt_cache_enabled() is True
     assert len(mod.DEFAULT_MIDDLEWARE) == 1
@@ -96,8 +96,8 @@ def test_prompt_cache_default_on(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.mark.parametrize("value", ["off", "OFF", "0", "false", "False", "no"])
 def test_prompt_cache_env_var_disables_middleware(monkeypatch: pytest.MonkeyPatch, value: str) -> None:
-    """``FLYDESK_IDP_PROMPT_CACHE`` truthy-off values empty the middleware list."""
-    monkeypatch.setenv("FLYDESK_IDP_PROMPT_CACHE", value)
+    """``FLYDOCS_PROMPT_CACHE`` truthy-off values empty the middleware list."""
+    monkeypatch.setenv("FLYDOCS_PROMPT_CACHE", value)
     mod = _reload_middleware_module()
     assert mod._prompt_cache_enabled() is False
     assert mod.DEFAULT_MIDDLEWARE == []
@@ -118,7 +118,7 @@ def test_genai_prices_resolves_our_anthropic_models() -> None:
     Skipped when the framework's cost module isn't reachable on the
     Python path (e.g. when CI clones an older ``fireflyframework-agentic``
     ref that pre-dates the resolver split). The cost telemetry feature
-    is itself optional -- :func:`flydesk_idp.core.observability.outbound_log._extract_usage_fields`
+    is itself optional -- :func:`flydocs.core.observability.outbound_log._extract_usage_fields`
     already swallows the same ImportError silently -- so skipping here
     only loses test coverage, not service behaviour.
     """
@@ -179,14 +179,14 @@ def _make_summary(*, record_count: int = 3, cost: float = 0.42) -> Any:
         total_latency_ms=12345.0,
         record_count=record_count,
         by_agent={
-            "flydesk-idp-extract": {
+            "flydocs-extract": {
                 "input_tokens": 700,
                 "output_tokens": 350,
                 "total_tokens": 1050,
                 "cost_usd": 0.30,
                 "requests": 2,
             },
-            "flydesk-idp-judge": {
+            "flydocs-judge": {
                 "input_tokens": 300,
                 "output_tokens": 150,
                 "total_tokens": 450,
@@ -213,7 +213,7 @@ def test_usage_breakdown_maps_pipeline_result_usage() -> None:
     assert isinstance(breakdown, UsageBreakdown)
     assert breakdown.total_tokens == 1500
     assert breakdown.total_cost_usd == pytest.approx(0.42)
-    assert "flydesk-idp-extract" in breakdown.by_agent
+    assert "flydocs-extract" in breakdown.by_agent
     assert "anthropic:claude-opus-4-7" in breakdown.by_model
 
 

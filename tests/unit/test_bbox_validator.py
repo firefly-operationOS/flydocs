@@ -14,9 +14,9 @@ score in ``[0, 1]`` for every recognised pattern:
 
 from __future__ import annotations
 
-from flydesk_idp.core.services.bbox import BboxValidator
-from flydesk_idp.interfaces.dtos.bbox import BboxQuality, BoundingBox
-from flydesk_idp.interfaces.dtos.field import ExtractedField, ExtractedFieldGroup
+from flydocs.core.services.bbox import BboxValidator
+from flydocs.interfaces.dtos.bbox import BboxQuality, BoundingBox
+from flydocs.interfaces.dtos.field import ExtractedField, ExtractedFieldGroup
 
 
 def _bbox(xmin: float, ymin: float, xmax: float, ymax: float) -> BoundingBox:

@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import pytest
 
-from flydesk_idp.core.services.validation.standard_validator_registry import run_standard_validator
-from flydesk_idp.interfaces.enums.standard_validator import StandardValidatorType
+from flydocs.core.services.validation.standard_validator_registry import run_standard_validator
+from flydocs.interfaces.enums.standard_validator import StandardValidatorType
 
 
 @pytest.mark.parametrize(

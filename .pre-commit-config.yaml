@@ -1,4 +1,4 @@
-# pre-commit hooks for flydesk-idp.
+# pre-commit hooks for flydocs.
 #
 # Install once:
 #     uv run pre-commit install --hook-type pre-commit

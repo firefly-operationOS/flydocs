@@ -10,13 +10,13 @@ from typing import Any
 
 import pytest
 
-from flydesk_idp.core.services.jobs.get_job_result_handler import (
+from flydocs.core.services.jobs.get_job_result_handler import (
     GetJobResultHandler,
     GetJobResultQuery,
     JobNotReady,
 )
-from flydesk_idp.interfaces.dtos.extract import ExtractionResult
-from flydesk_idp.interfaces.enums.job_status import JobStatus
+from flydocs.interfaces.dtos.extract import ExtractionResult
+from flydocs.interfaces.enums.job_status import JobStatus
 
 
 def _result_payload() -> dict[str, Any]:

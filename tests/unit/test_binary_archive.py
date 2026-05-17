@@ -10,9 +10,9 @@ import zipfile
 
 import pytest
 
-from flydesk_idp.config import IDPSettings
-from flydesk_idp.core.services.binary.archive import ArchiveUnpacker
-from flydesk_idp.core.services.binary.errors import ArchiveExtractionError
+from flydocs.config import IDPSettings
+from flydocs.core.services.binary.archive import ArchiveUnpacker
+from flydocs.core.services.binary.errors import ArchiveExtractionError
 
 
 def _settings(max_files: int = 50) -> IDPSettings:

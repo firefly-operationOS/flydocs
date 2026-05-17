@@ -73,16 +73,16 @@ Every node above reads its timeout from `IDPSettings`. Override per
 deployment by setting:
 
 ```
-FLYDESK_IDP_EXTRACT_TIMEOUT_S=600
-FLYDESK_IDP_JUDGE_TIMEOUT_S=300
-FLYDESK_IDP_BBOX_REFINE_INLINE_TIMEOUT_S=900
-FLYDESK_IDP_CLASSIFIER_TIMEOUT_S=180
-FLYDESK_IDP_SPLITTER_TIMEOUT_S=180
-FLYDESK_IDP_JUDGE_ESCALATION_TIMEOUT_S=600
-FLYDESK_IDP_TRANSFORM_TIMEOUT_S=600
+FLYDOCS_EXTRACT_TIMEOUT_S=600
+FLYDOCS_JUDGE_TIMEOUT_S=300
+FLYDOCS_BBOX_REFINE_INLINE_TIMEOUT_S=900
+FLYDOCS_CLASSIFIER_TIMEOUT_S=180
+FLYDOCS_SPLITTER_TIMEOUT_S=180
+FLYDOCS_JUDGE_ESCALATION_TIMEOUT_S=600
+FLYDOCS_TRANSFORM_TIMEOUT_S=600
 ```
 
-The outer per-request wall is `FLYDESK_IDP_ASYNC_TIMEOUT_S` (1800 s
+The outer per-request wall is `FLYDOCS_ASYNC_TIMEOUT_S` (1800 s
 default); it must exceed the sum of the inline stages you enable.
 
 ### bbox refinement: sync vs. async
@@ -106,7 +106,7 @@ re-running the worker after a partial result is safe.
 ## 3. How the DAG is built
 
 ```python
-builder = PipelineBuilder("flydesk-idp")
+builder = PipelineBuilder("flydocs")
 builder.add_node("load", CallableStep(self._step_load), timeout_seconds=20)
 
 # Discover runs when the splitter is on AND at least one file is unpinned.
@@ -253,11 +253,11 @@ For each call:
 1. Build a dynamic Pydantic model from the `DocSpec` field schema
    (`build_extraction_output_model`). This is what `pydantic-ai` uses
    to enforce structured output.
-2. Render the `flydesk_idp/extract` prompt with the JSON schema, media
+2. Render the `flydocs/extract` prompt with the JSON schema, media
    type, page count, intention, and optional language hint.
 3. Compose the user-side multimodal content list via
    `_build_user_content` -- ``[user_text, anchor?, BinaryContent]``.
-   When `FLYDESK_IDP_EXTRACTION_TEXT_ANCHOR=docling` and the configured
+   When `FLYDOCS_EXTRACTION_TEXT_ANCHOR=docling` and the configured
    `TextAnchor` returns a non-empty Markdown render, it slots between
    the instruction text and the binary so the LLM has both modalities
    to cross-reference. See [docling.md § Text anchor](docling.md#2b-doclingtextanchor--pre-extraction-markdown-anchor)
@@ -269,7 +269,7 @@ For each call:
    `[0, 1]`, coerce types, populate `pagesFound`.
 
 Fallback: if the primary model fails (timeout, content policy, etc.)
-**and** `FLYDESK_IDP_FALLBACK_MODEL` is set to a different model, the
+**and** `FLYDOCS_FALLBACK_MODEL` is set to a different model, the
 extractor retries on the fallback. The actual model used per task is
 reflected in `result.model` (when more than one model contributed,
 they're joined with a comma).
@@ -401,9 +401,9 @@ re-runs the extractor and the judge with a stronger model and keeps
 whichever result has the lower failure rate.
 
 - The trigger threshold is `options.escalation_threshold` (per-request)
-  or `FLYDESK_IDP_ESCALATION_THRESHOLD` (default `0.0` = disabled).
+  or `FLYDOCS_ESCALATION_THRESHOLD` (default `0.0` = disabled).
 - The escalation model is `options.escalation_model` or
-  `FLYDESK_IDP_ESCALATION_MODEL`. Same model as the primary disables
+  `FLYDOCS_ESCALATION_MODEL`. Same model as the primary disables
   the stage (no point re-running with the same engine).
 - The new run is per-doc fan-out via `asyncio.gather` — same shape as
   `extract`, so latency stays bounded.
@@ -457,8 +457,8 @@ Three places where concurrency matters:
    request returns 408 if the pipeline takes longer.
 
 For the async API (`POST /api/v1/jobs`), the ceiling is
-`FLYDESK_IDP_ASYNC_TIMEOUT_S` (default 300 s); failed attempts are
-re-queued up to `FLYDESK_IDP_JOB_MAX_ATTEMPTS`.
+`FLYDOCS_ASYNC_TIMEOUT_S` (default 300 s); failed attempts are
+re-queued up to `FLYDOCS_JOB_MAX_ATTEMPTS`.
 
 ---
 
@@ -584,7 +584,7 @@ response.
 > id that the caller has already created via the GenAI SDK. Plumb
 > the id through DI when you want Google caching active.
 
-**Disabling the cache.** Set `FLYDESK_IDP_PROMPT_CACHE=off` (or `0` /
+**Disabling the cache.** Set `FLYDOCS_PROMPT_CACHE=off` (or `0` /
 `false` / `no`) in the service env to attach the middleware list
 empty for the next process start. Useful for A/B benchmarking, for
 quick rollback when caching misbehaves, for low-volume workloads
@@ -619,7 +619,7 @@ Async jobs that fail get classified into one of two buckets in
 
 The `attempts` counter is persisted atomically by
 `ExtractionJobRepository.mark_running`. When `attempts ==
-FLYDESK_IDP_JOB_MAX_ATTEMPTS`, the job goes to `FAILED` even if the
+FLYDOCS_JOB_MAX_ATTEMPTS`, the job goes to `FAILED` even if the
 last error was retryable.
 
 A delayed re-publish runs as a background `asyncio.create_task` so the

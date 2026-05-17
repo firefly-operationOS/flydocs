@@ -1,20 +1,20 @@
 # Copyright 2026 Firefly Software Solutions Inc
 #
 # Copy to .env (this file is the canonical reference; .env is gitignored).
-# All keys are prefixed with FLYDESK_IDP_ so they are easy to grep for and
+# All keys are prefixed with FLYDOCS_ so they are easy to grep for and
 # easy to scope per service.
 
 # ----------------------------------------------------------------------------
 # Service
 # ----------------------------------------------------------------------------
-FLYDESK_IDP_LOG_LEVEL=INFO
-FLYDESK_IDP_PORT=8400
+FLYDOCS_LOG_LEVEL=INFO
+FLYDOCS_PORT=8400
 
 # ----------------------------------------------------------------------------
 # Persistence
 # ----------------------------------------------------------------------------
 # Async-SQLAlchemy URL. asyncpg for Postgres, aiosqlite for SQLite (tests).
-FLYDESK_IDP_DATABASE_URL=postgresql+asyncpg://idp:idp@localhost:5432/flydesk_idp
+FLYDOCS_DATABASE_URL=postgresql+asyncpg://idp:idp@localhost:5432/flydocs
 
 # Run alembic upgrade head on startup (set to "false" in production deploys
 # that prefer migrating as a separate step).
@@ -28,11 +28,11 @@ RUN_MIGRATIONS=true
 # runs Postgres), ``redis`` (Redis Streams), or ``kafka`` (production
 # fan-out). All adapters live in ``pyfly.eda.adapters``; the picker is
 # pyfly's :class:`EdaAutoConfiguration` driven from ``pyfly.yaml``.
-FLYDESK_IDP_EDA_ADAPTER=postgres
-FLYDESK_IDP_REDIS_URL=redis://localhost:6379/0
+FLYDOCS_EDA_ADAPTER=postgres
+FLYDOCS_REDIS_URL=redis://localhost:6379/0
 
 # Topic / stream name for job-submitted events.
-FLYDESK_IDP_JOBS_TOPIC=flydesk.idp.jobs
+FLYDOCS_JOBS_TOPIC=flydocs.jobs
 
 # ----------------------------------------------------------------------------
 # Multimodal extraction
@@ -40,22 +40,22 @@ FLYDESK_IDP_JOBS_TOPIC=flydesk.idp.jobs
 # Provider routing for FireflyAgent. Override at deploy time; supports any
 # pydantic-ai provider (``openai:gpt-4o``, ``anthropic:claude-sonnet-4-6``,
 # ``bedrock:eu.anthropic.claude-sonnet-4-6-v1``, ``openai:gpt-4o@http://mock-llm:8500``).
-FLYDESK_IDP_MODEL=anthropic:claude-sonnet-4-6
-FLYDESK_IDP_FALLBACK_MODEL=openai:gpt-4o
+FLYDOCS_MODEL=anthropic:claude-sonnet-4-6
+FLYDOCS_FALLBACK_MODEL=openai:gpt-4o
 
 # Maximum pages per single extraction request. Documents above this go through
 # the async API only. The document bytes are sent directly to the multimodal
 # LLM -- no local rasterisation, so format is whatever the provider accepts
 # (Anthropic supports PDF natively; OpenAI accepts images).
-FLYDESK_IDP_MAX_SYNC_PAGES=10
+FLYDOCS_MAX_SYNC_PAGES=10
 # Cap on total bytes accepted (after base64-decode) in a single submission.
-FLYDESK_IDP_MAX_BYTES=33554432
+FLYDOCS_MAX_BYTES=33554432
 
 # Per-call timeouts (seconds). Sync requests get the shorter one; async jobs
 # retry up to ``JOB_MAX_ATTEMPTS`` times on timeout.
-FLYDESK_IDP_SYNC_TIMEOUT_S=60
-FLYDESK_IDP_ASYNC_TIMEOUT_S=300
-FLYDESK_IDP_JOB_MAX_ATTEMPTS=3
+FLYDOCS_SYNC_TIMEOUT_S=60
+FLYDOCS_ASYNC_TIMEOUT_S=300
+FLYDOCS_JOB_MAX_ATTEMPTS=3
 
 # Optional pre-extraction text rendering. ``none`` (default) sends only the
 # binary to the LLM. ``docling`` runs Docling over the document first and
@@ -64,11 +64,11 @@ FLYDESK_IDP_JOB_MAX_ATTEMPTS=3
 # textual view -- useful on multilingual scans and long tabular documents.
 # Requires the ``docling`` extra (use the ``docling-`` image variant).
 # See docs/docling.md.
-FLYDESK_IDP_EXTRACTION_TEXT_ANCHOR=none
+FLYDOCS_EXTRACTION_TEXT_ANCHOR=none
 # Hard ceiling on the anchor length. Truncated on a paragraph boundary
 # when in reach, otherwise hard-cut with a visible ``[anchor truncated]``
 # sentinel. Set to 0 to silently disable even when the engine is set.
-FLYDESK_IDP_EXTRACTION_TEXT_ANCHOR_MAX_CHARS=12000
+FLYDOCS_EXTRACTION_TEXT_ANCHOR_MAX_CHARS=12000
 
 # Provider credentials are picked up from the standard env vars (OPENAI_API_KEY,
 # ANTHROPIC_API_KEY, AWS_*). Set only the ones you need.
@@ -83,12 +83,12 @@ FLYDESK_IDP_EXTRACTION_TEXT_ANCHOR_MAX_CHARS=12000
 # Webhook delivery
 # ----------------------------------------------------------------------------
 # Outbound webhook delivery from the job worker uses these defaults.
-FLYDESK_IDP_WEBHOOK_TIMEOUT_S=15
-FLYDESK_IDP_WEBHOOK_MAX_ATTEMPTS=5
+FLYDOCS_WEBHOOK_TIMEOUT_S=15
+FLYDOCS_WEBHOOK_MAX_ATTEMPTS=5
 
-# Optional shared-secret HMAC signing of webhooks (X-Flydesk-Signature header).
+# Optional shared-secret HMAC signing of webhooks (X-Flydocs-Signature header).
 # Leave blank to disable.
-FLYDESK_IDP_WEBHOOK_HMAC_SECRET=
+FLYDOCS_WEBHOOK_HMAC_SECRET=
 
 # ----------------------------------------------------------------------------
 # Bbox refinement
@@ -101,21 +101,21 @@ FLYDESK_IDP_WEBHOOK_HMAC_SECRET=
 #     the matcher uses as a tie-break signal. Requires the ``docling``
 #     extra (use the ``docling-`` image variant). See docs/docling.md.
 #   * ``none`` -- skip OCR; image pages keep the LLM bbox.
-FLYDESK_IDP_BBOX_REFINE_OCR_ENGINE=tesseract
+FLYDOCS_BBOX_REFINE_OCR_ENGINE=tesseract
 # DPI for PDF→image rasterisation. Only used by the Tesseract path;
 # Docling rasterises internally.
-FLYDESK_IDP_BBOX_REFINE_OCR_DPI=200
+FLYDOCS_BBOX_REFINE_OCR_DPI=200
 # Default Tesseract ``-l`` argument. Also consumed by Docling as the default
 # OCR language hint when no per-request ``language_hint`` is supplied.
-FLYDESK_IDP_BBOX_REFINE_TESSERACT_LANG=spa+eng
+FLYDOCS_BBOX_REFINE_TESSERACT_LANG=spa+eng
 # Strategy that maps each extracted value to OCR/text-layer word indices.
 #   * ``hybrid`` (default) -- rapidfuzz first, LLM only for residual.
 #   * ``llm`` -- one LLM call per page over every field.
 #   * ``fuzzy`` -- rapidfuzz only, no LLM fallback.
-FLYDESK_IDP_BBOX_REFINE_MATCHER=hybrid
+FLYDOCS_BBOX_REFINE_MATCHER=hybrid
 
 # ----------------------------------------------------------------------------
 # Security (optional -- only used if you front the service with an auth gate)
 # ----------------------------------------------------------------------------
 # Static API keys that grant access. Comma-separated.
-FLYDESK_IDP_API_KEYS=
+FLYDOCS_API_KEYS=

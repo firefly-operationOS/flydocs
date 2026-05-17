@@ -18,9 +18,9 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
 
-from flydesk_idp.core.services.webhook import WebhookPublisher
-from flydesk_idp.interfaces.dtos.webhook import JobWebhookPayload
-from flydesk_idp.interfaces.enums.job_status import JobStatus
+from flydocs.core.services.webhook import WebhookPublisher
+from flydocs.interfaces.dtos.webhook import JobWebhookPayload
+from flydocs.interfaces.enums.job_status import JobStatus
 
 # ---------------------------------------------------------------------------
 # In-process webhook receiver
@@ -120,7 +120,7 @@ async def test_webhook_delivers_and_signs(receiver) -> None:
     assert body["job_id"] == "01HEM2ZZ7M0Q800000000"
     assert body["status"] == "SUCCEEDED"
     # The signature header carries an HMAC-SHA256 of the body.
-    sig = capture.headers.get("X-Flydesk-Signature", "")
+    sig = capture.headers.get("X-Flydocs-Signature", "")
     assert sig.startswith("sha256=")
     expected = hmac.new(b"s3cret", capture.body, hashlib.sha256).hexdigest()
     assert sig == f"sha256={expected}"
@@ -159,7 +159,7 @@ async def test_webhook_does_not_overwrite_content_type(receiver) -> None:
         extra_headers={"content-type": "text/plain", "User-Agent": "evil"},
     )
     assert capture.headers.get("Content-Type") == "application/json"
-    assert capture.headers.get("User-Agent") == "flydesk-idp/0.1.0"
+    assert capture.headers.get("User-Agent") == "flydocs/0.1.0"
 
 
 @pytest.mark.asyncio

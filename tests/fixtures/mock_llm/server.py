@@ -21,7 +21,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request, Response
 
-app = FastAPI(title="flydesk-idp mock LLM")
+app = FastAPI(title="flydocs mock LLM")
 _CANNED_DIR = Path(os.environ.get("MOCK_LLM_CANNED_DIR", "/canned"))
 
 
@@ -78,7 +78,7 @@ def _wrap_chat_completion(json_payload: dict) -> dict:
         "id": f"chatcmpl-{uuid.uuid4()}",
         "object": "chat.completion",
         "created": int(time.time()),
-        "model": "flydesk-mock",
+        "model": "flydocs-mock",
         "choices": [
             {
                 "index": 0,

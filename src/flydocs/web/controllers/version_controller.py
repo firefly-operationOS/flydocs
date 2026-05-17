@@ -1,0 +1,54 @@
+# Copyright 2026 Firefly Software Solutions Inc
+"""Build + model identity endpoint -- ``GET /api/v1/version``."""
+
+from __future__ import annotations
+
+from pydantic import BaseModel, Field
+from pyfly.container import rest_controller
+from pyfly.web import get_mapping, request_mapping
+
+from flydocs import __version__
+from flydocs.config import IDPSettings
+
+
+class VersionInfo(BaseModel):
+    """Identity of the running service instance."""
+
+    service: str = Field(description="Service slug.", examples=["flydocs"])
+    version: str = Field(description="Semantic version baked into the wheel.", examples=["0.1.0"])
+    model: str = Field(
+        description="Primary multimodal model the orchestrator uses by default.",
+        examples=["anthropic:claude-opus-4-7"],
+    )
+    fallback_model: str = Field(
+        description="Secondary model used when the primary errors out. Empty disables the fallback.",
+        examples=["openai:gpt-4o"],
+    )
+    eda_adapter: str = Field(
+        description="Event-driven adapter backing the async job queue.",
+        examples=["redis", "memory"],
+    )
+
+
+@rest_controller
+@request_mapping("/api/v1")
+class VersionController:
+    """Identity + model information for the running instance.
+
+    Useful for smoke tests, deploy validation, and answering the
+    "which model is this hitting?" question from operations channels.
+    """
+
+    def __init__(self, settings: IDPSettings) -> None:
+        self._settings = settings
+
+    @get_mapping("/version")
+    async def version(self) -> VersionInfo:
+        """Return the service identity, primary model and queue adapter."""
+        return VersionInfo(
+            service="flydocs",
+            version=__version__,
+            model=self._settings.model,
+            fallback_model=self._settings.fallback_model or "",
+            eda_adapter=self._settings.eda_adapter,
+        )

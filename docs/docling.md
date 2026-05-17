@@ -11,7 +11,7 @@ multimodal extractor, backed by IBM's [Docling](https://github.com/docling-proje
 
 ## 1. What it adds, in one paragraph
 
-flydesk-idp's bbox refiner already grounds LLM-estimated coordinates
+flydocs's bbox refiner already grounds LLM-estimated coordinates
 against the document's text layer (PyMuPDF for born-digital PDFs) and
 against Tesseract OCR for image-PDFs / rasters. Docling slots into the
 same `OcrEngine` protocol as **a third option** — but instead of flat
@@ -92,8 +92,8 @@ Failure modes are deliberate:
 
 ```bash
 uv sync --extra docling --extra dev
-export FLYDESK_IDP_BBOX_REFINE_OCR_ENGINE=docling
-export FLYDESK_IDP_EXTRACTION_TEXT_ANCHOR=docling
+export FLYDOCS_BBOX_REFINE_OCR_ENGINE=docling
+export FLYDOCS_EXTRACTION_TEXT_ANCHOR=docling
 task serve
 ```
 
@@ -108,18 +108,18 @@ every SemVer tag:
 
 | Tag pattern | Architectures | What's in it | Pull |
 |---|---|---|---|
-| `:latest`, `:vX.Y.Z`, `:sha-<short>` | `linux/amd64` + `linux/arm64` | **Slim**. Default `tesseract` OCR engine; no PyTorch. | `docker pull ghcr.io/firefly-operationos/flydesk-idp:latest` |
-| `:docling-latest`, `:docling-vX.Y.Z`, `:docling-sha-<short>` | `linux/amd64` **only** | **Docling**. Heavy variant with PyTorch + HF models baked in. Multi-arch publish doesn't fit a default GHA runner's disk; arm64 users can `buildx build --platform linux/arm64 --build-arg WITH_DOCLING=true` locally. | `docker pull ghcr.io/firefly-operationos/flydesk-idp:docling-latest` |
+| `:latest`, `:vX.Y.Z`, `:sha-<short>` | `linux/amd64` + `linux/arm64` | **Slim**. Default `tesseract` OCR engine; no PyTorch. | `docker pull ghcr.io/firefly-operationos/flydocs:latest` |
+| `:docling-latest`, `:docling-vX.Y.Z`, `:docling-sha-<short>` | `linux/amd64` **only** | **Docling**. Heavy variant with PyTorch + HF models baked in. Multi-arch publish doesn't fit a default GHA runner's disk; arm64 users can `buildx build --platform linux/arm64 --build-arg WITH_DOCLING=true` locally. | `docker pull ghcr.io/firefly-operationos/flydocs:docling-latest` |
 
 Set the env vars in the docling variant and you're done:
 
 ```yaml
 # docker-compose override
 api:
-  image: ghcr.io/firefly-operationos/flydesk-idp:docling-latest
+  image: ghcr.io/firefly-operationos/flydocs:docling-latest
   environment:
-    FLYDESK_IDP_BBOX_REFINE_OCR_ENGINE: docling
-    FLYDESK_IDP_EXTRACTION_TEXT_ANCHOR: docling
+    FLYDOCS_BBOX_REFINE_OCR_ENGINE: docling
+    FLYDOCS_EXTRACTION_TEXT_ANCHOR: docling
 ```
 
 ### 3c. Building the image yourself
@@ -129,7 +129,7 @@ docker buildx build \
     --build-arg WITH_DOCLING=true \
     --build-context pyfly=../../fireflyframework/fireflyframework-pyfly \
     --build-context fireflyframework-agentic=../../fireflyframework/fireflyframework-agentic \
-    --tag flydesk-idp:docling \
+    --tag flydocs:docling \
     .
 ```
 
@@ -141,19 +141,19 @@ docker buildx build \
 
 | Env var | Default | Effect |
 |---|---|---|
-| `FLYDESK_IDP_BBOX_REFINE_OCR_ENGINE` | `tesseract` | `docling` swaps in `DoclingOcrEngine` for image-PDFs + rasters. `none` keeps the LLM bbox. `tesseract` is the legacy default. |
-| `FLYDESK_IDP_EXTRACTION_TEXT_ANCHOR` | `none` | `docling` splices a Markdown anchor into every extract / extract-retry call. |
-| `FLYDESK_IDP_EXTRACTION_TEXT_ANCHOR_MAX_CHARS` | `12000` | Hard ceiling on the anchor length. Truncated on a paragraph boundary when in reach, otherwise hard-cut with a visible sentinel. Set to `0` to silently disable even when the engine is configured. |
+| `FLYDOCS_BBOX_REFINE_OCR_ENGINE` | `tesseract` | `docling` swaps in `DoclingOcrEngine` for image-PDFs + rasters. `none` keeps the LLM bbox. `tesseract` is the legacy default. |
+| `FLYDOCS_EXTRACTION_TEXT_ANCHOR` | `none` | `docling` splices a Markdown anchor into every extract / extract-retry call. |
+| `FLYDOCS_EXTRACTION_TEXT_ANCHOR_MAX_CHARS` | `12000` | Hard ceiling on the anchor length. Truncated on a paragraph boundary when in reach, otherwise hard-cut with a visible sentinel. Set to `0` to silently disable even when the engine is configured. |
 
 Existing knobs that still apply:
 
-- `FLYDESK_IDP_BBOX_REFINE_THRESHOLD` (default `0.85`) — fuzz score floor.
-- `FLYDESK_IDP_BBOX_REFINE_MIN_TEXT_WORDS` (default `5`) — per-page
+- `FLYDOCS_BBOX_REFINE_THRESHOLD` (default `0.85`) — fuzz score floor.
+- `FLYDOCS_BBOX_REFINE_MIN_TEXT_WORDS` (default `5`) — per-page
   threshold below which the page is treated as image-only and routed
   to the configured OCR engine.
-- `FLYDESK_IDP_BBOX_REFINE_OCR_DPI` (default `200`) — only used by
+- `FLYDOCS_BBOX_REFINE_OCR_DPI` (default `200`) — only used by
   the Tesseract path. Docling rasterises internally.
-- `FLYDESK_IDP_BBOX_REFINE_TESSERACT_LANG` (default `spa+eng`) — also
+- `FLYDOCS_BBOX_REFINE_TESSERACT_LANG` (default `spa+eng`) — also
   consumed by Docling as the default OCR language hint when no
   per-request `language_hint` is supplied.
 
@@ -173,8 +173,8 @@ CPU.
 For long-running workers this is a one-time cost. For short-lived /
 serverless deployments, pre-warm by running a tiny synthetic PDF
 through the engine at boot, or set
-`FLYDESK_IDP_BBOX_REFINE_OCR_ENGINE=tesseract` and only flip
-`FLYDESK_IDP_EXTRACTION_TEXT_ANCHOR=docling` for the requests where
+`FLYDOCS_BBOX_REFINE_OCR_ENGINE=tesseract` and only flip
+`FLYDOCS_EXTRACTION_TEXT_ANCHOR=docling` for the requests where
 the anchor is worth the wait.
 
 ### 5b. Prompt cache hit-rate
@@ -188,7 +188,7 @@ Two follow-ups:
   prompt prefix — the warm-cache premium increases relative to the
   binary-only path. Measure before flipping on for high-volume
   workloads.
-- `FLYDESK_IDP_PROMPT_CACHE=off` disables Anthropic prompt caching
+- `FLYDOCS_PROMPT_CACHE=off` disables Anthropic prompt caching
   entirely; useful for A/B comparison.
 
 See [`pipeline.md` § 7c](pipeline.md#7c-pricing--prompt-caching) for
@@ -239,12 +239,12 @@ Subsequent runs are seconds.
 
 | Component | File |
 |---|---|
-| OCR engine | [`src/flydesk_idp/core/services/bbox/docling_engine.py`](../src/flydesk_idp/core/services/bbox/docling_engine.py) |
-| Text anchor | [`src/flydesk_idp/core/services/extraction/text_anchor.py`](../src/flydesk_idp/core/services/extraction/text_anchor.py) |
-| `Word` metadata | [`src/flydesk_idp/core/services/bbox/word_extractor.py`](../src/flydesk_idp/core/services/bbox/word_extractor.py) |
-| Matcher tie-break | [`src/flydesk_idp/core/services/bbox/value_matcher.py`](../src/flydesk_idp/core/services/bbox/value_matcher.py) |
-| Settings | [`src/flydesk_idp/config.py`](../src/flydesk_idp/config.py) — search for `bbox_refine_ocr_engine` + `extraction_text_anchor` |
-| DI wiring | [`src/flydesk_idp/core/configuration.py`](../src/flydesk_idp/core/configuration.py) — `ocr_engine` + `text_anchor` beans |
+| OCR engine | [`src/flydocs/core/services/bbox/docling_engine.py`](../src/flydocs/core/services/bbox/docling_engine.py) |
+| Text anchor | [`src/flydocs/core/services/extraction/text_anchor.py`](../src/flydocs/core/services/extraction/text_anchor.py) |
+| `Word` metadata | [`src/flydocs/core/services/bbox/word_extractor.py`](../src/flydocs/core/services/bbox/word_extractor.py) |
+| Matcher tie-break | [`src/flydocs/core/services/bbox/value_matcher.py`](../src/flydocs/core/services/bbox/value_matcher.py) |
+| Settings | [`src/flydocs/config.py`](../src/flydocs/config.py) — search for `bbox_refine_ocr_engine` + `extraction_text_anchor` |
+| DI wiring | [`src/flydocs/core/configuration.py`](../src/flydocs/core/configuration.py) — `ocr_engine` + `text_anchor` beans |
 | Unit tests | [`tests/unit/test_docling_engine.py`](../tests/unit/test_docling_engine.py), [`tests/unit/test_text_anchor.py`](../tests/unit/test_text_anchor.py), [`tests/unit/test_value_matcher.py`](../tests/unit/test_value_matcher.py) |
 | Integration tests | [`tests/integration/test_docling_real.py`](../tests/integration/test_docling_real.py) |
 

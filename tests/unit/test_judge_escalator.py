@@ -9,17 +9,17 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from flydesk_idp.core.services.escalation import JudgeEscalator
-from flydesk_idp.core.services.splitting import DiscoveredSegment
-from flydesk_idp.interfaces.dtos.bbox import BoundingBox
-from flydesk_idp.interfaces.dtos.doc import DocSpec, DocType, ValidatorsSpec
-from flydesk_idp.interfaces.dtos.extract import (
+from flydocs.core.services.escalation import JudgeEscalator
+from flydocs.core.services.splitting import DiscoveredSegment
+from flydocs.interfaces.dtos.bbox import BoundingBox
+from flydocs.interfaces.dtos.doc import DocSpec, DocType, ValidatorsSpec
+from flydocs.interfaces.dtos.extract import (
     DocumentInput,
     ExtractionOptions,
     ExtractionRequest,
     StageToggles,
 )
-from flydesk_idp.interfaces.dtos.field import (
+from flydocs.interfaces.dtos.field import (
     ExtractedField,
     ExtractedFieldGroup,
     FieldGroup,
@@ -27,8 +27,8 @@ from flydesk_idp.interfaces.dtos.field import (
     FieldValidation,
     JudgeOutcome,
 )
-from flydesk_idp.interfaces.enums.field_type import FieldType
-from flydesk_idp.interfaces.enums.status import JudgeStatus
+from flydocs.interfaces.enums.field_type import FieldType
+from flydocs.interfaces.enums.status import JudgeStatus
 
 _DUMMY = base64.b64encode(b"%PDF-1.4").decode("ascii")
 

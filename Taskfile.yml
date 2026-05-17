@@ -1,6 +1,6 @@
 # Copyright 2026 Firefly Software Solutions Inc
 #
-# Developer workflows for flydesk-idp. Run ``task`` with no arguments to
+# Developer workflows for flydocs. Run ``task`` with no arguments to
 # list every target. Each task is meant to be the shortest path to a
 # working environment.
 
@@ -68,7 +68,7 @@ tasks:
   test:integration:
     desc: Integration tests against the docker compose stack.
     env:
-      FLYDESK_IDP_RUN_INTEGRATION: "1"
+      FLYDOCS_RUN_INTEGRATION: "1"
     cmds:
       - uv run pytest tests/integration -m integration
 
@@ -97,17 +97,17 @@ tasks:
   dev:migrate:
     desc: alembic upgrade head against the configured DATABASE_URL.
     cmds:
-      - uv run flydesk-idp migrate
+      - uv run flydocs migrate
 
   dev:serve:
     desc: Run the API with hot-reload on :{{.PORT}}.
     cmds:
-      - uv run uvicorn flydesk_idp.main:app --reload --host 0.0.0.0 --port {{.PORT}}
+      - uv run uvicorn flydocs.main:app --reload --host 0.0.0.0 --port {{.PORT}}
 
   dev:worker:
     desc: Run the EDA worker that consumes the job queue.
     cmds:
-      - uv run flydesk-idp worker
+      - uv run flydocs worker
 
   dev:up:
     desc: |
@@ -123,7 +123,7 @@ tasks:
   # Docker -- everything inside containers
   # ===================================================================
   docker:build:
-    desc: Build the flydesk-idp image with sibling-path BuildKit contexts.
+    desc: Build the flydocs image with sibling-path BuildKit contexts.
     deps: [env:init]
     cmds:
       - '{{.COMPOSE}} build'
@@ -192,7 +192,7 @@ tasks:
       Postgres.
     cmds:
       - |
-        docker compose exec -T postgres psql -U idp -d flydesk_idp -c "
+        docker compose exec -T postgres psql -U idp -d flydocs -c "
           SELECT id, destination, event_type, payload, created_at
           FROM pyfly_eda_outbox
           ORDER BY id DESC

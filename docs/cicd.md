@@ -1,6 +1,6 @@
 # CI/CD
 
-flydesk-idp ships two GitHub Actions workflows: one PR gate and one
+flydocs ships two GitHub Actions workflows: one PR gate and one
 multi-arch image publisher. Both live under `.github/workflows/`.
 
 ```
@@ -10,7 +10,7 @@ multi-arch image publisher. Both live under `.github/workflows/`.
 ```
 
 The image is published to **GitHub Container Registry (GHCR)** as
-`ghcr.io/firefly-operationos/flydesk-idp` (the owner is normalised to
+`ghcr.io/firefly-operationos/flydocs` (the owner is normalised to
 lower-case because GHCR rejects upper-case namespaces).
 
 ---
@@ -24,7 +24,7 @@ push cancels the previous run.
 | Job | What it does |
 | --- | --- |
 | **lint** | `ruff check` + `ruff format --check` against the working tree. |
-| **typecheck** *(advisory)* | `pyright src/flydesk_idp`. `continue-on-error: true` so it doesn't block merges yet — flip the flag once the codebase is fully typed. |
+| **typecheck** *(advisory)* | `pyright src/flydocs`. `continue-on-error: true` so it doesn't block merges yet — flip the flag once the codebase is fully typed. |
 | **unit** | `pytest -q tests/unit` — in-memory SQLite + in-memory EDA bus, no real Postgres. Docling-touching tests use a mocked `docling` module so this lane stays slim. |
 | **docling-tests** *(advisory)* | `uv sync --extra docling` then `pytest -q tests/integration/test_docling_real.py`. Loads the real Heron layout model + RapidOCR backend against reportlab-synthesized PDFs. Model weights cached in `~/.cache/docling`, `~/.cache/huggingface`, `~/.cache/rapidocr`. `continue-on-error: true` for the first weeks; flip once it runs green sustainedly. |
 | **docker-build** | `docker buildx build --platform linux/amd64 --load` against the real `Dockerfile`, matrixed over both image variants (`slim`, `docling`). Smoke-tests that both flavors still build after the PR's changes. No push. |
@@ -81,7 +81,7 @@ namespaces never collide.
 | Flavor (`WITH_DOCLING`) | Architectures | Canonical tags on main | What it contains |
 | --- | --- | --- | --- |
 | `slim` (`false`) | `linux/amd64` + `linux/arm64` | `latest`, `main`, `sha-<short>`, `v1.2.3`, `v1.2`, `v1` | Default runtime: Tesseract OCR, no PyTorch. |
-| `docling` (`true`) | `linux/amd64` **only** | `docling-latest`, `docling-main`, `docling-sha-<short>`, `docling-v1.2.3`, … | Slim image **plus** the `docling` extra: PyTorch + HF models (~2.5 GB). Unlocks `FLYDESK_IDP_BBOX_REFINE_OCR_ENGINE=docling` and `FLYDESK_IDP_EXTRACTION_TEXT_ANCHOR=docling`. |
+| `docling` (`true`) | `linux/amd64` **only** | `docling-latest`, `docling-main`, `docling-sha-<short>`, `docling-v1.2.3`, … | Slim image **plus** the `docling` extra: PyTorch + HF models (~2.5 GB). Unlocks `FLYDOCS_BBOX_REFINE_OCR_ENGINE=docling` and `FLYDOCS_EXTRACTION_TEXT_ANCHOR=docling`. |
 
 > **Why amd64-only for the docling variant?** A multi-arch
 > (`amd64` + `arm64`) build of the docling image exceeds the
@@ -97,14 +97,14 @@ namespaces never collide.
 
 ```bash
 # Both arches land on the same tag:
-docker pull ghcr.io/firefly-operationos/flydesk-idp:latest
+docker pull ghcr.io/firefly-operationos/flydocs:latest
 
 # Heavy variant with Docling baked in:
-docker pull ghcr.io/firefly-operationos/flydesk-idp:docling-latest
+docker pull ghcr.io/firefly-operationos/flydocs:docling-latest
 
 # Force a specific arch (useful for cross-arch testing on a workstation):
-docker pull --platform linux/amd64 ghcr.io/firefly-operationos/flydesk-idp:latest
-docker pull --platform linux/arm64 ghcr.io/firefly-operationos/flydesk-idp:latest
+docker pull --platform linux/amd64 ghcr.io/firefly-operationos/flydocs:latest
+docker pull --platform linux/arm64 ghcr.io/firefly-operationos/flydocs:latest
 ```
 
 ### Caching
@@ -150,14 +150,14 @@ GHCR packages created by Actions are **private by default**. To pull
 the image without a token, flip the visibility in the package
 settings:
 
-1. Go to <https://github.com/orgs/firefly-operationOS/packages/container/flydesk-idp/settings>.
+1. Go to <https://github.com/orgs/firefly-operationOS/packages/container/flydocs/settings>.
 2. Under *Danger Zone*, click **Change visibility** → **Public**.
 
 Or pull with auth:
 
 ```bash
 echo "$GITHUB_TOKEN" | docker login ghcr.io -u <user> --password-stdin
-docker pull ghcr.io/firefly-operationos/flydesk-idp:latest
+docker pull ghcr.io/firefly-operationos/flydocs:latest
 ```
 
 The GitHub Action's built-in token has `packages: read` (and `write`
@@ -170,9 +170,9 @@ without an extra secret.
 listing relies on:
 
 ```
-org.opencontainers.image.title       flydesk-idp
+org.opencontainers.image.title       flydocs
 org.opencontainers.image.description Firefly Desk -- Intelligent Document Processing service…
-org.opencontainers.image.source      https://github.com/firefly-operationOS/flydesk-idp
+org.opencontainers.image.source      https://github.com/firefly-operationOS/flydocs
 org.opencontainers.image.licenses    Apache-2.0
 org.opencontainers.image.vendor      Firefly Software Solutions Inc
 ```
@@ -212,7 +212,7 @@ a good predictor of a green PR.
    ```
 
 4. `docker-publish.yaml` fires, builds for both arches, pushes
-   `ghcr.io/firefly-operationos/flydesk-idp:v0.2.0`, `:v0.2`, `:v0`,
+   `ghcr.io/firefly-operationos/flydocs:v0.2.0`, `:v0.2`, `:v0`,
    and `:sha-<short>`, plus `:latest` if the tag points at the head
    of the default branch.
 
@@ -228,11 +228,11 @@ and the full tag list — paste it into the release notes.
 spec:
   containers:
     - name: api
-      image: ghcr.io/firefly-operationos/flydesk-idp:v0.2.0
+      image: ghcr.io/firefly-operationos/flydocs:v0.2.0
       env:
-        - name: FLYDESK_IDP_DATABASE_URL
-          value: postgresql+asyncpg://idp:idp@postgres:5432/flydesk_idp
-        - name: FLYDESK_IDP_EDA_ADAPTER
+        - name: FLYDOCS_DATABASE_URL
+          value: postgresql+asyncpg://idp:idp@postgres:5432/flydocs
+        - name: FLYDOCS_EDA_ADAPTER
           value: postgres  # durable outbox + LISTEN/NOTIFY, no extra broker
       livenessProbe:
         httpGet:

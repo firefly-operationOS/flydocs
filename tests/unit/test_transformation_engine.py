@@ -16,14 +16,14 @@ from dataclasses import dataclass
 
 import pytest
 
-from flydesk_idp.core.services.transformations.entity_resolution import (
+from flydocs.core.services.transformations.entity_resolution import (
     EntityResolutionTransformer,
 )
-from flydesk_idp.core.services.transformations.transformation_engine import (
+from flydocs.core.services.transformations.transformation_engine import (
     TransformationEngine,
 )
-from flydesk_idp.interfaces.dtos.field import ExtractedField, ExtractedFieldGroup
-from flydesk_idp.interfaces.dtos.transformation import (
+from flydocs.interfaces.dtos.field import ExtractedField, ExtractedFieldGroup
+from flydocs.interfaces.dtos.transformation import (
     EntityResolutionTransformation,
     LlmTransformation,
     TransformationScope,

@@ -1,8 +1,8 @@
 # Prompts
 
-flydesk-idp keeps every LLM prompt **outside the Python source**. Each
+flydocs keeps every LLM prompt **outside the Python source**. Each
 stage's system + user template lives as a YAML file under
-`src/flydesk_idp/resources/prompts/`, loaded at boot by a single
+`src/flydocs/resources/prompts/`, loaded at boot by a single
 `PromptCatalog` bean and registered with the framework-wide
 `PromptRegistry`. This makes prompt edits a configuration change
 rather than a code change, gives every template a stable
@@ -15,7 +15,7 @@ container and never import a prompt global.
 ## 1. Anatomy of a YAML template
 
 ```yaml
-name: flydesk_idp/extract
+name: flydocs/extract
 version: "1.0.0"
 description: >-
   Schema-driven multimodal extraction. One LLM call returns every
@@ -44,7 +44,7 @@ Five fields drive the loader:
 
 | Field                | Meaning                                                                                  |
 | -------------------- | ---------------------------------------------------------------------------------------- |
-| `name`               | Unique key in the `PromptRegistry`. Conventionally `flydesk_idp/<stage>`.                |
+| `name`               | Unique key in the `PromptRegistry`. Conventionally `flydocs/<stage>`.                |
 | `version`            | Semantic version. Bump when the contract (variables / output shape) changes.             |
 | `description`        | Human-readable summary. Surfaces in `PromptInfo` and the framework's prompt browser.     |
 | `required_variables` | Names the renderer must receive. Missing required vars raise `PromptValidationError`.    |
@@ -131,7 +131,7 @@ Look one up at runtime:
 ```python
 catalog: PromptCatalog = container.resolve(PromptCatalog)
 template = catalog.extract                                  # named accessor
-template = catalog.get("flydesk_idp/extract", version="1.0.0")
+template = catalog.get("flydocs/extract", version="1.0.0")
 ```
 
 ---
@@ -149,7 +149,7 @@ template = catalog.get("flydesk_idp/extract", version="1.0.0")
    indexes by `name + version`; an older version can coexist for an
    A/B test or a controlled rollout.
 4. **Run the real-LLM smoke test** after the change. Use whichever
-   provider your `FLYDESK_IDP_MODEL` is set to — `fireflyframework-genai`
+   provider your `FLYDOCS_MODEL` is set to — `fireflyframework-genai`
    reads the matching env var automatically:
 
    ```bash
@@ -167,7 +167,7 @@ template = catalog.get("flydesk_idp/extract", version="1.0.0")
 
 If you're adding a new pipeline stage, the prompt comes with it.
 
-1. Create `src/flydesk_idp/resources/prompts/<stage>.yaml` with the
+1. Create `src/flydocs/resources/prompts/<stage>.yaml` with the
    five required fields above.
 2. Register it in `PromptCatalog._PROMPT_FILES`:
 

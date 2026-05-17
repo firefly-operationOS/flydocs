@@ -25,11 +25,11 @@ import pytest
 
 pytest.importorskip("docling")  # noqa: E402
 
-from flydesk_idp.config import IDPSettings  # noqa: E402
-from flydesk_idp.core.services.bbox.docling_engine import DoclingOcrEngine  # noqa: E402
-from flydesk_idp.core.services.bbox.value_matcher import ValueMatcher  # noqa: E402
-from flydesk_idp.core.services.extraction.text_anchor import DoclingTextAnchor  # noqa: E402
-from flydesk_idp.interfaces.dtos.bbox import BboxSource  # noqa: E402
+from flydocs.config import IDPSettings  # noqa: E402
+from flydocs.core.services.bbox.docling_engine import DoclingOcrEngine  # noqa: E402
+from flydocs.core.services.bbox.value_matcher import ValueMatcher  # noqa: E402
+from flydocs.core.services.extraction.text_anchor import DoclingTextAnchor  # noqa: E402
+from flydocs.interfaces.dtos.bbox import BboxSource  # noqa: E402
 
 
 def _synth_pdf(lines: list[str]) -> bytes:

@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import pytest
 
-from flydesk_idp.interfaces.enums.job_status import BboxRefineStatus, JobStatus
+from flydocs.interfaces.enums.job_status import BboxRefineStatus, JobStatus
 
 
 @pytest.mark.parametrize(

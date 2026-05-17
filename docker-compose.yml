@@ -24,11 +24,11 @@ services:
     environment:
       POSTGRES_USER: idp
       POSTGRES_PASSWORD: idp
-      POSTGRES_DB: flydesk_idp
+      POSTGRES_DB: flydocs
     ports:
       - "${PG_PORT:-5435}:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U idp -d flydesk_idp"]
+      test: ["CMD-SHELL", "pg_isready -U idp -d flydocs"]
       interval: 5s
       timeout: 5s
       retries: 30
@@ -48,12 +48,12 @@ services:
   # Office-doc conversion sidecar. Owns headless LibreOffice + Chromium
   # internally so the API + worker containers stay distroless-friendly
   # (no ``soffice`` binary, no writable filesystem, no shell). The
-  # ``flydesk-idp`` containers POST DOCX/XLSX/PPTX/RTF/HTML bytes here
+  # ``flydocs`` containers POST DOCX/XLSX/PPTX/RTF/HTML bytes here
   # and get back the rendered PDF -- selected by
-  # ``FLYDESK_IDP_OFFICE_CONVERTER=gotenberg`` (the default).
+  # ``FLYDOCS_OFFICE_CONVERTER=gotenberg`` (the default).
   gotenberg:
     image: gotenberg/gotenberg:8
-    container_name: flydesk-idp-gotenberg
+    container_name: flydocs-gotenberg
     ports:
       - "${GOTENBERG_PORT:-3000}:3000"
     healthcheck:
@@ -68,8 +68,8 @@ services:
 
   api:
     build: *service-build
-    image: flydesk-idp:latest
-    container_name: flydesk-idp-api
+    image: flydocs:latest
+    container_name: flydocs-api
     command: ["serve"]
     ports:
       - "${IDP_PORT:-8400}:8400"
@@ -80,12 +80,12 @@ services:
       - path: .env
         required: false
     environment:
-      FLYDESK_IDP_DATABASE_URL: postgresql+asyncpg://idp:idp@postgres:5432/flydesk_idp
-      FLYDESK_IDP_REDIS_URL: redis://redis:6379/0
-      FLYDESK_IDP_EDA_ADAPTER: postgres
-      FLYDESK_IDP_MODEL: ${FLYDESK_IDP_MODEL:-anthropic:claude-sonnet-4-6}
-      FLYDESK_IDP_OFFICE_CONVERTER: ${FLYDESK_IDP_OFFICE_CONVERTER:-gotenberg}
-      FLYDESK_IDP_GOTENBERG_URL: http://gotenberg:3000
+      FLYDOCS_DATABASE_URL: postgresql+asyncpg://idp:idp@postgres:5432/flydocs
+      FLYDOCS_REDIS_URL: redis://redis:6379/0
+      FLYDOCS_EDA_ADAPTER: postgres
+      FLYDOCS_MODEL: ${FLYDOCS_MODEL:-anthropic:claude-sonnet-4-6}
+      FLYDOCS_OFFICE_CONVERTER: ${FLYDOCS_OFFICE_CONVERTER:-gotenberg}
+      FLYDOCS_GOTENBERG_URL: http://gotenberg:3000
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       RUN_MIGRATIONS: "true"
@@ -104,19 +104,19 @@ services:
 
   worker:
     build: *service-build
-    image: flydesk-idp:latest
-    container_name: flydesk-idp-worker
+    image: flydocs:latest
+    container_name: flydocs-worker
     command: ["worker"]
     env_file:
       - path: .env
         required: false
     environment:
-      FLYDESK_IDP_DATABASE_URL: postgresql+asyncpg://idp:idp@postgres:5432/flydesk_idp
-      FLYDESK_IDP_REDIS_URL: redis://redis:6379/0
-      FLYDESK_IDP_EDA_ADAPTER: postgres
-      FLYDESK_IDP_MODEL: ${FLYDESK_IDP_MODEL:-anthropic:claude-sonnet-4-6}
-      FLYDESK_IDP_OFFICE_CONVERTER: ${FLYDESK_IDP_OFFICE_CONVERTER:-gotenberg}
-      FLYDESK_IDP_GOTENBERG_URL: http://gotenberg:3000
+      FLYDOCS_DATABASE_URL: postgresql+asyncpg://idp:idp@postgres:5432/flydocs
+      FLYDOCS_REDIS_URL: redis://redis:6379/0
+      FLYDOCS_EDA_ADAPTER: postgres
+      FLYDOCS_MODEL: ${FLYDOCS_MODEL:-anthropic:claude-sonnet-4-6}
+      FLYDOCS_OFFICE_CONVERTER: ${FLYDOCS_OFFICE_CONVERTER:-gotenberg}
+      FLYDOCS_GOTENBERG_URL: http://gotenberg:3000
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       RUN_MIGRATIONS: "false"
@@ -126,7 +126,7 @@ services:
       gotenberg:
         condition: service_healthy
 
-  # Second-stage EDA consumer: subscribes to ``flydesk.idp.bbox.refine``
+  # Second-stage EDA consumer: subscribes to ``flydocs.bbox.refine``
   # events that ``worker`` publishes when an extraction finishes with
   # ``options.stages.bbox_refine == true``. Grounds bboxes against the
   # PDF text layer / configured OCR engine, persists the refined result,
@@ -135,25 +135,25 @@ services:
   # differs.
   bbox-worker:
     build: *service-build
-    image: flydesk-idp:latest
-    container_name: flydesk-idp-bbox-worker
+    image: flydocs:latest
+    container_name: flydocs-bbox-worker
     command: ["bbox-worker"]
     env_file:
       - path: .env
         required: false
     environment:
-      FLYDESK_IDP_DATABASE_URL: postgresql+asyncpg://idp:idp@postgres:5432/flydesk_idp
-      FLYDESK_IDP_REDIS_URL: redis://redis:6379/0
-      FLYDESK_IDP_EDA_ADAPTER: postgres
+      FLYDOCS_DATABASE_URL: postgresql+asyncpg://idp:idp@postgres:5432/flydocs
+      FLYDOCS_REDIS_URL: redis://redis:6379/0
+      FLYDOCS_EDA_ADAPTER: postgres
       # Subscribe to the bbox-refine topic under a dedicated consumer
       # group so the offset advances independently of the main worker.
-      # Without these the bus would default to ``flydesk.idp.jobs`` and
+      # Without these the bus would default to ``flydocs.jobs`` and
       # the bbox-refine events would never reach this container.
-      FLYDESK_IDP_EDA_DESTINATIONS: flydesk.idp.bbox.refine
-      FLYDESK_IDP_EDA_GROUP: flydesk-idp-bbox-workers
-      FLYDESK_IDP_MODEL: ${FLYDESK_IDP_MODEL:-anthropic:claude-sonnet-4-6}
-      FLYDESK_IDP_OFFICE_CONVERTER: ${FLYDESK_IDP_OFFICE_CONVERTER:-gotenberg}
-      FLYDESK_IDP_GOTENBERG_URL: http://gotenberg:3000
+      FLYDOCS_EDA_DESTINATIONS: flydocs.bbox.refine
+      FLYDOCS_EDA_GROUP: flydocs-bbox-workers
+      FLYDOCS_MODEL: ${FLYDOCS_MODEL:-anthropic:claude-sonnet-4-6}
+      FLYDOCS_OFFICE_CONVERTER: ${FLYDOCS_OFFICE_CONVERTER:-gotenberg}
+      FLYDOCS_GOTENBERG_URL: http://gotenberg:3000
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       RUN_MIGRATIONS: "false"

@@ -32,7 +32,7 @@ shaped as:
 
 ```jsonc
 {
-  "type":    "https://flydesk.dev/problems/<slug>",   // URI reference identifying the problem class
+  "type":    "https://flydocs.dev/problems/<slug>",   // URI reference identifying the problem class
   "title":   "Short human-readable summary",
   "status":  409,                                     // mirrors the HTTP status
   "detail":  "Human-readable explanation for this occurrence.",
@@ -60,7 +60,7 @@ See [§ 6 (Error codes)](#6-error-codes) for the full catalogue.
 
 ## 2. Synchronous extraction — `POST /api/v1/extract`
 
-Blocks until the orchestrator finishes or `FLYDESK_IDP_SYNC_TIMEOUT_S`
+Blocks until the orchestrator finishes or `FLYDOCS_SYNC_TIMEOUT_S`
 elapses (default 60 s). On timeout the controller returns
 `408 extraction_timeout`.
 
@@ -243,12 +243,12 @@ and may pin its own `document_type`.
     "cache_creation_tokens": 0,
     "cache_read_tokens": 0,
     "by_agent": {
-      "flydesk-idp-splitter":   {"input_tokens": 48598, "output_tokens": 746,  "total_tokens": 49344, "cost_usd": 0.785},
-      "flydesk-idp-classifier": {"input_tokens": 63325, "output_tokens": 2307, "total_tokens": 65632, "cost_usd": 1.123},
-      "flydesk-idp-extractor":  {"input_tokens": 78936, "output_tokens": 6057, "total_tokens": 84993, "cost_usd": 1.638},
-      "flydesk-idp-judge":      {"input_tokens": 73023, "output_tokens": 5719, "total_tokens": 78742, "cost_usd": 1.524},
-      "flydesk-idp-visual-auth":{"input_tokens": 40847, "output_tokens": 642,  "total_tokens": 41489, "cost_usd": 0.661},
-      "flydesk-idp-rule-engine":{"input_tokens": 13609, "output_tokens": 2326, "total_tokens": 15935, "cost_usd": 0.379}
+      "flydocs-splitter":   {"input_tokens": 48598, "output_tokens": 746,  "total_tokens": 49344, "cost_usd": 0.785},
+      "flydocs-classifier": {"input_tokens": 63325, "output_tokens": 2307, "total_tokens": 65632, "cost_usd": 1.123},
+      "flydocs-extractor":  {"input_tokens": 78936, "output_tokens": 6057, "total_tokens": 84993, "cost_usd": 1.638},
+      "flydocs-judge":      {"input_tokens": 73023, "output_tokens": 5719, "total_tokens": 78742, "cost_usd": 1.524},
+      "flydocs-visual-auth":{"input_tokens": 40847, "output_tokens": 642,  "total_tokens": 41489, "cost_usd": 0.661},
+      "flydocs-rule-engine":{"input_tokens": 13609, "output_tokens": 2326, "total_tokens": 15935, "cost_usd": 0.379}
     },
     "by_model": {
       "anthropic:claude-opus-4-7": {"input_tokens": 318338, "output_tokens": 17797, "total_tokens": 336135, "cost_usd": 6.110}
@@ -286,7 +286,7 @@ request when assembling the response.
 | `total_cost_usd`         | Estimated USD cost using the configured price table (see operational notes below).                       |
 | `record_count`           | Number of distinct LLM calls behind this request.                                                        |
 | `total_latency_ms`       | Sum of per-call wall-clock times (with `asyncio.gather` parallelism this can exceed `latency_ms`).       |
-| `cache_creation_tokens`  | Prompt tokens written to the provider's prompt cache. Populated by Anthropic (direct + Bedrock-hosted) when `cache_control` breakpoints fire; by Google Gemini when a `CachedContent` resource is referenced. OpenAI's automatic caching does not surface "creation" tokens distinctly. Always 0 when `FLYDESK_IDP_PROMPT_CACHE=off`. |
+| `cache_creation_tokens`  | Prompt tokens written to the provider's prompt cache. Populated by Anthropic (direct + Bedrock-hosted) when `cache_control` breakpoints fire; by Google Gemini when a `CachedContent` resource is referenced. OpenAI's automatic caching does not surface "creation" tokens distinctly. Always 0 when `FLYDOCS_PROMPT_CACHE=off`. |
 | `cache_read_tokens`      | Prompt tokens served from the provider's prompt cache. Populated by all three first-class providers when their respective cache backends hit (Anthropic ~10% of input cost on hit; OpenAI ~50%; Google ~25%). |
 | `by_agent`               | Per-agent breakdown (extractor, classifier, splitter, judge, visual, content, rule-engine).             |
 | `by_model`               | Per-model breakdown — useful when fallback or escalation switched models mid-request.                   |
@@ -321,8 +321,8 @@ sync endpoint can return:
 | Status | Code                          | When                                                                                                              |
 | -----: | ----------------------------- | ----------------------------------------------------------------------------------------------------------------- |
 |    400 | _various_                     | Pydantic validation failed (RFC 7807 body with field errors).                                                     |
-|    408 | `extraction_timeout`          | Sync pipeline exceeded `FLYDESK_IDP_SYNC_TIMEOUT_S`.                                                              |
-|    413 | `document_too_large`          | Decoded document exceeds `FLYDESK_IDP_MAX_BYTES` (default 32 MiB).                                                |
+|    408 | `extraction_timeout`          | Sync pipeline exceeded `FLYDOCS_SYNC_TIMEOUT_S`.                                                              |
+|    413 | `document_too_large`          | Decoded document exceeds `FLYDOCS_MAX_BYTES` (default 32 MiB).                                                |
 |    422 | `invalid_base64`              | A `content_base64` field failed strict base64 parsing.                                                            |
 |    422 | `invalid_request`             | Semantic validator rejected the payload (a `document_type` pin references an undeclared docType, rule points at an unknown field, …). The body embeds the full report so the caller can fix every issue at once. |
 |    422 | `encrypted_pdf`               | The submitted PDF is password-protected. Decrypt it before submitting.                                            |
@@ -440,7 +440,7 @@ Two correctness notes:
 - A `document_type` pin **must** reference a docType declared in
   `docs[]`. Unknown pins are rejected with `422 invalid_request /
   code=document_type_unknown` before the pipeline runs.
-- Per-file size limits (`FLYDESK_IDP_MAX_BYTES`) are enforced
+- Per-file size limits (`FLYDOCS_MAX_BYTES`) are enforced
   individually -- a single oversized file rejects the whole request
   with `413 document_too_large` naming that file.
 
@@ -604,7 +604,7 @@ workers.
 ```http
 POST <callback_url>
 Content-Type: application/json
-X-Flydesk-Signature: sha256=<hex>
+X-Flydocs-Signature: sha256=<hex>
 
 {
   "event_id":       "f0c7b3aa-2f43-4d34-bf6c-3b09e6efbb19",  // UUID v4 — dedupe by this on the client
@@ -625,9 +625,9 @@ X-Flydesk-Signature: sha256=<hex>
 }
 ```
 
-`X-Flydesk-Signature` is an HMAC-SHA256 of the raw body using
-`FLYDESK_IDP_WEBHOOK_HMAC_SECRET`. The publisher retries on `5xx` and
-`429` up to `FLYDESK_IDP_WEBHOOK_MAX_ATTEMPTS` with exponential
+`X-Flydocs-Signature` is an HMAC-SHA256 of the raw body using
+`FLYDOCS_WEBHOOK_HMAC_SECRET`. The publisher retries on `5xx` and
+`429` up to `FLYDOCS_WEBHOOK_MAX_ATTEMPTS` with exponential
 back-off + jitter; anything else `4xx` is treated as permanent.
 **Dedupe by `event_id` on the client** — the publisher's at-least-once
 delivery semantics mean the same `event_id` may arrive more than once
@@ -945,7 +945,7 @@ submitted with `options.stages.bbox_refine=true`; `null` otherwise.
 
 ```jsonc
 {
-  "service":        "flydesk-idp",
+  "service":        "flydocs",
   "version":        "0.1.0",                    // semantic version baked into the wheel
   "model":          "anthropic:claude-sonnet-4-6",
   "fallback_model": "openai:gpt-4o",            // "" disables the fallback
@@ -959,7 +959,7 @@ submitted with `options.stages.bbox_refine=true`; `null` otherwise.
 
 Two layers, both optional.
 
-- **API keys** — set `FLYDESK_IDP_API_KEYS` to a comma-separated list
+- **API keys** — set `FLYDOCS_API_KEYS` to a comma-separated list
   of secrets; `fireflyframework-pyfly` enforces them via the
   `security-api-key` starter when the env var is present.
 - **OIDC / OAuth2** — out of scope here; use `fireflyframework-pyfly`'s
@@ -980,10 +980,10 @@ stable `code` that callers can branch on. The catalogue:
 |    400 | `invalid_request`               | every endpoint                           | Generic `ValueError` raised before the handler — typically a hand-rolled cross-field check that pydantic couldn't express. |
 |    400 | _various_ (pydantic field path) | every endpoint                           | Pydantic validation failed. The body lists every offending path.                                                  |
 |    404 | `JOB_NOT_FOUND`                 | `/api/v1/jobs/{id}*`                     | Unknown `job_id`.                                                                                                 |
-|    408 | `extraction_timeout`            | `POST /api/v1/extract`                   | Sync pipeline exceeded `FLYDESK_IDP_SYNC_TIMEOUT_S` (default 60 s). Retry as an async job.                        |
+|    408 | `extraction_timeout`            | `POST /api/v1/extract`                   | Sync pipeline exceeded `FLYDOCS_SYNC_TIMEOUT_S` (default 60 s). Retry as an async job.                        |
 |    409 | `job_not_ready`                 | `GET /api/v1/jobs/{id}/result`           | Job is in `QUEUED` / `RUNNING` / `FAILED` / `CANCELLED`. Body includes the current status under `extensions`.     |
 |    409 | `job_not_cancellable`           | `DELETE /api/v1/jobs/{id}`               | Job has already started or terminated. Only `QUEUED` jobs can be cancelled.                                       |
-|    413 | `document_too_large`            | `POST /api/v1/extract`, `POST /jobs`     | Decoded per-file size exceeds `FLYDESK_IDP_MAX_BYTES` (default 32 MiB). The body names the offending file.        |
+|    413 | `document_too_large`            | `POST /api/v1/extract`, `POST /jobs`     | Decoded per-file size exceeds `FLYDOCS_MAX_BYTES` (default 32 MiB). The body names the offending file.        |
 |    422 | `invalid_base64`                | `POST /api/v1/extract`, `POST /jobs`     | A `content_base64` field failed strict base64 parsing.                                                            |
 |    422 | `invalid_request`               | `POST /api/v1/extract`, `POST /jobs`     | Semantic validator rejected the payload. Body embeds the full `ValidationReport` (`errors[]` + `warnings[]`).      |
 |    422 | `encrypted_pdf`                 | `POST /api/v1/extract`, `POST /jobs`     | Submitted PDF is password-protected.                                                                              |

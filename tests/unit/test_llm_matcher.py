@@ -16,14 +16,14 @@ from typing import Any
 
 import pytest
 
-from flydesk_idp.core.services.bbox.llm_matcher import (
+from flydocs.core.services.bbox.llm_matcher import (
     LlmValueMatcher,
     _LlmFieldMatch,
     _LlmMatchResponse,
 )
-from flydesk_idp.core.services.bbox.value_matcher import MatchResult
-from flydesk_idp.core.services.bbox.word_extractor import PageWords, Word
-from flydesk_idp.interfaces.dtos.bbox import BboxSource
+from flydocs.core.services.bbox.value_matcher import MatchResult
+from flydocs.core.services.bbox.word_extractor import PageWords, Word
+from flydocs.interfaces.dtos.bbox import BboxSource
 
 
 def _w(text: str, page: int, x0: float, y0: float, x1: float, y1: float) -> Word:

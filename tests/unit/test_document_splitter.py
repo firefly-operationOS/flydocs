@@ -21,20 +21,20 @@ from typing import Any
 import pytest
 from fireflyframework_agentic.prompts import PromptTemplate
 
-from flydesk_idp.core.services.splitting import (
+from flydocs.core.services.splitting import (
     DiscoveredSegment,
     DocumentSplitter,
     SplitResult,
 )
-from flydesk_idp.core.services.splitting import splitter as splitter_module
-from flydesk_idp.interfaces.dtos.doc import DocSpec, DocType, ValidatorsSpec
-from flydesk_idp.interfaces.dtos.field import FieldGroup, FieldSpec
-from flydesk_idp.interfaces.enums.field_type import FieldType
+from flydocs.core.services.splitting import splitter as splitter_module
+from flydocs.interfaces.dtos.doc import DocSpec, DocType, ValidatorsSpec
+from flydocs.interfaces.dtos.field import FieldGroup, FieldSpec
+from flydocs.interfaces.enums.field_type import FieldType
 
 
 def _template() -> PromptTemplate:
     return PromptTemplate(
-        name="flydesk_idp/splitter-test",
+        name="flydocs/splitter-test",
         system_template="discover sub-documents",
         user_template="pages={{ page_count }} targets={{ targets_json }} intent={{ intention }}",
         required_variables=["targets_json", "page_count", "intention"],

@@ -8,8 +8,8 @@ import io
 import pytest
 from PIL import Image
 
-from flydesk_idp.core.services.binary.errors import ImageConversionError
-from flydesk_idp.core.services.binary.image import ImageNormalizer
+from flydocs.core.services.binary.errors import ImageConversionError
+from flydocs.core.services.binary.image import ImageNormalizer
 
 
 def _png_bytes(size: tuple[int, int] = (32, 32), color: str = "red") -> bytes:

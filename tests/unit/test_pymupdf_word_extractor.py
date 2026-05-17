@@ -9,8 +9,8 @@ import pytest
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 
-from flydesk_idp.config import IDPSettings
-from flydesk_idp.core.services.bbox.pymupdf_words import PyMuPDFWordExtractor
+from flydocs.config import IDPSettings
+from flydocs.core.services.bbox.pymupdf_words import PyMuPDFWordExtractor
 
 
 def _pdf(lines: list[str]) -> bytes:

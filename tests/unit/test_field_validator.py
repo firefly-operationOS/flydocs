@@ -9,16 +9,16 @@ Verifies the post-extraction validator correctly:
 
 from __future__ import annotations
 
-from flydesk_idp.core.services.validation import FieldValidator
-from flydesk_idp.interfaces.dtos.field import (
+from flydocs.core.services.validation import FieldValidator
+from flydocs.interfaces.dtos.field import (
     ExtractedField,
     ExtractedFieldGroup,
     FieldGroup,
     FieldSpec,
 )
-from flydesk_idp.interfaces.dtos.standard_validator import StandardValidatorSpec
-from flydesk_idp.interfaces.enums.field_type import FieldType
-from flydesk_idp.interfaces.enums.standard_validator import StandardValidatorType
+from flydocs.interfaces.dtos.standard_validator import StandardValidatorSpec
+from flydocs.interfaces.enums.field_type import FieldType
+from flydocs.interfaces.enums.standard_validator import StandardValidatorType
 
 
 def _group(spec: FieldSpec, extracted: ExtractedField) -> tuple[FieldGroup, ExtractedFieldGroup]:
