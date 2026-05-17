@@ -1,4 +1,4 @@
-# flydesk-idp — Overview
+# flydocs — Overview
 
 A guided tour for someone landing on this codebase for the first time.
 By the end you should know **what the service does for the business**,
@@ -9,7 +9,7 @@ source** when you need to change something.
 
 ## 1. The product, in plain language
 
-flydesk-idp turns documents into structured, validated, audit-ready
+flydocs turns documents into structured, validated, audit-ready
 decisions. A single HTTP call does five things that operations teams
 normally have to glue together themselves:
 
@@ -160,7 +160,7 @@ JobsController → SubmitJobCommand → SubmitJobHandler → ExtractionJob table
                                                           WebhookPublisher (HMAC + retries)
 ```
 
-Switch broker by flipping `FLYDESK_IDP_EDA_ADAPTER` to `memory`,
+Switch broker by flipping `FLYDOCS_EDA_ADAPTER` to `memory`,
 `redis` (Streams), or `kafka` — the orchestrator and the worker don't
 care; only the bus implementation changes.
 
@@ -178,7 +178,7 @@ care; only the bus implementation changes.
 | Wire a new bean                                   | `core/configuration.py` (`@bean`) or decorate the class with `@service` |
 | Diagnose a request                                | Grep the structured logs by `request_id` (UUID stamped in the response) |
 | Run only the unit tests                           | `task test`                                                              |
-| Run the real-LLM smoke test                       | `ANTHROPIC_API_KEY=… task test:llm` (or `OPENAI_API_KEY=…` etc., depending on the model id in `FLYDESK_IDP_MODEL`) |
+| Run the real-LLM smoke test                       | `ANTHROPIC_API_KEY=… task test:llm` (or `OPENAI_API_KEY=…` etc., depending on the model id in `FLYDOCS_MODEL`) |
 
 ---
 
@@ -186,14 +186,14 @@ care; only the bus implementation changes.
 
 | Block                              | Purpose                                                              | Default                                          |
 | ---------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------ |
-| **PyFly application**              | Spring-Boot-style framework: DI, CQRS, web, EDA, actuator, security  | `flydesk_idp.app.FlydeskIDPApplication`         |
+| **PyFly application**              | Spring-Boot-style framework: DI, CQRS, web, EDA, actuator, security  | `flydocs.app.FlydocsApplication`         |
 | **Configuration**                  | Single `@configuration` declaring every cross-cutting bean           | `core/configuration.py::IDPCoreConfiguration`   |
 | **PromptCatalog**                  | Loads YAML prompts at boot, registers them with the `fireflyframework-agentic` registry | `core/services/extraction/prompts.py`           |
 | **Pipeline orchestrator**          | Builds + runs a `fireflyframework-agentic` `PipelineEngine` per request                | `core/services/pipeline/orchestrator.py`        |
-| **Event bus**                      | `fireflyframework-pyfly` `EventPublisher` — default Postgres outbox + LISTEN/NOTIFY; swap to Redis Streams / Kafka via `FLYDESK_IDP_EDA_ADAPTER` | injected by `pyfly.eda.auto_configuration.EdaAutoConfiguration` |
+| **Event bus**                      | `fireflyframework-pyfly` `EventPublisher` — default Postgres outbox + LISTEN/NOTIFY; swap to Redis Streams / Kafka via `FLYDOCS_EDA_ADAPTER` | injected by `pyfly.eda.auto_configuration.EdaAutoConfiguration` |
 | **WebhookPublisher**               | HMAC-SHA256 signed, retries on 5xx / 429 with `tenacity`             | `core/services/webhook/webhook_publisher.py`    |
 | **Database**                       | Async SQLAlchemy + Alembic                                           | `models/repositories/extraction_job_repository.py` |
-| **Settings**                       | Pydantic settings; every knob is a `FLYDESK_IDP_*` env var           | `config.py`                                      |
+| **Settings**                       | Pydantic settings; every knob is a `FLYDOCS_*` env var           | `config.py`                                      |
 
 ---
 

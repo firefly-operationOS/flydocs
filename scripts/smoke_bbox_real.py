@@ -6,7 +6,7 @@ Sends two real documents (escritura + DNI) through ``POST /api/v1/extract``
 with ``stages.bbox_refine=true``, then renders each page with the
 returned bboxes overlaid so the bbox refiner's output can be eyeballed.
 
-Output: ``/tmp/flydesk-idp-viz/index.html`` plus one PNG per page.
+Output: ``/tmp/flydocs-viz/index.html`` plus one PNG per page.
 Open in a browser to see the bboxes coloured by source:
 
 * green   -- ``source=pdf_text`` (grounded via PyMuPDF text layer).
@@ -34,7 +34,7 @@ import pymupdf  # pyright: ignore[reportMissingImports]
 from PIL import Image, ImageDraw, ImageFont
 
 API = "http://localhost:8400"
-OUT = Path("/tmp/flydesk-idp-viz")
+OUT = Path("/tmp/flydocs-viz")
 OUT.mkdir(parents=True, exist_ok=True)
 
 # RGB outlines per bbox source.
@@ -427,7 +427,7 @@ def visualize(pdf_path: Path, response: dict[str, Any], out_prefix: str) -> list
 
 def write_index(jobs: list[dict[str, Any]]) -> Path:
     parts: list[str] = [
-        '<!DOCTYPE html>\n<html><head><meta charset="utf-8"><title>flydesk-idp bbox viewer</title>',
+        '<!DOCTYPE html>\n<html><head><meta charset="utf-8"><title>flydocs bbox viewer</title>',
         "<style>",
         "body{font-family:system-ui,sans-serif;margin:24px;background:#fafafa;color:#222}",
         "h1{margin:0 0 8px}h2{margin:24px 0 4px}",
@@ -448,7 +448,7 @@ def write_index(jobs: list[dict[str, Any]]) -> Path:
         "table td,table th{border:1px solid #ddd;padding:4px 8px;text-align:left}",
         "table th{background:#f0f0f0}",
         "</style></head><body>",
-        "<h1>flydesk-idp bbox visualizer</h1>",
+        "<h1>flydocs bbox visualizer</h1>",
         '<div class="legend">',
         '<span class="pdf">grounded (pdf text)</span>',
         '<span class="ocr">grounded (ocr)</span>',

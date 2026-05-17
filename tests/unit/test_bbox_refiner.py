@@ -9,14 +9,14 @@ import pytest
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 
-from flydesk_idp.config import IDPSettings
-from flydesk_idp.core.services.bbox.bbox_refiner import BboxRefiner
-from flydesk_idp.core.services.bbox.ocr_engine import NoneOcrEngine
-from flydesk_idp.core.services.bbox.pymupdf_words import PyMuPDFWordExtractor
-from flydesk_idp.core.services.bbox.value_matcher import ValueMatcher
-from flydesk_idp.core.services.bbox.word_router import WordRouter
-from flydesk_idp.interfaces.dtos.bbox import BboxSource, BoundingBox
-from flydesk_idp.interfaces.dtos.field import ExtractedField, ExtractedFieldGroup
+from flydocs.config import IDPSettings
+from flydocs.core.services.bbox.bbox_refiner import BboxRefiner
+from flydocs.core.services.bbox.ocr_engine import NoneOcrEngine
+from flydocs.core.services.bbox.pymupdf_words import PyMuPDFWordExtractor
+from flydocs.core.services.bbox.value_matcher import ValueMatcher
+from flydocs.core.services.bbox.word_router import WordRouter
+from flydocs.interfaces.dtos.bbox import BboxSource, BoundingBox
+from flydocs.interfaces.dtos.field import ExtractedField, ExtractedFieldGroup
 
 
 def _make_pdf(lines: list[str]) -> bytes:

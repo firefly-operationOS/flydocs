@@ -1,7 +1,7 @@
 # Copyright 2026 Firefly Software Solutions Inc
 # syntax=docker/dockerfile:1.7
 #
-# Multi-stage Docker build for flydesk-idp.
+# Multi-stage Docker build for flydocs.
 #
 # Sibling-path deps (pyfly, fireflyframework-agentic) are passed in as
 # named BuildKit contexts so the build context stays scoped to this
@@ -11,7 +11,7 @@
 #     docker buildx build \
 #         --build-context pyfly=../../fireflyframework/fireflyframework-pyfly \
 #         --build-context fireflyframework-agentic=../../fireflyframework/fireflyframework-agentic \
-#         --tag flydesk-idp:latest \
+#         --tag flydocs:latest \
 #         .
 #
 # See docker-compose.yml for the canonical invocation.
@@ -98,18 +98,18 @@ ENV PYTHONUNBUFFERED=1 \
     UV_PROJECT_ENVIRONMENT=/app/.venv \
     PATH="/app/.venv/bin:${PATH}"
 # Surface the build flag for boot-time logging + actuator info.
-ENV FLYDESK_IDP_IMAGE_VARIANT=${WITH_DOCLING:+docling}
+ENV FLYDOCS_IMAGE_VARIANT=${WITH_DOCLING:+docling}
 
 # System libs required by the binary normalizer's image adapters:
 # * ``libheif1``                                -- pillow-heif (HEIC / HEIF / AVIF)
 # * ``libcairo2`` / ``libpango*`` / ``libgdk-pixbuf-2.0-0`` -- cairosvg (SVG)
 #
 # Office conversion (DOCX/XLSX/PPTX/RTF/HTML) goes through the Gotenberg
-# sidecar by default (``FLYDESK_IDP_OFFICE_CONVERTER=gotenberg``), so
+# sidecar by default (``FLYDOCS_OFFICE_CONVERTER=gotenberg``), so
 # ``soffice`` is intentionally NOT installed here -- it would bloat the
 # image by ~700MB and is not needed when running against the canonical
 # compose stack. Operators who want the in-container subprocess path
-# (``FLYDESK_IDP_OFFICE_CONVERTER=libreoffice``) extend this Dockerfile
+# (``FLYDOCS_OFFICE_CONVERTER=libreoffice``) extend this Dockerfile
 # with ``libreoffice-core`` + ``fonts-noto-cjk`` etc. on their side.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \

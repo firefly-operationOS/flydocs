@@ -21,20 +21,20 @@ from typing import Any
 import pytest
 from fireflyframework_agentic.prompts import PromptTemplate
 
-from flydesk_idp.core.services.classification import (
+from flydocs.core.services.classification import (
     UNMATCHED,
     ClassificationResult,
     DocumentClassifier,
 )
-from flydesk_idp.core.services.classification import classifier as classifier_module
-from flydesk_idp.interfaces.dtos.doc import DocSpec, DocType, ValidatorsSpec
-from flydesk_idp.interfaces.dtos.field import FieldGroup, FieldSpec
-from flydesk_idp.interfaces.enums.field_type import FieldType
+from flydocs.core.services.classification import classifier as classifier_module
+from flydocs.interfaces.dtos.doc import DocSpec, DocType, ValidatorsSpec
+from flydocs.interfaces.dtos.field import FieldGroup, FieldSpec
+from flydocs.interfaces.enums.field_type import FieldType
 
 
 def _template() -> PromptTemplate:
     return PromptTemplate(
-        name="flydesk_idp/classifier-test",
+        name="flydocs/classifier-test",
         system_template="classify {{ filename }} into {{ targets_json }}",
         user_template="intention: {{ intention }}",
         required_variables=["targets_json", "filename", "media_type", "intention"],

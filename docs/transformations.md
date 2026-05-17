@@ -202,7 +202,7 @@ Each LLM transformation is one structured-output call against the
 default model. Token usage is included in the request's
 `usage.breakdown` under `transform.{transformation_id[:8]}`. Default
 timeout per call is 600 s (override with
-`FLYDESK_IDP_TRANSFORM_TIMEOUT_S`).
+`FLYDOCS_TRANSFORM_TIMEOUT_S`).
 
 ## Adding a new declarative type
 
@@ -240,9 +240,9 @@ The placement is intentional:
 
 - [`docs/pipeline.md`](pipeline.md) — full stage table and DAG
   construction.
-- [`src/flydesk_idp/interfaces/dtos/transformation.py`](../src/flydesk_idp/interfaces/dtos/transformation.py)
+- [`src/flydocs/interfaces/dtos/transformation.py`](../src/flydocs/interfaces/dtos/transformation.py)
   — DTO source.
-- [`src/flydesk_idp/core/services/transformations/`](../src/flydesk_idp/core/services/transformations/)
+- [`src/flydocs/core/services/transformations/`](../src/flydocs/core/services/transformations/)
   — implementation.
 - [`tests/unit/test_entity_resolution_transformer.py`](../tests/unit/test_entity_resolution_transformer.py)
   — declarative tests.

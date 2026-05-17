@@ -146,12 +146,12 @@ jobs:
             type=raw,value=${{ matrix.tag_prefix }}latest,enable=${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
             type=raw,value=${{ matrix.tag_prefix }}manual-${{ github.run_id }},enable=${{ github.event_name == 'workflow_dispatch' }}
           labels: |
-            org.opencontainers.image.title=flydesk-idp${{ matrix.with_docling == 'true' && ' (docling)' || '' }}
+            org.opencontainers.image.title=flydocs${{ matrix.with_docling == 'true' && ' (docling)' || '' }}
             org.opencontainers.image.description=Firefly Desk -- Intelligent Document Processing service. Pure multimodal extraction with bbox.${{ matrix.with_docling == 'true' && ' Layout-aware OCR + Markdown text-anchor baked in.' || '' }}
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.licenses=Apache-2.0
             org.opencontainers.image.vendor=Firefly Software Solutions Inc
-            io.flydesk.idp.variant=${{ matrix.variant }}
+            io.flydocs.variant=${{ matrix.variant }}
 
       - name: Build + push (${{ matrix.platforms_label }}) -- ${{ matrix.variant }}
         id: build

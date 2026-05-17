@@ -21,13 +21,13 @@ from sqlalchemy import engine_from_config, pool
 _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT / "src"))
 
-from flydesk_idp.models.entities.extraction_job import Base  # noqa: E402
+from flydocs.models.entities.extraction_job import Base  # noqa: E402
 
 config = context.config
 
 # Override sqlalchemy.url from the env var when present (and translate the
 # async driver name back to a sync one Alembic can use).
-url = os.environ.get("FLYDESK_IDP_DATABASE_URL") or config.get_main_option("sqlalchemy.url")
+url = os.environ.get("FLYDOCS_DATABASE_URL") or config.get_main_option("sqlalchemy.url")
 if url:
     sync_url = url.replace("+asyncpg", "+psycopg").replace("+aiosqlite", "")
     config.set_main_option("sqlalchemy.url", sync_url)

@@ -1,6 +1,6 @@
 # Standard validators
 
-The deterministic, pure-Python validators flydesk-idp ships out of the
+The deterministic, pure-Python validators flydocs ships out of the
 box. They run **after** extraction (no LLM call) and let you catch
 syntactically invalid values — checksums, country-specific identifier
 shapes, ISO codes, … — without writing a single regex.

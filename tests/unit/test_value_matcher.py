@@ -3,9 +3,9 @@
 
 from __future__ import annotations
 
-from flydesk_idp.config import IDPSettings
-from flydesk_idp.core.services.bbox.value_matcher import ValueMatcher
-from flydesk_idp.core.services.bbox.word_extractor import PageWords, Word
+from flydocs.config import IDPSettings
+from flydocs.core.services.bbox.value_matcher import ValueMatcher
+from flydocs.core.services.bbox.word_extractor import PageWords, Word
 
 
 def _settings(threshold: float = 0.85) -> IDPSettings:

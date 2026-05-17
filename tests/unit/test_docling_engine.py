@@ -17,8 +17,8 @@ from dataclasses import dataclass
 import pytest
 from PIL import Image
 
-from flydesk_idp.config import IDPSettings
-from flydesk_idp.interfaces.dtos.bbox import BboxSource
+from flydocs.config import IDPSettings
+from flydocs.interfaces.dtos.bbox import BboxSource
 
 # ---------------------------------------------------------------------
 # Fake docling -- minimal stand-in for the parts DoclingOcrEngine uses.
@@ -146,7 +146,7 @@ def _png(size: tuple[int, int] = (400, 300)) -> bytes:
 
 
 def test_supports_pdf_and_common_image_types() -> None:
-    from flydesk_idp.core.services.bbox.docling_engine import DoclingOcrEngine
+    from flydocs.core.services.bbox.docling_engine import DoclingOcrEngine
 
     eng = DoclingOcrEngine(IDPSettings())
     assert eng.supports("application/pdf")
@@ -160,7 +160,7 @@ def test_supports_pdf_and_common_image_types() -> None:
 
 
 def test_empty_bytes_short_circuits() -> None:
-    from flydesk_idp.core.services.bbox.docling_engine import DoclingOcrEngine
+    from flydocs.core.services.bbox.docling_engine import DoclingOcrEngine
 
     eng = DoclingOcrEngine(IDPSettings())
     assert eng.recognise(b"", media_type="image/png", page_count=1) == []
@@ -170,7 +170,7 @@ def test_recognise_image_emits_words_in_normalised_top_left_coords(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _install_fake_docling(monkeypatch)
-    from flydesk_idp.core.services.bbox.docling_engine import DoclingOcrEngine
+    from flydocs.core.services.bbox.docling_engine import DoclingOcrEngine
 
     _FakeConverter.next_document = _FakeDocument(
         pages={1: _FakePage(page_no=1, size=_FakeSize(width=400, height=300))},
@@ -213,7 +213,7 @@ def test_recognise_distributes_phrase_bbox_across_tokens_proportionally(
     so downstream `_union_bbox` reconstructs the original rectangle.
     """
     _install_fake_docling(monkeypatch)
-    from flydesk_idp.core.services.bbox.docling_engine import DoclingOcrEngine
+    from flydocs.core.services.bbox.docling_engine import DoclingOcrEngine
 
     _FakeConverter.next_document = _FakeDocument(
         pages={1: _FakePage(page_no=1, size=_FakeSize(width=1000, height=1000))},
@@ -244,7 +244,7 @@ def test_recognise_distributes_phrase_bbox_across_tokens_proportionally(
 
 def test_recognise_pdf_emits_one_page_words_per_page(monkeypatch: pytest.MonkeyPatch) -> None:
     _install_fake_docling(monkeypatch)
-    from flydesk_idp.core.services.bbox.docling_engine import DoclingOcrEngine
+    from flydocs.core.services.bbox.docling_engine import DoclingOcrEngine
 
     _FakeConverter.next_document = _FakeDocument(
         pages={
@@ -272,7 +272,7 @@ def test_recognise_pdf_emits_one_page_words_per_page(monkeypatch: pytest.MonkeyP
 
 def test_pages_with_no_text_get_empty_word_list(monkeypatch: pytest.MonkeyPatch) -> None:
     _install_fake_docling(monkeypatch)
-    from flydesk_idp.core.services.bbox.docling_engine import DoclingOcrEngine
+    from flydocs.core.services.bbox.docling_engine import DoclingOcrEngine
 
     _FakeConverter.next_document = _FakeDocument(
         pages={
@@ -298,7 +298,7 @@ def test_pages_with_no_text_get_empty_word_list(monkeypatch: pytest.MonkeyPatch)
 def test_degenerate_bbox_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
     """xmin >= xmax (or ymin >= ymax) entries are dropped, not crashed on."""
     _install_fake_docling(monkeypatch)
-    from flydesk_idp.core.services.bbox.docling_engine import DoclingOcrEngine
+    from flydocs.core.services.bbox.docling_engine import DoclingOcrEngine
 
     _FakeConverter.next_document = _FakeDocument(
         pages={1: _FakePage(page_no=1, size=_FakeSize(width=500, height=500))},
@@ -328,7 +328,7 @@ def test_degenerate_bbox_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_items_without_text_are_ignored(monkeypatch: pytest.MonkeyPatch) -> None:
     """Picture / Table headers / etc. without ``text`` come through silently."""
     _install_fake_docling(monkeypatch)
-    from flydesk_idp.core.services.bbox.docling_engine import DoclingOcrEngine
+    from flydocs.core.services.bbox.docling_engine import DoclingOcrEngine
 
     class _PictureLike:
         prov = [_FakeProv(page_no=1, bbox=_FakeBbox(left=10, top=10, right=50, bottom=50))]
@@ -359,7 +359,7 @@ def test_missing_docling_dep_raises_runtime_error(monkeypatch: pytest.MonkeyPatc
     via :class:`MetaPathFinder` regardless of whether the optional extra
     is actually installed -- the test must hold either way.
     """
-    from flydesk_idp.core.services.bbox.docling_engine import DoclingOcrEngine
+    from flydocs.core.services.bbox.docling_engine import DoclingOcrEngine
 
     class _Block:
         def find_spec(self, name, path=None, target=None):  # noqa: ANN001
@@ -382,8 +382,8 @@ def test_di_wiring_dispatches_docling_engine() -> None:
     """The IDPCoreConfiguration.ocr_engine bean returns DoclingOcrEngine
     when ``bbox_refine_ocr_engine='docling'``.
     """
-    from flydesk_idp.core.configuration import IDPCoreConfiguration
-    from flydesk_idp.core.services.bbox.docling_engine import DoclingOcrEngine
+    from flydocs.core.configuration import IDPCoreConfiguration
+    from flydocs.core.services.bbox.docling_engine import DoclingOcrEngine
 
     settings = IDPSettings(bbox_refine_ocr_engine="docling")
     cfg = IDPCoreConfiguration()
@@ -392,7 +392,7 @@ def test_di_wiring_dispatches_docling_engine() -> None:
 
 
 def test_di_unknown_engine_raises_value_error() -> None:
-    from flydesk_idp.core.configuration import IDPCoreConfiguration
+    from flydocs.core.configuration import IDPCoreConfiguration
 
     settings = IDPSettings(bbox_refine_ocr_engine="paddle")
     cfg = IDPCoreConfiguration()
@@ -410,7 +410,7 @@ def test_reading_order_increments_per_emitted_item(monkeypatch: pytest.MonkeyPat
     so every emitted Word carries the visual order of its parent item.
     """
     _install_fake_docling(monkeypatch)
-    from flydesk_idp.core.services.bbox.docling_engine import DoclingOcrEngine
+    from flydocs.core.services.bbox.docling_engine import DoclingOcrEngine
 
     _FakeConverter.next_document = _FakeDocument(
         pages={1: _FakePage(page_no=1, size=_FakeSize(width=500, height=500))},
@@ -475,7 +475,7 @@ def test_table_cells_carry_structural_metadata(monkeypatch: pytest.MonkeyPatch) 
     grounding for array-row fields.
     """
     _install_fake_docling(monkeypatch)
-    from flydesk_idp.core.services.bbox.docling_engine import DoclingOcrEngine
+    from flydocs.core.services.bbox.docling_engine import DoclingOcrEngine
 
     table = _FakeTableItem(
         prov=[_FakeProv(page_no=1, bbox=_FakeBbox(left=10, top=10, right=400, bottom=200))],
@@ -540,7 +540,7 @@ def test_table_cells_with_no_bbox_fall_back_to_table_bbox(monkeypatch: pytest.Mo
     table-level bbox -- so matching never silently loses content.
     """
     _install_fake_docling(monkeypatch)
-    from flydesk_idp.core.services.bbox.docling_engine import DoclingOcrEngine
+    from flydocs.core.services.bbox.docling_engine import DoclingOcrEngine
 
     table_bbox = _FakeBbox(left=10, top=10, right=400, bottom=200)
 
@@ -572,7 +572,7 @@ def test_table_data_with_flat_cells_attribute_is_supported(monkeypatch: pytest.M
     table support.
     """
     _install_fake_docling(monkeypatch)
-    from flydesk_idp.core.services.bbox.docling_engine import DoclingOcrEngine
+    from flydocs.core.services.bbox.docling_engine import DoclingOcrEngine
 
     @dataclass
     class _FlatTableData:

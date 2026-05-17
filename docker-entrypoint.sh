@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 # Copyright 2026 Firefly Software Solutions Inc
 #
-# Dispatcher for the flydesk-idp container.
+# Dispatcher for the flydocs container.
 #
 #   ./docker-entrypoint.sh serve        -- run the FastAPI server (default)
 #   ./docker-entrypoint.sh worker       -- run the main EDA worker
@@ -21,13 +21,13 @@ shift || true
 
 case "${cmd}" in
   serve)
-    exec flydesk-idp serve "$@"
+    exec flydocs serve "$@"
     ;;
   worker)
-    exec flydesk-idp worker "$@"
+    exec flydocs worker "$@"
     ;;
   bbox-worker)
-    exec flydesk-idp bbox-worker "$@"
+    exec flydocs bbox-worker "$@"
     ;;
   migrate)
     exec alembic upgrade head

@@ -1,7 +1,7 @@
 # Copyright 2026 Firefly Software Solutions Inc
 #
 # PyFly application configuration. Values override the property-driven defaults
-# activated by ``enable_core_stack``. Anything in the environment (FLYDESK_IDP_*)
+# activated by ``enable_core_stack``. Anything in the environment (FLYDOCS_*)
 # wins over this file because pydantic-settings is loaded after pyfly merges its
 # config sources.
 
@@ -22,7 +22,7 @@ pyfly:
     enabled: true
   tracing:
     enabled: true
-    service-name: flydesk-idp
+    service-name: flydocs
 
   # Actuator -- /actuator/health, /actuator/info, /actuator/metrics
   actuator:
@@ -38,7 +38,7 @@ pyfly:
   admin:
     enabled: true
     path: /admin
-    title: "flydesk-idp -- PyFly Admin"
+    title: "flydocs -- PyFly Admin"
     theme: auto
     require-auth: false
     refresh-interval: 5000
@@ -61,28 +61,28 @@ pyfly:
 
   # EDA -- async-jobs event bus, wired by pyfly's EdaAutoConfiguration.
   # Default provider is ``postgres`` which uses LISTEN/NOTIFY + the
-  # durable ``pyfly_eda_outbox`` table; flydesk-idp already runs Postgres
+  # durable ``pyfly_eda_outbox`` table; flydocs already runs Postgres
   # so no extra broker is required. Override with
-  # ``FLYDESK_IDP_EDA_ADAPTER`` (memory | postgres | redis | kafka).
+  # ``FLYDOCS_EDA_ADAPTER`` (memory | postgres | redis | kafka).
   eda:
     enabled: true
-    provider: ${FLYDESK_IDP_EDA_ADAPTER:postgres}
+    provider: ${FLYDOCS_EDA_ADAPTER:postgres}
     # Both knobs are env-overridable so the ``bbox-worker`` container can
-    # subscribe to ``flydesk.idp.bbox.refine`` under its own consumer
-    # group while the main ``worker`` keeps consuming ``flydesk.idp.jobs``.
-    destinations: ${FLYDESK_IDP_EDA_DESTINATIONS:flydesk.idp.jobs}
-    group: ${FLYDESK_IDP_EDA_GROUP:flydesk-idp-workers}
+    # subscribe to ``flydocs.bbox.refine`` under its own consumer
+    # group while the main ``worker`` keeps consuming ``flydocs.jobs``.
+    destinations: ${FLYDOCS_EDA_DESTINATIONS:flydocs.jobs}
+    group: ${FLYDOCS_EDA_GROUP:flydocs-workers}
     postgres:
-      dsn: ${FLYDESK_IDP_DATABASE_URL:postgresql+asyncpg://idp:idp@localhost:5432/flydesk_idp}
-      channel: flydesk_idp_eda
+      dsn: ${FLYDOCS_DATABASE_URL:postgresql+asyncpg://idp:idp@localhost:5432/flydocs}
+      channel: flydocs_eda
     redis:
-      url: ${FLYDESK_IDP_REDIS_URL:redis://localhost:6379/0}
+      url: ${FLYDOCS_REDIS_URL:redis://localhost:6379/0}
     kafka:
-      bootstrap-servers: ${FLYDESK_IDP_KAFKA_BOOTSTRAP:localhost:9092}
+      bootstrap-servers: ${FLYDOCS_KAFKA_BOOTSTRAP:localhost:9092}
 
   # Persistence -- async SQLAlchemy with Alembic migrations on startup if
   # ``RUN_MIGRATIONS=true``.
   data:
     relational:
       enabled: true
-      url: ${FLYDESK_IDP_DATABASE_URL:postgresql+asyncpg://idp:idp@localhost:5432/flydesk_idp}
+      url: ${FLYDOCS_DATABASE_URL:postgresql+asyncpg://idp:idp@localhost:5432/flydocs}

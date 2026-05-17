@@ -7,23 +7,23 @@ import base64
 
 import pytest
 
-from flydesk_idp.core.services.validation import RequestValidator
-from flydesk_idp.interfaces.dtos.doc import DocSpec, DocType, ValidatorsSpec, VisualValidatorSpec
-from flydesk_idp.interfaces.dtos.extract import (
+from flydocs.core.services.validation import RequestValidator
+from flydocs.interfaces.dtos.doc import DocSpec, DocType, ValidatorsSpec, VisualValidatorSpec
+from flydocs.interfaces.dtos.extract import (
     DocumentInput,
     ExtractionOptions,
     ExtractionRequest,
     StageToggles,
 )
-from flydesk_idp.interfaces.dtos.field import FieldGroup, FieldSpec
-from flydesk_idp.interfaces.dtos.rule import (
+from flydocs.interfaces.dtos.field import FieldGroup, FieldSpec
+from flydocs.interfaces.dtos.rule import (
     RuleFieldParent,
     RuleOutputSpec,
     RuleRuleParent,
     RuleSpec,
     RuleValidatorParent,
 )
-from flydesk_idp.interfaces.enums.field_type import FieldType
+from flydocs.interfaces.enums.field_type import FieldType
 
 _DUMMY_B64 = base64.b64encode(b"%PDF-1.4 dummy").decode("ascii")
 

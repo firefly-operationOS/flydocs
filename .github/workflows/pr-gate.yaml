@@ -100,7 +100,7 @@ jobs:
       - name: uv sync (dev)
         run: uv sync --extra dev
       - name: pyright
-        run: uv run pyright src/flydesk_idp
+        run: uv run pyright src/flydocs
 
   unit:
     name: Unit tests
@@ -251,7 +251,7 @@ jobs:
           file: ./Dockerfile
           push: false
           load: true
-          tags: flydesk-idp:pr-${{ github.event.pull_request.number }}-${{ matrix.variant }}
+          tags: flydocs:pr-${{ github.event.pull_request.number }}-${{ matrix.variant }}
           platforms: linux/amd64
           build-args: |
             WITH_DOCLING=${{ matrix.variant == 'docling' && 'true' || 'false' }}

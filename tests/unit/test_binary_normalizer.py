@@ -12,21 +12,21 @@ import pytest
 from PIL import Image
 from reportlab.pdfgen import canvas
 
-from flydesk_idp.config import IDPSettings
-from flydesk_idp.core.services.binary.archive import ArchiveUnpacker
-from flydesk_idp.core.services.binary.email import EmailUnpacker
-from flydesk_idp.core.services.binary.errors import (
+from flydocs.config import IDPSettings
+from flydocs.core.services.binary.archive import ArchiveUnpacker
+from flydocs.core.services.binary.email import EmailUnpacker
+from flydocs.core.services.binary.errors import (
     ArchiveExtractionError,
     OfficeConversionError,
     UnsupportedBinaryError,
 )
-from flydesk_idp.core.services.binary.image import ImageNormalizer
-from flydesk_idp.core.services.binary.normalizer import BinaryNormalizer
-from flydesk_idp.core.services.binary.office_converter import (
+from flydocs.core.services.binary.image import ImageNormalizer
+from flydocs.core.services.binary.normalizer import BinaryNormalizer
+from flydocs.core.services.binary.office_converter import (
     OFFICE_MEDIA_TYPES,
     OfficeConverter,
 )
-from flydesk_idp.core.services.binary.pdf_guard import PdfGuard
+from flydocs.core.services.binary.pdf_guard import PdfGuard
 
 
 class _StubOffice(OfficeConverter):

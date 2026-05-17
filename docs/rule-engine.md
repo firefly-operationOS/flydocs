@@ -3,7 +3,7 @@
 Rules turn extracted data into **decisions** the surrounding workflow
 can act on. Should we auto-approve? Send to manual review? Reject?
 Escalate to fraud? These are the questions a hand-coded if/else block
-ends up answering in most extraction pipelines. flydesk-idp lets you
+ends up answering in most extraction pipelines. flydocs lets you
 declare them as data and resolve them with an LLM evaluator that walks
 your dependency graph.
 

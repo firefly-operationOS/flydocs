@@ -7,9 +7,9 @@ import httpx
 import pytest
 import respx
 
-from flydesk_idp.config import IDPSettings
-from flydesk_idp.core.services.binary.errors import OfficeConversionError
-from flydesk_idp.core.services.binary.gotenberg import GotenbergConverter
+from flydocs.config import IDPSettings
+from flydocs.core.services.binary.errors import OfficeConversionError
+from flydocs.core.services.binary.gotenberg import GotenbergConverter
 
 _DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 

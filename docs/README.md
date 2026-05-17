@@ -1,6 +1,6 @@
 # Documentation
 
-The complete reference set for **flydesk-idp**. Start in the main
+The complete reference set for **flydocs**. Start in the main
 [README.md](../README.md) for the elevator pitch and the
 step-by-step quickstart; come here when you need a specific corner
 of the system.
@@ -97,7 +97,7 @@ Where to read about each topic that spans multiple documents:
 | Provider-agnostic LLM calls     | [pipeline.md § 7c (Pricing & prompt caching)](pipeline.md#7c-pricing--prompt-caching)                       | [deployment.md § 2 (Environment)](deployment.md#2-environment)                                            |
 | Prompt caching (Anthropic-only) | [pipeline.md § 7c](pipeline.md#7c-pricing--prompt-caching)                                                  | [api-reference.md § `usage` block](api-reference.md#usage-block)                                          |
 | EDA / typed event envelopes     | [api-reference.md § EDA event envelopes](api-reference.md#eda-event-envelopes-audit--webhook-payload)       | [overview.md § Async path](overview.md), [deployment.md § 1 (Topology)](deployment.md#1-topology)          |
-| Webhooks (HMAC + retry)         | [api-reference.md § Webhook](api-reference.md#webhook)                                                      | [deployment.md § 2 (Environment) → `FLYDESK_IDP_WEBHOOK_*`](deployment.md#2-environment)                  |
+| Webhooks (HMAC + retry)         | [api-reference.md § Webhook](api-reference.md#webhook)                                                      | [deployment.md § 2 (Environment) → `FLYDOCS_WEBHOOK_*`](deployment.md#2-environment)                  |
 | Health probes                   | [deployment.md § 5 (Health + readiness)](deployment.md#5-health--readiness)                                 | [api-reference.md § 1 (Surface at a glance)](api-reference.md#1-surface-at-a-glance)                      |
 | W3C trace context               | [deployment.md § 5](deployment.md#5-health--readiness)                                                      | [api-reference.md § Request headers honoured](api-reference.md#request-headers-honoured)                  |
 | Cost telemetry                  | [api-reference.md § `usage` block](api-reference.md#usage-block), [pipeline.md § 7](pipeline.md#7-outbound-call-logging--cost-telemetry) | [README.md § What you get back](../README.md#what-you-get-back)                                           |
