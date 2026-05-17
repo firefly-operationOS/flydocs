@@ -97,7 +97,7 @@ class FlydocsClientAsyncTest {
                         .withBody("""
                                 {
                                   "service": "flydocs",
-                                  "version": "0.1.0",
+                                  "version": "26.5.1",
                                   "model":   "anthropic:claude-sonnet-4-6",
                                   "fallback_model": "",
                                   "eda_adapter": "postgres"
@@ -107,7 +107,7 @@ class FlydocsClientAsyncTest {
         StepVerifier.create(client.version())
                 .assertNext(info -> {
                     assertThat(info.service()).isEqualTo("flydocs");
-                    assertThat(info.version()).isEqualTo("0.1.0");
+                    assertThat(info.version()).isEqualTo("26.5.1");
                     assertThat(info.edaAdapter()).isEqualTo("postgres");
                 })
                 .verifyComplete();

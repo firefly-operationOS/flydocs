@@ -2,8 +2,13 @@
 #
 # Publish the Java + Python SDKs.
 #
+#   * Versioning: CalVer ``YY.MM.PP`` -- e.g. ``26.05.01`` for the first
+#     patch in May 2026. Tag form is ``v<version>`` so the pattern
+#     ``v*.*.*`` below catches both legacy SemVer tags and the new
+#     CalVer ones without special-casing.
+#
 #   * Triggers
-#       - push of a SemVer tag (``v*.*.*``) → publishes a release
+#       - push of a ``v*.*.*`` tag           → publishes a release
 #       - workflow_dispatch                  → manual re-publish
 #
 #   * Java SDK → ``mvn deploy`` to GitHub Packages
@@ -14,7 +19,7 @@
 #                  PyPI — users install directly from the release URL
 #                  with uv:
 #
-#                      uv add https://github.com/firefly-operationOS/flydocs/releases/download/v0.1.0/flydocs_sdk-0.1.0-py3-none-any.whl
+#                      uv add https://github.com/firefly-operationOS/flydocs/releases/download/v26.05.01/flydocs_sdk-26.5.1-py3-none-any.whl
 #
 #                  (or pin in pyproject.toml under [tool.uv.sources]).
 #
@@ -130,9 +135,18 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         id: install_url
         run: |
-          TAG="${GITHUB_REF#refs/tags/}"          # e.g. v0.1.0
-          VERSION="${TAG#v}"                       # e.g. 0.1.0   (wheel filename has no leading v)
-          echo "wheel_url=https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/flydocs_sdk-${VERSION}-py3-none-any.whl" >> "$GITHUB_OUTPUT"
+          TAG="${GITHUB_REF#refs/tags/}"          # e.g. v26.05.01
+          # PEP 440 strips leading zeros, so the wheel filename uses
+          # the normalised form. Compute both: ``TAG_VERSION`` matches
+          # the git tag (used in install URLs we hand to users), and
+          # ``WHEEL_VERSION`` is what hatchling actually writes onto
+          # the wheel filename. uv installs from the wheel URL so the
+          # release-notes step uses ``WHEEL_VERSION``.
+          TAG_VERSION="${TAG#v}"                  # e.g. 26.05.01
+          WHEEL_VERSION="$(python -c 'import sys; v=sys.argv[1]; print(".".join(str(int(p)) for p in v.split(".")))' "$TAG_VERSION")"
+          echo "TAG_VERSION=$TAG_VERSION"
+          echo "WHEEL_VERSION=$WHEEL_VERSION"
+          echo "wheel_url=https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/flydocs_sdk-${WHEEL_VERSION}-py3-none-any.whl" >> "$GITHUB_OUTPUT"
 
       - name: Attach build artifacts to the GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')

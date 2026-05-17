@@ -173,7 +173,7 @@ class ModelMappingTest {
         String body = """
                 {
                   "service": "flydocs",
-                  "version": "0.1.0",
+                  "version": "26.5.1",
                   "model":   "anthropic:claude-sonnet-4-6",
                   "fallback_model": "",
                   "eda_adapter": "postgres"

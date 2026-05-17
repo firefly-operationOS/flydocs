@@ -15,7 +15,14 @@ class VersionInfo(BaseModel):
     """Identity of the running service instance."""
 
     service: str = Field(description="Service slug.", examples=["flydocs"])
-    version: str = Field(description="Semantic version baked into the wheel.", examples=["0.1.0"])
+    version: str = Field(
+        description=(
+            "CalVer (``YY.MM.PP``) baked into the wheel at build time. "
+            "PEP 440 normalises ``26.05.01`` -> ``26.5.1`` so the value "
+            "you see here uses the stripped form."
+        ),
+        examples=["26.5.1"],
+    )
     model: str = Field(
         description="Primary multimodal model the orchestrator uses by default.",
         examples=["anthropic:claude-opus-4-7"],

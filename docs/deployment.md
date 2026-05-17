@@ -132,17 +132,17 @@ published by `.github/workflows/docker-publish.yaml`:
 
 ```bash
 docker pull ghcr.io/firefly-operationos/flydocs:latest      # arm64 + amd64 manifest
-docker pull ghcr.io/firefly-operationos/flydocs:v0.1.0       # SemVer pin
+docker pull ghcr.io/firefly-operationos/flydocs:v26.05.01    # CalVer pin (YY.MM.PP)
 docker pull --platform linux/arm64 ghcr.io/firefly-operationos/flydocs:latest
 ```
 
 Available tag schemas:
 
-| Source                | Tags written                                              |
-| --------------------- | --------------------------------------------------------- |
-| `push` to `main`      | `main`, `sha-<short>`, `latest`                           |
-| `push` of `vX.Y.Z` tag | `vX.Y.Z`, `vX.Y`, `vX`, `sha-<short>`, `latest` (on main head) |
-| `workflow_dispatch`   | `manual-<run_id>`                                          |
+| Source                  | Tags written                                                      |
+| ----------------------- | ----------------------------------------------------------------- |
+| `push` to `main`        | `main`, `sha-<short>`, `latest`                                   |
+| `push` of `vYY.MM.PP` tag | `vYY.MM.PP`, `vYY.MM`, `vYY`, `sha-<short>`, `latest` (on main head) |
+| `workflow_dispatch`     | `manual-<run_id>`                                                  |
 
 Every tag carries a multi-arch manifest covering **linux/amd64** and
 **linux/arm64**, plus SLSA build provenance and a CycloneDX SBOM
@@ -161,7 +161,7 @@ Or directly:
 docker buildx build \
     --build-context pyfly=../../fireflyframework/fireflyframework-pyfly \
     --build-context fireflyframework-agentic=../../fireflyframework/fireflyframework-agentic \
-    --tag flydocs:0.1.0 \
+    --tag flydocs:26.05.01 \
     .
 ```
 
@@ -182,7 +182,7 @@ Migrations are Alembic-based. Three ways to apply them:
 
 1. **From the host**: `task dev:migrate` (requires
    `FLYDOCS_DATABASE_URL` set in your shell).
-2. **From the image**: `docker run --rm ... flydocs:0.1.0 migrate`.
+2. **From the image**: `docker run --rm ... flydocs:26.05.01 migrate`.
 3. **At container start** (dev / staging): set `RUN_MIGRATIONS=true`
    on the `api` service; the entrypoint runs `alembic upgrade head`
    before serving.

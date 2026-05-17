@@ -40,7 +40,7 @@ Then in your project's `pom.xml`:
 <dependency>
   <groupId>com.firefly.flydocs</groupId>
   <artifactId>flydocs-sdk</artifactId>
-  <version>0.1.0</version>
+  <version>26.05.01</version>
 </dependency>
 ```
 
