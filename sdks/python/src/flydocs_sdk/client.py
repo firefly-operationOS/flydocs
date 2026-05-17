@@ -170,11 +170,7 @@ class FlydocsClient:
         wait_for_bboxes: bool = False,
         timeout: float = 60.0,
     ) -> JobResult:
-        return self._run(
-            self._inner.get_job_result(
-                job_id, wait_for_bboxes=wait_for_bboxes, timeout=timeout
-            )
-        )
+        return self._run(self._inner.get_job_result(job_id, wait_for_bboxes=wait_for_bboxes, timeout=timeout))
 
     def list_jobs(
         self,

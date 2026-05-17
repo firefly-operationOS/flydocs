@@ -127,9 +127,7 @@ class AsyncFlydocsClient:
     # Sync extraction
     # ------------------------------------------------------------------
 
-    async def validate(
-        self, request: ExtractionRequest | dict[str, Any]
-    ) -> dict[str, Any]:
+    async def validate(self, request: ExtractionRequest | dict[str, Any]) -> dict[str, Any]:
         """``POST /api/v1/extract:validate`` -- dry-run the semantic validator.
 
         Always returns a dict with ``ok`` / ``error_count`` /
@@ -234,9 +232,7 @@ class AsyncFlydocsClient:
             params["status"] = ",".join(status) if isinstance(status, list) else status
         if bbox_refine_status is not None:
             params["bbox_refine_status"] = (
-                ",".join(bbox_refine_status)
-                if isinstance(bbox_refine_status, list)
-                else bbox_refine_status
+                ",".join(bbox_refine_status) if isinstance(bbox_refine_status, list) else bbox_refine_status
             )
         if idempotency_key:
             params["idempotency_key"] = idempotency_key
