@@ -1500,7 +1500,7 @@ provides-extras = ["rest", "kafka", "rabbitmq", "redis", "queues", "postgres", "
 
 [[package]]
 name = "flydocs"
-version = "0.1.0"
+version = "26.5.1"
 source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },

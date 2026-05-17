@@ -7,7 +7,7 @@ Client libraries for [flydocs](https://github.com/firefly-operationOS/flydocs) �
 | **Python**      | [`sdks/python/`](./python/)   | `flydocs-sdk`                                                        | `.whl` + `.tar.gz` attached to each GitHub Release    |
 | **Java / Spring Boot** | [`sdks/java/`](./java/) | `com.firefly.flydocs:flydocs-sdk`                                    | GitHub Packages (Maven)                               |
 
-Both SDKs are versioned together with the service (`0.1.0` on this commit) and ship with the same surface:
+Both SDKs are versioned together with the service (`26.05.01` on this commit — CalVer YY.MM.PP) and ship with the same surface:
 
 - All eight REST endpoints (`/extract`, `/extract:validate`, `/jobs`, `/jobs/{id}`, `/jobs/{id}/result`, `/jobs/list`, `/version`, `/actuator/health/*`).
 - Async-first design with a synchronous facade for non-async callers.
@@ -22,7 +22,7 @@ Both SDKs are versioned together with the service (`0.1.0` on this commit) and s
 The wheel is published as a GitHub Release asset on every `vX.Y.Z` tag. Install directly from the release URL with [`uv`](https://docs.astral.sh/uv/):
 
 ```bash
-uv add https://github.com/firefly-operationOS/flydocs/releases/download/v0.1.0/flydocs_sdk-0.1.0-py3-none-any.whl
+uv add https://github.com/firefly-operationOS/flydocs/releases/download/v26.05.01/flydocs_sdk-26.5.1-py3-none-any.whl
 ```
 
 …or pin it in your `pyproject.toml`:
@@ -32,7 +32,7 @@ uv add https://github.com/firefly-operationOS/flydocs/releases/download/v0.1.0/f
 dependencies = ["flydocs-sdk"]
 
 [tool.uv.sources]
-flydocs-sdk = { url = "https://github.com/firefly-operationOS/flydocs/releases/download/v0.1.0/flydocs_sdk-0.1.0-py3-none-any.whl" }
+flydocs-sdk = { url = "https://github.com/firefly-operationOS/flydocs/releases/download/v26.05.01/flydocs_sdk-26.5.1-py3-none-any.whl" }
 ```
 
 ```python
@@ -77,7 +77,7 @@ Add the GitHub Packages registry to your `~/.m2/settings.xml`:
 <dependency>
   <groupId>com.firefly.flydocs</groupId>
   <artifactId>flydocs-sdk</artifactId>
-  <version>0.1.0</version>
+  <version>26.05.01</version>
 </dependency>
 ```
 
@@ -96,11 +96,13 @@ Full quickstart → [sdks/java/README.md](./java/README.md) · Detailed walkthro
 
 ## Release process
 
-Both SDKs publish from the same workflow: `.github/workflows/publish-sdks.yaml`. The trigger is a SemVer tag push on the main repo (`vX.Y.Z`). The job:
+Both SDKs use **CalVer `YY.MM.PP`** — e.g. `26.05.01` for the first patch in May 2026. The tag form is `v<version>`. Both SDKs publish from the same workflow: `.github/workflows/publish-sdks.yaml`. The trigger is a `v*.*.*` tag push on the main repo. The job:
 
-1. Reads the version from the tag and stamps it into `pom.xml` / `pyproject.toml` / `_version.py`.
+1. Reads the version from the tag (`v26.05.01` → `26.05.01`) and stamps it into `pom.xml` / `pyproject.toml` / `_version.py`.
 2. Builds the Java SDK (jar + sources + javadoc) and `mvn deploy`s to GitHub Packages.
 3. Builds the Python SDK with `uv build` (sdist + wheel) and attaches both to the GitHub Release. Consumers install the wheel directly from the release URL with `uv add` — no PyPI publish.
+
+> **PEP 440 note.** Python's PEP 440 normalises `26.05.01` to `26.5.1` for the wheel filename. The git tag and Java artifact keep the full zero-padded `26.05.01` form; the Python wheel ships as `flydocs_sdk-26.5.1-py3-none-any.whl`. The install snippets above use the actual on-disk URL.
 
 Every pull request runs the `SDK Python` and `SDK Java` jobs in `pr-gate.yaml` so SDK regressions block merges.
 

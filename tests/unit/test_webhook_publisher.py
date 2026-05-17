@@ -159,7 +159,7 @@ async def test_webhook_does_not_overwrite_content_type(receiver) -> None:
         extra_headers={"content-type": "text/plain", "User-Agent": "evil"},
     )
     assert capture.headers.get("Content-Type") == "application/json"
-    assert capture.headers.get("User-Agent") == "flydocs/0.1.0"
+    assert capture.headers.get("User-Agent") == "flydocs/26.5.1"
 
 
 @pytest.mark.asyncio

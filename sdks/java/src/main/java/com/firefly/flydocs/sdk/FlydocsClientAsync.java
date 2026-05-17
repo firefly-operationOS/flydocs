@@ -64,7 +64,7 @@ import reactor.netty.http.client.HttpClient;
  * }</pre>
  */
 public class FlydocsClientAsync {
-    private static final String USER_AGENT = "flydocs-sdk-java/0.1.0";
+    private static final String USER_AGENT = "flydocs-sdk-java/26.05.01";
     /** Default timeout when the caller does not override. */
     public static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(60);
 

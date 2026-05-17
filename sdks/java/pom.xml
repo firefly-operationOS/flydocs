@@ -18,7 +18,8 @@
 
     <groupId>com.firefly.flydocs</groupId>
     <artifactId>flydocs-sdk</artifactId>
-    <version>0.1.0</version>
+    <!-- CalVer: YY.MM.PP. Bumped per-release to match the service tag. -->
+    <version>26.05.01</version>
     <packaging>jar</packaging>
 
     <name>flydocs Java SDK</name>
