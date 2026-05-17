@@ -1,7 +1,7 @@
 [project]
 name = "flydocs"
 version = "0.1.0"
-description = "Firefly Desk -- Intelligent Document Processing service. Pure multimodal extraction with bounding boxes, sync + async (queue-backed) APIs, built on pyfly + fireflyframework-agentic."
+description = "Pure-multimodal Intelligent Document Processing service: structured fields + bounding boxes, validation, authenticity checks, LLM judge, and a business-rule engine. Sync + queue-backed async APIs over fireflyframework-pyfly and -agentic. Part of Firefly OperationOS, platform-agnostic by design."
 readme = "README.md"
 requires-python = ">=3.13"
 license = { text = "Apache-2.0" }

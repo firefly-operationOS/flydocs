@@ -2,14 +2,12 @@
 
 <img src="docs/assets/logo.png" alt="flydocs — document intelligence" width="320" />
 
-# flydocs
+### **Pure-multimodal Intelligent Document Processing**
 
-### **Intelligent Document Processing for Firefly Desk**
-
-Pure-multimodal field extraction with bounding boxes, structured
-validation, LLM cross-checking, and a business-rule engine — exposed
-as a production HTTP service with both synchronous and queue-backed
-asynchronous APIs.
+Field extraction with bounding boxes, structured validation, LLM
+cross-checking, and a business-rule engine — exposed as a production
+HTTP service with both synchronous and queue-backed asynchronous APIs,
+independent of any particular product or vertical.
 
 [![Python 3.13](https://img.shields.io/badge/python-3.13-blue.svg)](https://www.python.org)
 [![pyfly](https://img.shields.io/badge/runtime-fireflyframework--pyfly-orange)](https://github.com/fireflyframework/fireflyframework-pyfly)
@@ -467,8 +465,10 @@ Full task surface is in [Taskfile.yml](Taskfile.yml).
 
 <div align="center">
 
-**flydocs** is part of [Firefly OperationOS](../) — the back-office
-plane for Firefly Desk.
+**flydocs** is part of [Firefly OperationOS](https://github.com/firefly-operationOS) — the
+open back-office plane. flydocs itself is product- and vertical-agnostic:
+plug it into any platform that needs to turn documents into structured,
+verifiable data.
 
 Copyright © 2026 Firefly Software Solutions Inc
 

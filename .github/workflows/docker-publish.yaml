@@ -24,6 +24,14 @@ on:
   push:
     branches: [main]
     tags: ["v*.*.*"]
+    # Skip docs-only changes -- the image contents don't differ in any
+    # functional way when only Markdown / docs are touched. Tag pushes
+    # are always built (this filter only affects branch pushes).
+    paths-ignore:
+      - "**.md"
+      - "LICENSE"
+      - ".gitignore"
+      - "docs/**"
   workflow_dispatch:
     inputs:
       tag_suffix:
@@ -147,7 +155,7 @@ jobs:
             type=raw,value=${{ matrix.tag_prefix }}manual-${{ github.run_id }},enable=${{ github.event_name == 'workflow_dispatch' }}
           labels: |
             org.opencontainers.image.title=flydocs${{ matrix.with_docling == 'true' && ' (docling)' || '' }}
-            org.opencontainers.image.description=Firefly Desk -- Intelligent Document Processing service. Pure multimodal extraction with bbox.${{ matrix.with_docling == 'true' && ' Layout-aware OCR + Markdown text-anchor baked in.' || '' }}
+            org.opencontainers.image.description=flydocs -- pure-multimodal Intelligent Document Processing service. Structured fields + bounding boxes, validation, authenticity checks, LLM judge, and business rules.${{ matrix.with_docling == 'true' && ' Layout-aware OCR + Markdown text-anchor baked in.' || '' }} Part of Firefly OperationOS, platform-agnostic.
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.licenses=Apache-2.0
             org.opencontainers.image.vendor=Firefly Software Solutions Inc

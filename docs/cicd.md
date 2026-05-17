@@ -171,7 +171,7 @@ listing relies on:
 
 ```
 org.opencontainers.image.title       flydocs
-org.opencontainers.image.description Firefly Desk -- Intelligent Document Processing service…
+org.opencontainers.image.description flydocs -- pure-multimodal Intelligent Document Processing service…
 org.opencontainers.image.source      https://github.com/firefly-operationOS/flydocs
 org.opencontainers.image.licenses    Apache-2.0
 org.opencontainers.image.vendor      Firefly Software Solutions Inc
