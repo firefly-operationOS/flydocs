@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="docs/assets/logo.png" alt="Firefly OperationOS" width="260" />
+
 # flydocs
 
 ### **Intelligent Document Processing for Firefly Desk**
