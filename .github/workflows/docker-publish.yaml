@@ -157,7 +157,7 @@ jobs:
             org.opencontainers.image.title=flydocs${{ matrix.with_docling == 'true' && ' (docling)' || '' }}
             org.opencontainers.image.description=flydocs -- pure-multimodal Intelligent Document Processing service. Structured fields + bounding boxes, validation, authenticity checks, LLM judge, and business rules.${{ matrix.with_docling == 'true' && ' Layout-aware OCR + Markdown text-anchor baked in.' || '' }} Part of Firefly OperationOS, platform-agnostic.
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.licenses=Apache-2.0
+            org.opencontainers.image.licenses=Proprietary
             org.opencontainers.image.vendor=Firefly Software Solutions Inc
             io.flydocs.variant=${{ matrix.variant }}
 
