@@ -12,7 +12,7 @@ Official Python client for [flydocs](https://github.com/firefly-operationOS/flyd
 The wheel is attached to every `vX.Y.Z` GitHub Release of [firefly-operationOS/flydocs](https://github.com/firefly-operationOS/flydocs). There is no PyPI publish; install the wheel directly from the release URL with [`uv`](https://docs.astral.sh/uv/):
 
 ```bash
-uv add https://github.com/firefly-operationOS/flydocs/releases/download/v0.1.0/flydocs_sdk-0.1.0-py3-none-any.whl
+uv add https://github.com/firefly-operationOS/flydocs/releases/download/v26.05.01/flydocs_sdk-26.5.1-py3-none-any.whl
 ```
 
 Or pin it in your `pyproject.toml`:
@@ -22,7 +22,7 @@ Or pin it in your `pyproject.toml`:
 dependencies = ["flydocs-sdk"]
 
 [tool.uv.sources]
-flydocs-sdk = { url = "https://github.com/firefly-operationOS/flydocs/releases/download/v0.1.0/flydocs_sdk-0.1.0-py3-none-any.whl" }
+flydocs-sdk = { url = "https://github.com/firefly-operationOS/flydocs/releases/download/v26.05.01/flydocs_sdk-26.5.1-py3-none-any.whl" }
 ```
 
 The SDK depends only on `httpx` and `pydantic`.

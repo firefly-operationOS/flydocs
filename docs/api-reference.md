@@ -946,7 +946,7 @@ submitted with `options.stages.bbox_refine=true`; `null` otherwise.
 ```jsonc
 {
   "service":        "flydocs",
-  "version":        "0.1.0",                    // semantic version baked into the wheel
+  "version":        "26.5.1",                   // CalVer YY.MM.PP baked into the wheel (PEP 440 strips leading zeros, so 26.05.01 -> 26.5.1)
   "model":          "anthropic:claude-sonnet-4-6",
   "fallback_model": "openai:gpt-4o",            // "" disables the fallback
   "eda_adapter":    "postgres"                  // postgres | memory | redis | kafka
