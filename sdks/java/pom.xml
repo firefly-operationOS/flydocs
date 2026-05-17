@@ -1,0 +1,220 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  flydocs Java/Spring Boot SDK.
+
+  Packaging is ``jar`` (library), not a Spring Boot application — there
+  is no ``spring-boot-starter-parent`` parent and no ``spring-boot-maven-plugin``.
+  We pull Spring Boot's dependency BOM in for managed versions so callers can
+  drop the SDK into any Boot 3.5.x application and have Jackson, WebFlux,
+  and Reactor Netty resolve to the same versions they already use.
+
+  Java toolchain is 25 (LTS); the SDK compiles to bytecode level 25.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+                             https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.firefly.flydocs</groupId>
+    <artifactId>flydocs-sdk</artifactId>
+    <version>0.1.0</version>
+    <packaging>jar</packaging>
+
+    <name>flydocs Java SDK</name>
+    <description>
+        Official Java/Spring Boot SDK for flydocs — pure-multimodal Intelligent Document Processing.
+        Reactive WebClient-based async client plus a synchronous facade, RFC 7807 typed errors,
+        and an HMAC webhook verifier.
+    </description>
+    <url>https://github.com/firefly-operationOS/flydocs</url>
+
+    <licenses>
+        <license>
+            <name>Apache License, Version 2.0</name>
+            <url>https://www.apache.org/licenses/LICENSE-2.0.txt</url>
+        </license>
+    </licenses>
+
+    <developers>
+        <developer>
+            <name>Firefly Software Solutions Inc</name>
+            <organization>Firefly OperationOS</organization>
+            <organizationUrl>https://github.com/firefly-operationOS</organizationUrl>
+        </developer>
+    </developers>
+
+    <scm>
+        <url>https://github.com/firefly-operationOS/flydocs</url>
+        <connection>scm:git:https://github.com/firefly-operationOS/flydocs.git</connection>
+    </scm>
+
+    <properties>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <maven.compiler.release>25</maven.compiler.release>
+        <spring-boot.version>3.5.9</spring-boot.version>
+        <wiremock.version>3.10.0</wiremock.version>
+        <assertj.version>3.27.3</assertj.version>
+    </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <!-- Spring Boot BOM gives us managed versions for WebFlux,
+                 Reactor Netty, Jackson, JUnit 5, etc. -->
+            <dependency>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-dependencies</artifactId>
+                <version>${spring-boot.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <dependencies>
+        <!-- Reactive HTTP client (WebClient) + Jackson for JSON.
+             ``spring-webflux`` brings spring-beans/web/core transitively;
+             ``spring-context`` is needed at runtime by WebClient for
+             SmartLifecycle hooks, so we pin it explicitly. -->
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-webflux</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-context</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.projectreactor.netty</groupId>
+            <artifactId>reactor-netty-http</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.datatype</groupId>
+            <artifactId>jackson-datatype-jsr310</artifactId>
+        </dependency>
+        <!-- jspecify @Nullable / @NonNull annotations -->
+        <dependency>
+            <groupId>org.jspecify</groupId>
+            <artifactId>jspecify</artifactId>
+            <version>1.0.0</version>
+        </dependency>
+
+        <!-- Test deps. -->
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.assertj</groupId>
+            <artifactId>assertj-core</artifactId>
+            <version>${assertj.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.projectreactor</groupId>
+            <artifactId>reactor-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.wiremock</groupId>
+            <artifactId>wiremock-standalone</artifactId>
+            <version>${wiremock.version}</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <distributionManagement>
+        <!-- GitHub Packages registry. The deploy job in
+             ``.github/workflows/publish-sdks.yaml`` runs ``mvn deploy``
+             with the GITHUB_TOKEN scoped for ``packages:write`` so this
+             section becomes the only push target. -->
+        <repository>
+            <id>github</id>
+            <name>GitHub Packages</name>
+            <url>https://maven.pkg.github.com/firefly-operationOS/flydocs</url>
+        </repository>
+        <snapshotRepository>
+            <id>github</id>
+            <name>GitHub Packages (snapshots)</name>
+            <url>https://maven.pkg.github.com/firefly-operationOS/flydocs</url>
+        </snapshotRepository>
+    </distributionManagement>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <release>${maven.compiler.release}</release>
+                    <compilerArgs>
+                        <arg>-parameters</arg>
+                    </compilerArgs>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <!-- Java 25 removed the security manager entirely;
+                         no surefire-specific args needed. The plugin's
+                         defaults work as-is. -->
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <configuration>
+                    <archive>
+                        <manifestEntries>
+                            <Implementation-Title>flydocs-sdk</Implementation-Title>
+                            <Implementation-Version>${project.version}</Implementation-Version>
+                            <Built-By>Firefly Software Solutions Inc</Built-By>
+                        </manifestEntries>
+                    </archive>
+                </configuration>
+            </plugin>
+            <!-- Sources jar (required by Maven Central; also nice for
+                 IDE navigation when consuming from GitHub Packages). -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-source-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>attach-sources</id>
+                        <goals>
+                            <goal>jar-no-fork</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <!-- Javadoc jar. We tolerate missing-comment warnings so
+                 the build doesn't fail when developers ship a record
+                 without a full javadoc — the records are mostly
+                 self-documenting and have field-level javadoc only
+                 where the wire shape needs explanation. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-javadoc-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>attach-javadocs</id>
+                        <goals>
+                            <goal>jar</goal>
+                        </goals>
+                    </execution>
+                </executions>
+                <configuration>
+                    <doclint>none</doclint>
+                    <failOnError>false</failOnError>
+                    <quiet>true</quiet>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

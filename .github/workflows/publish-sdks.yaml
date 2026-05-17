@@ -1,0 +1,164 @@
+# Copyright 2026 Firefly Software Solutions Inc
+#
+# Publish the Java + Python SDKs.
+#
+#   * Triggers
+#       - push of a SemVer tag (``v*.*.*``) → publishes a release
+#       - workflow_dispatch                  → manual re-publish
+#
+#   * Java SDK → ``mvn deploy`` to GitHub Packages
+#       (https://maven.pkg.github.com/firefly-operationOS/flydocs)
+#
+#   * Python SDK → build sdist + wheel with ``uv build`` and attach
+#                  both to the GitHub Release. We do NOT publish to
+#                  PyPI — users install directly from the release URL
+#                  with uv:
+#
+#                      uv add https://github.com/firefly-operationOS/flydocs/releases/download/v0.1.0/flydocs_sdk-0.1.0-py3-none-any.whl
+#
+#                  (or pin in pyproject.toml under [tool.uv.sources]).
+#
+# Docs-only commits do not trigger this workflow (we run on tags only).
+
+name: Publish SDKs
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      java:
+        description: "Publish the Java SDK to GitHub Packages?"
+        required: false
+        default: "true"
+      python:
+        description: "Publish the Python SDK?"
+        required: false
+        default: "true"
+
+permissions:
+  contents: write   # attach assets to the GitHub Release
+  packages: write   # push to GitHub Packages
+
+concurrency:
+  group: publish-sdks-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # --------------------------------------------------------------------
+  # Java → GitHub Packages
+  # --------------------------------------------------------------------
+  publish-java-sdk:
+    if: ${{ github.event_name == 'push' || github.event.inputs.java != 'false' }}
+    name: Publish flydocs-sdk (Java) to GitHub Packages
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdks/java
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Java 25 (Temurin) + Maven settings.xml
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+          # Pre-populates ~/.m2/settings.xml with a ``github`` server
+          # entry that ``mvn deploy`` will pick up. The username is the
+          # actor (any GitHub identity with packages:write on the repo)
+          # and the password is the workflow's GITHUB_TOKEN.
+          server-id: github
+          server-username: GITHUB_ACTOR
+          server-password: GITHUB_TOKEN
+          cache: maven
+
+      - name: Override version from tag (if applicable)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          TAG="${GITHUB_REF#refs/tags/v}"
+          echo "Setting Maven version to ${TAG}"
+          mvn -B -q versions:set -DnewVersion="${TAG}" -DgenerateBackupPoms=false
+
+      - name: Build + deploy to GitHub Packages
+        env:
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: mvn -B -ntp deploy
+
+  # --------------------------------------------------------------------
+  # Python → GitHub Release assets (+ optional PyPI)
+  # --------------------------------------------------------------------
+  publish-python-sdk:
+    if: ${{ github.event_name == 'push' || github.event.inputs.python != 'false' }}
+    name: Publish flydocs-sdk (Python)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdks/python
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Override version from tag (if applicable)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          TAG="${GITHUB_REF#refs/tags/v}"
+          echo "Setting Python SDK version to ${TAG}"
+          python - <<PY
+          import re, pathlib
+          tag = "${TAG}"
+          for p in (pathlib.Path("pyproject.toml"), pathlib.Path("src/flydocs_sdk/_version.py")):
+              text = p.read_text()
+              text = re.sub(r'^(version\s*=\s*")[^"]+(")', rf'\g<1>{tag}\g<2>', text, count=1, flags=re.MULTILINE)
+              text = re.sub(r'^(__version__\s*=\s*")[^"]+(")', rf'\g<1>{tag}\g<2>', text, count=1, flags=re.MULTILINE)
+              p.write_text(text)
+          PY
+
+      - name: Build sdist + wheel with uv
+        run: |
+          uv build
+          ls -lh dist/
+
+      - name: Compute install URL for the release notes
+        if: startsWith(github.ref, 'refs/tags/v')
+        id: install_url
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"          # e.g. v0.1.0
+          VERSION="${TAG#v}"                       # e.g. 0.1.0   (wheel filename has no leading v)
+          echo "wheel_url=https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/flydocs_sdk-${VERSION}-py3-none-any.whl" >> "$GITHUB_OUTPUT"
+
+      - name: Attach build artifacts to the GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          # Users install directly from these URLs with ``uv add``;
+          # no PyPI publish step — by design.
+          files: sdks/python/dist/*
+          generate_release_notes: true
+          append_body: true
+          body: |
+
+            ### Python SDK
+
+            Install the wheel for this release with `uv`:
+
+            ```bash
+            uv add ${{ steps.install_url.outputs.wheel_url }}
+            ```
+
+            Or pin it in your `pyproject.toml`:
+
+            ```toml
+            [project]
+            dependencies = ["flydocs-sdk"]
+
+            [tool.uv.sources]
+            flydocs-sdk = { url = "${{ steps.install_url.outputs.wheel_url }}" }
+            ```
