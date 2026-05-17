@@ -21,6 +21,10 @@ independent of any particular product or vertical.
 
 ---
 
+> **In a hurry?** &nbsp;Jump to the [**5-minute Quickstart →**](QUICKSTART.md) &nbsp;·&nbsp; SDK paths: [Python](sdks/python/QUICKSTART.md) · [Java / Spring Boot](sdks/java/QUICKSTART.md) &nbsp;·&nbsp; Compose payloads: [**Payload reference →**](docs/payload-reference.md)
+
+---
+
 ## Why this service exists
 
 KYC reviews, contract intake, claims triage, invoice processing — every
@@ -84,6 +88,11 @@ is supported on both surfaces.
 ---
 
 ## Quickstart
+
+> **Want the 5-minute curl tour instead?** &nbsp;See [`QUICKSTART.md`](QUICKSTART.md)
+> — `task docker:up:test` + one curl call against a mock LLM, no API keys.
+> The section below is the **full** walk-through (real provider keys,
+> Postgres, worker, multi-file async job + transformation).
 
 A complete walk-through from a fresh clone to your first **sync**
 extraction and your first **async, multi-file** job with a
@@ -428,6 +437,8 @@ Cycles are rejected before any LLM call is issued. See
 
 | Document                                       | Read it when…                                                            |
 | ---------------------------------------------- | ------------------------------------------------------------------------ |
+| [QUICKSTART.md](QUICKSTART.md)                 | You want your first extraction in five minutes (HTTP / curl).            |
+| [docs/payload-reference.md](docs/payload-reference.md) | You're composing the request payload — every field, option, variant, and worked example. |
 | [docs/overview.md](docs/overview.md)           | You're new and want a guided tour of the system.                         |
 | [docs/architecture.md](docs/architecture.md)   | You need to know how `fireflyframework-pyfly` + `fireflyframework-agentic` plug together. |
 | [docs/pipeline.md](docs/pipeline.md)           | You're touching the orchestrator or adding a new stage.                  |
