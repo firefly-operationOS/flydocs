@@ -18,6 +18,8 @@ package com.firefly.flydocs.sdk.model;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.jspecify.annotations.Nullable;
@@ -25,36 +27,61 @@ import org.jspecify.annotations.Nullable;
 /**
  * Request body for {@code POST /api/v1/jobs}.
  *
- * <p>Superset of {@link ExtractionRequest} — adds an optional
- * {@code callback_url} the service will POST the terminal-status webhook
- * to, plus a free-form {@code metadata} bag echoed back on the webhook
- * payload.</p>
+ * <p>Superset of {@link ExtractionRequest} — adds the optional
+ * {@code callback_url} (for webhook delivery on terminal status) and
+ * a free-form {@code metadata} bag echoed back on the webhook payload.</p>
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record SubmitJobRequest(
         String intention,
         List<DocumentInput> documents,
-        List<Map<String, Object>> docs,
-        List<Map<String, Object>> rules,
-        Map<String, Object> options,
+        List<DocSpec> docs,
+        List<RuleSpec> rules,
+        ExtractionOptions options,
         @JsonProperty("callback_url") @Nullable String callbackUrl,
         Map<String, Object> metadata) {
 
-    /** Compact constructor — defaults the lists / maps the same way as {@link ExtractionRequest}. */
-    public SubmitJobRequest(
-            @Nullable String intention,
-            List<DocumentInput> documents,
-            List<Map<String, Object>> docs,
-            @Nullable List<Map<String, Object>> rules,
-            @Nullable Map<String, Object> options,
-            @Nullable String callbackUrl,
-            @Nullable Map<String, Object> metadata) {
-        this.intention = intention == null ? "Extract structured data from the document." : intention;
-        this.documents = List.copyOf(documents);
-        this.docs = List.copyOf(docs);
-        this.rules = rules == null ? List.of() : List.copyOf(rules);
-        this.options = options == null ? Map.of() : Map.copyOf(options);
-        this.callbackUrl = callbackUrl;
-        this.metadata = metadata == null ? Map.of() : Map.copyOf(metadata);
+    public SubmitJobRequest {
+        if (intention == null) intention = "Extract structured data from the document.";
+        documents = List.copyOf(documents);
+        docs = List.copyOf(docs);
+        rules = rules == null ? List.of() : List.copyOf(rules);
+        if (options == null) options = ExtractionOptions.defaults();
+        metadata = metadata == null ? Map.of() : Map.copyOf(metadata);
+    }
+
+    public static Builder builder() {
+        return new Builder();
+    }
+
+    /** Fluent builder. */
+    public static final class Builder {
+        private @Nullable String intention;
+        private final List<DocumentInput> documents = new ArrayList<>();
+        private final List<DocSpec> docs = new ArrayList<>();
+        private final List<RuleSpec> rules = new ArrayList<>();
+        private ExtractionOptions options = ExtractionOptions.defaults();
+        private @Nullable String callbackUrl;
+        private final Map<String, Object> metadata = new HashMap<>();
+
+        public Builder intention(String s) { this.intention = s; return this; }
+        public Builder addDocument(DocumentInput d) { this.documents.add(d); return this; }
+        public Builder addDocSpec(DocSpec d) { this.docs.add(d); return this; }
+        public Builder addRule(RuleSpec r) { this.rules.add(r); return this; }
+        public Builder options(ExtractionOptions o) { this.options = o; return this; }
+        public Builder callbackUrl(String url) { this.callbackUrl = url; return this; }
+        public Builder metadata(String key, Object value) { this.metadata.put(key, value); return this; }
+        public Builder metadata(Map<String, Object> m) { this.metadata.putAll(m); return this; }
+
+        public SubmitJobRequest build() {
+            return new SubmitJobRequest(
+                    intention,
+                    List.copyOf(documents),
+                    List.copyOf(docs),
+                    List.copyOf(rules),
+                    options,
+                    callbackUrl,
+                    Map.copyOf(metadata));
+        }
     }
 }

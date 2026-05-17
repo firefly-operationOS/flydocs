@@ -47,7 +47,7 @@ with FlydocsClient("http://localhost:8400") as flydocs:
     )
 ```
 
-Full quickstart → [sdks/python/README.md](./python/README.md).
+Full quickstart → [sdks/python/README.md](./python/README.md) · Detailed walkthrough → [sdks/python/TUTORIAL.md](./python/TUTORIAL.md).
 
 ### Java / Spring Boot
 
@@ -92,7 +92,7 @@ ExtractionResult result = flydocs.extract(
                 List.of(Map.of("docType", Map.of("documentType", "invoice")))));
 ```
 
-Full quickstart → [sdks/java/README.md](./java/README.md).
+Full quickstart → [sdks/java/README.md](./java/README.md) · Detailed walkthrough → [sdks/java/TUTORIAL.md](./java/TUTORIAL.md).
 
 ## Release process
 

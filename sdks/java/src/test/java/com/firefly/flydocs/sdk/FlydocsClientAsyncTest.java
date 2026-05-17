@@ -31,9 +31,12 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.firefly.flydocs.sdk.error.FlydocsHttpException;
+import com.firefly.flydocs.sdk.model.DocSpec;
 import com.firefly.flydocs.sdk.model.DocumentInput;
 import com.firefly.flydocs.sdk.model.ExtractionRequest;
 import com.firefly.flydocs.sdk.model.ExtractionResult;
+import com.firefly.flydocs.sdk.model.FieldSpec;
+import com.firefly.flydocs.sdk.model.FieldType;
 import com.firefly.flydocs.sdk.model.JobListResponse;
 import com.firefly.flydocs.sdk.model.JobResult;
 import com.firefly.flydocs.sdk.model.JobStatus;
@@ -62,6 +65,14 @@ class FlydocsClientAsyncTest {
 
     private WireMockServer wm;
     private FlydocsClientAsync client;
+
+    /** Minimal DocSpec list reused by tests that don't care about the schema's shape. */
+    private static List<DocSpec> invoiceSpec() {
+        return List.of(
+                DocSpec.builder("invoice")
+                        .addFieldGroup("totals", FieldSpec.required("total", FieldType.NUMBER))
+                        .build());
+    }
 
     @BeforeEach
     void setUp() {
@@ -134,7 +145,7 @@ class FlydocsClientAsyncTest {
 
         ExtractionRequest req = ExtractionRequest.of(
                 List.of(DocumentInput.ofBytes("hello".getBytes(), "x.pdf", null, null)),
-                List.of(Map.of("docType", Map.of("documentType", "invoice"))));
+                invoiceSpec());
 
         StepVerifier.create(client.extract(req, "abc-123", "corr-1"))
                 .assertNext(r -> {
@@ -161,7 +172,7 @@ class FlydocsClientAsyncTest {
                                 """)));
         ExtractionRequest req = ExtractionRequest.of(
                 List.of(DocumentInput.ofBytes(new byte[]{0}, "x.pdf")),
-                List.of(Map.of("docType", Map.of("documentType", "invoice"))));
+                invoiceSpec());
 
         assertThatThrownBy(() -> client.extract(req).block())
                 .isInstanceOf(FlydocsHttpException.class)
@@ -189,7 +200,7 @@ class FlydocsClientAsyncTest {
                                 """)));
         ExtractionRequest req = ExtractionRequest.of(
                 List.of(DocumentInput.ofBytes(new byte[]{0}, "x.pdf")),
-                List.of(Map.of("docType", Map.of("documentType", "invoice"))));
+                invoiceSpec());
 
         assertThatThrownBy(() -> client.extract(req).block())
                 .isInstanceOf(FlydocsHttpException.class)
@@ -215,7 +226,7 @@ class FlydocsClientAsyncTest {
         SubmitJobRequest req = new SubmitJobRequest(
                 null,
                 List.of(DocumentInput.ofBytes(new byte[]{0}, "x.pdf")),
-                List.of(Map.of("docType", Map.of("documentType", "invoice"))),
+                invoiceSpec(),
                 null,
                 null,
                 "https://example.com/webhook",
@@ -361,7 +372,7 @@ class FlydocsClientAsyncTest {
         SubmitJobRequest req = new SubmitJobRequest(
                 null,
                 List.of(DocumentInput.ofBytes(new byte[]{0}, "x.pdf", "application/pdf", null)),
-                List.of(Map.of("docType", Map.of("documentType", "invoice"))),
+                invoiceSpec(),
                 null,
                 null,
                 "https://example.com/webhook",

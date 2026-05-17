@@ -193,6 +193,31 @@ public class FlydocsClientAsync {
                 JobStatusResponse.class);
     }
 
+    /**
+     * Poll {@code GET /api/v1/jobs/{id}} until the job reaches a terminal
+     * status (SUCCEEDED, PARTIAL_SUCCEEDED, FAILED, CANCELLED), then
+     * emit the final {@link JobStatusResponse}.
+     *
+     * <p>Errors with {@link java.util.concurrent.TimeoutException} when
+     * the deadline elapses before the job finishes. Inspect
+     * {@link JobStatusResponse#status()} on success to decide what to
+     * do next — the helper does not treat FAILED/CANCELLED as errors,
+     * they're the caller's branching decision.</p>
+     */
+    public Mono<JobStatusResponse> waitForCompletion(
+            String jobId, Duration pollInterval, Duration timeout) {
+        return getJob(jobId)
+                .flatMap(s -> s.isTerminal()
+                        ? Mono.just(s)
+                        : Mono.delay(pollInterval).then(waitForCompletion(jobId, pollInterval, timeout)))
+                .timeout(timeout);
+    }
+
+    /** Same as {@link #waitForCompletion(String, Duration, Duration)} with default poll (2s) and timeout (10m). */
+    public Mono<JobStatusResponse> waitForCompletion(String jobId) {
+        return waitForCompletion(jobId, Duration.ofSeconds(2), Duration.ofMinutes(10));
+    }
+
     /** {@code DELETE /api/v1/jobs/{id}} */
     public Mono<JobStatusResponse> cancelJob(String jobId) {
         return requestJson(

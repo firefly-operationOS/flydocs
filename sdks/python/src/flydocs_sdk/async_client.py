@@ -43,6 +43,11 @@ from flydocs_sdk.models import (
 
 DEFAULT_TIMEOUT_S = 60.0
 
+#: Statuses that mean the worker is done -- success or failure -- and
+#: the SDK's :meth:`AsyncFlydocsClient.wait_for_completion` polling
+#: loop can stop.
+TERMINAL_JOB_STATUSES = frozenset({"SUCCEEDED", "PARTIAL_SUCCEEDED", "FAILED", "CANCELLED"})
+
 
 class AsyncFlydocsClient:
     """Async client for the flydocs HTTP API.
@@ -242,6 +247,44 @@ class AsyncFlydocsClient:
             params["created_before"] = _to_iso(created_before)
         data = await self._request_json("GET", "/api/v1/jobs", params=params)
         return JobListResponse.model_validate(data)
+
+    async def wait_for_completion(
+        self,
+        job_id: str,
+        *,
+        poll_interval: float = 2.0,
+        timeout: float = 600.0,
+    ) -> JobStatusResponse:
+        """Poll a job until it reaches a terminal status, then return.
+
+        Waits at most ``timeout`` seconds, polling every
+        ``poll_interval`` seconds. Returns the final
+        :class:`JobStatusResponse` whether the job succeeded or failed
+        -- inspect ``.status`` to decide what to do next. Raises
+        :class:`TimeoutError` if the deadline elapses before the
+        worker finishes.
+
+            async with AsyncFlydocsClient("http://localhost:8400") as flydocs:
+                submit = await flydocs.submit_job(req)
+                final = await flydocs.wait_for_completion(submit.job_id)
+                if final.status == JobStatus.SUCCEEDED:
+                    result = await flydocs.get_job_result(submit.job_id)
+        """
+        import asyncio
+
+        loop = asyncio.get_event_loop()
+        deadline = loop.time() + max(0.0, float(timeout))
+        while True:
+            status = await self.get_job(job_id)
+            if str(status.status) in TERMINAL_JOB_STATUSES:
+                return status
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                raise TimeoutError(
+                    f"job {job_id!r} did not reach a terminal status within "
+                    f"{timeout}s (last status: {status.status!s})"
+                )
+            await asyncio.sleep(min(poll_interval, max(remaining, 0.01)))
 
     async def cancel_job(self, job_id: str) -> JobStatusResponse:
         """``DELETE /api/v1/jobs/{job_id}`` -- cancel a queued job.

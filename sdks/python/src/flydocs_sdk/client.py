@@ -198,6 +198,22 @@ class FlydocsClient:
     def cancel_job(self, job_id: str) -> JobStatusResponse:
         return self._run(self._inner.cancel_job(job_id))
 
+    def wait_for_completion(
+        self,
+        job_id: str,
+        *,
+        poll_interval: float = 2.0,
+        timeout: float = 600.0,
+    ) -> JobStatusResponse:
+        """Synchronous wrapper around :meth:`AsyncFlydocsClient.wait_for_completion`."""
+        return self._run(
+            self._inner.wait_for_completion(
+                job_id,
+                poll_interval=poll_interval,
+                timeout=timeout,
+            )
+        )
+
     # ------------------------------------------------------------------
     # Internal: drive coroutines on the dedicated loop
     # ------------------------------------------------------------------

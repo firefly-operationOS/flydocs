@@ -24,7 +24,6 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -70,13 +69,12 @@ class ModelMappingTest {
 
     @Test
     void extractionRequest_serialises_with_snake_case() throws Exception {
-        ExtractionRequest req = new ExtractionRequest(
-                UUID.fromString("00000000-0000-0000-0000-000000000001"),
-                "Extract structured data from the document.",
-                List.of(DocumentInput.ofBytes(new byte[]{1, 2}, "x.pdf")),
-                List.of(Map.of("docType", Map.of("documentType", "invoice"))),
-                List.of(),
-                Map.of());
+        ExtractionRequest req = ExtractionRequest.builder()
+                .requestId(UUID.fromString("00000000-0000-0000-0000-000000000001"))
+                .addDocument(DocumentInput.ofBytes(new byte[]{1, 2}, "x.pdf"))
+                .addDocSpec(DocSpec.builder("invoice").addFieldGroup(
+                        "totals", FieldSpec.required("total", FieldType.NUMBER)).build())
+                .build();
         String json = mapper.writeValueAsString(req);
         assertThat(json).contains("\"request_id\":\"00000000-0000-0000-0000-000000000001\"");
         assertThat(json).contains("\"documents\"");
@@ -85,14 +83,13 @@ class ModelMappingTest {
 
     @Test
     void submitJobRequest_serialises_callback_url_as_snake_case() throws Exception {
-        SubmitJobRequest req = new SubmitJobRequest(
-                null,
-                List.of(DocumentInput.ofBytes(new byte[]{0}, "x.pdf")),
-                List.of(Map.of("docType", Map.of("documentType", "invoice"))),
-                null,
-                null,
-                "https://example.com/webhook",
-                Map.of("caller", "test"));
+        SubmitJobRequest req = SubmitJobRequest.builder()
+                .addDocument(DocumentInput.ofBytes(new byte[]{0}, "x.pdf"))
+                .addDocSpec(DocSpec.builder("invoice").addFieldGroup(
+                        "totals", FieldSpec.required("total", FieldType.NUMBER)).build())
+                .callbackUrl("https://example.com/webhook")
+                .metadata("caller", "test")
+                .build();
         String json = mapper.writeValueAsString(req);
         assertThat(json).contains("\"callback_url\":\"https://example.com/webhook\"");
         assertThat(json).contains("\"intention\":\"Extract structured data from the document.\"");

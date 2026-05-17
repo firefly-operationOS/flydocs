@@ -46,6 +46,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from flydocs_sdk.request import DocSpec, ExtractionOptions, RuleSpec
+
 # ---------------------------------------------------------------------------
 # Permissive base
 # ---------------------------------------------------------------------------
@@ -156,17 +158,20 @@ class DocumentInput(_WireBase):
 
 
 class ExtractionRequest(_WireBase):
-    """Request body for ``POST /api/v1/extract`` and ``POST /api/v1/jobs``."""
+    """Request body for ``POST /api/v1/extract`` and ``POST /api/v1/jobs``.
+
+    ``docs`` / ``rules`` / ``options`` accept either the typed models
+    from :mod:`flydocs_sdk.request` or plain dicts -- typed instances
+    give autocomplete + validation, dicts give forward-compatibility
+    against new service-side fields the SDK has not surfaced yet.
+    """
 
     request_id: uuid.UUID = Field(default_factory=uuid.uuid4)
     intention: str = "Extract structured data from the document."
     documents: list[DocumentInput] = Field(..., min_length=1)
-    # Deeply-nested schema shapes are kept as opaque dicts on the SDK
-    # side; callers build them directly. See docs/api-reference.md for
-    # the per-field structure.
-    docs: list[dict[str, Any]] = Field(..., min_length=1)
-    rules: list[dict[str, Any]] = Field(default_factory=list)
-    options: dict[str, Any] = Field(default_factory=dict)
+    docs: list[DocSpec | dict[str, Any]] = Field(..., min_length=1)
+    rules: list[RuleSpec | dict[str, Any]] = Field(default_factory=list)
+    options: ExtractionOptions | dict[str, Any] = Field(default_factory=ExtractionOptions)
 
 
 class ExtractionResult(_WireBase):
@@ -208,9 +213,9 @@ class SubmitJobRequest(_WireBase):
 
     intention: str = "Extract structured data from the document."
     documents: list[DocumentInput] = Field(..., min_length=1)
-    docs: list[dict[str, Any]] = Field(..., min_length=1)
-    rules: list[dict[str, Any]] = Field(default_factory=list)
-    options: dict[str, Any] = Field(default_factory=dict)
+    docs: list[DocSpec | dict[str, Any]] = Field(..., min_length=1)
+    rules: list[RuleSpec | dict[str, Any]] = Field(default_factory=list)
+    options: ExtractionOptions | dict[str, Any] = Field(default_factory=ExtractionOptions)
     callback_url: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 

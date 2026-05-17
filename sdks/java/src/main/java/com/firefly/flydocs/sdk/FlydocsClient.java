@@ -102,6 +102,16 @@ public class FlydocsClient {
         return async.cancelJob(jobId).block();
     }
 
+    /** Blocking wrapper around {@link FlydocsClientAsync#waitForCompletion(String, Duration, Duration)}. */
+    public JobStatusResponse waitForCompletion(String jobId, Duration pollInterval, Duration timeout) {
+        return async.waitForCompletion(jobId, pollInterval, timeout).block();
+    }
+
+    /** Blocking wrapper with default poll interval (2s) and timeout (10m). */
+    public JobStatusResponse waitForCompletion(String jobId) {
+        return async.waitForCompletion(jobId).block();
+    }
+
     public JobResult getJobResult(String jobId) {
         return async.getJobResult(jobId).block();
     }

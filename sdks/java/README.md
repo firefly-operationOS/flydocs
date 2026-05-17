@@ -44,38 +44,43 @@ Then in your project's `pom.xml`:
 </dependency>
 ```
 
-## Quickstart — blocking
+## Quickstart — blocking (typed builders)
 
 ```java
 import com.firefly.flydocs.sdk.FlydocsClient;
 import com.firefly.flydocs.sdk.model.*;
 import java.nio.file.Path;
-import java.util.List;
-import java.util.Map;
 
 FlydocsClient flydocs = FlydocsClient.builder()
         .baseUrl("http://localhost:8400")
         .build();
 
-ExtractionResult result = flydocs.extract(
-        ExtractionRequest.of(
-                List.of(DocumentInput.ofPath(Path.of("invoice.pdf"))),
-                List.of(Map.of(
-                        "docType", Map.of("documentType", "invoice"),
-                        "groups",  List.of(Map.of(
-                                "fieldGroupName", "totals",
-                                "fieldGroupFields", List.of(
-                                        Map.of("name", "total_amount", "type", "number"),
-                                        Map.of("name", "currency",      "type", "string"))))))));
+DocSpec invoice = DocSpec.builder("invoice")
+        .addFieldGroup("totals",
+                FieldSpec.required("total_amount", FieldType.NUMBER),
+                FieldSpec.required("currency",      FieldType.STRING))
+        .build();
 
-System.out.printf("model=%s, latency=%dms%n", result.model(), result.latencyMs());
+ExtractionRequest req = ExtractionRequest.builder()
+        .addDocument(DocumentInput.ofPath(Path.of("invoice.pdf")))
+        .addDocSpec(invoice)
+        .options(ExtractionOptions.builder()
+                .stages(StageToggles.builder().judge(true).bboxRefine(true).build())
+                .build())
+        .build();
+
+ExtractionResult result = flydocs.extract(req);
+System.out.printf("model=%s   latency=%dms%n", result.model(), result.latencyMs());
 ```
 
-## Quickstart — reactive
+> **See [TUTORIAL.md](./TUTORIAL.md) for the full walkthrough** — schemas, rules, async jobs, webhooks, errors, reactive usage.
+
+## Quickstart — reactive (with `waitForCompletion`)
 
 ```java
 import com.firefly.flydocs.sdk.FlydocsClientAsync;
 import com.firefly.flydocs.sdk.model.*;
+import java.time.Duration;
 
 FlydocsClientAsync flydocs = FlydocsClientAsync.builder()
         .baseUrl("http://localhost:8400")
@@ -83,14 +88,14 @@ FlydocsClientAsync flydocs = FlydocsClientAsync.builder()
 
 flydocs.submitJob(submitRequest, "my-app:invoice:42", null)
         .doOnNext(r -> log.info("queued {}", r.jobId()))
-        .flatMap(r -> Mono.defer(() -> flydocs.getJob(r.jobId()))
-                .repeatWhen(f -> f.delayElements(Duration.ofSeconds(2)))
-                .filter(JobStatusResponse::isTerminal)
-                .next())
-        .flatMap(status -> status.status() == JobStatus.SUCCEEDED
-                ? flydocs.getJobResult(status.jobId())
-                : Mono.error(new IllegalStateException("job failed: " + status.errorCode())))
-        .subscribe(jobResult -> log.info("got {} documents", jobResult.result().documents().size()));
+        .flatMap(submit -> flydocs.waitForCompletion(
+                submit.jobId(),
+                Duration.ofSeconds(2),
+                Duration.ofMinutes(10)))
+        .filter(s -> s.status() == JobStatus.SUCCEEDED)
+        .flatMap(s -> flydocs.getJobResult(s.jobId()))
+        .subscribe(jobResult ->
+                log.info("got {} documents", jobResult.result().documents().size()));
 ```
 
 ## Webhook verification
@@ -127,8 +132,21 @@ public ResponseEntity<Void> onWebhook(
 | `cancelJob(id)`                       | `DELETE /api/v1/jobs/{id}`                | `JobStatusResponse`    |
 | `getJobResult(id, waitForBboxes, t)`  | `GET  /api/v1/jobs/{id}/result`           | `JobResult`            |
 | `listJobs(filter)`                    | `GET  /api/v1/jobs`                       | `JobListResponse`      |
+| `waitForCompletion(id, poll, t)`      | polls `GET /api/v1/jobs/{id}`             | terminal `JobStatusResponse` |
 | `version()`                           | `GET  /api/v1/version`                    | `VersionInfo`          |
 | `health(probe)`                       | `GET  /actuator/health/{probe}`           | `Map<String, Object>`  |
+
+## Typed request types
+
+| Type                       | Purpose                                                                       |
+|----------------------------|-------------------------------------------------------------------------------|
+| `StageToggles`             | Opt-in switches for every optional pipeline stage. Has a fluent `builder()`. |
+| `ExtractionOptions`        | Per-request knobs. Has a fluent `builder()`.                                  |
+| `DocSpec`                  | One expected document type. Has a fluent `builder()`.                         |
+| `FieldGroup`, `FieldSpec`, `FieldItem` | Field schema. `FieldSpec` has a fluent `builder()`.               |
+| `StandardValidatorSpec`    | Built-in field validator (IBAN, BIC, VAT_ID, …).                              |
+| `RuleSpec` + `RuleParent` (sealed: `FieldParent`/`ValidatorParent`/`RuleRef`) | Business-rule DAG. |
+| `ExtractionRequest.builder()` / `SubmitJobRequest.builder()`             | Top-level request fluent builders. |
 
 ## Errors
 

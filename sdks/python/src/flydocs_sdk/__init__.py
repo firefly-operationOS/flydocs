@@ -60,6 +60,26 @@ from flydocs_sdk.models import (
     SubmitJobResponse,
     VersionInfo,
 )
+from flydocs_sdk.request import (
+    DocSpec,
+    DocType,
+    ExtractionOptions,
+    FieldGroup,
+    FieldItem,
+    FieldSpec,
+    FieldType,
+    RuleFieldParent,
+    RuleOutputSpec,
+    RuleRuleParent,
+    RuleSpec,
+    RuleValidatorParent,
+    StageToggles,
+    StandardFormat,
+    StandardValidatorSpec,
+    StandardValidatorType,
+    ValidatorsSpec,
+    VisualValidatorSpec,
+)
 from flydocs_sdk.webhooks import WebhookVerificationError, WebhookVerifier
 
 __all__ = [
@@ -73,7 +93,7 @@ __all__ = [
     "FlydocsError",
     "FlydocsHTTPError",
     "FlydocsTimeoutError",
-    # Models
+    # Wire response / shared models
     "DocumentInput",
     "ExtractionRequest",
     "ExtractionResult",
@@ -85,6 +105,25 @@ __all__ = [
     "SubmitJobRequest",
     "SubmitJobResponse",
     "VersionInfo",
+    # Typed request schema
+    "DocSpec",
+    "DocType",
+    "ExtractionOptions",
+    "FieldGroup",
+    "FieldItem",
+    "FieldSpec",
+    "FieldType",
+    "RuleFieldParent",
+    "RuleOutputSpec",
+    "RuleRuleParent",
+    "RuleSpec",
+    "RuleValidatorParent",
+    "StageToggles",
+    "StandardFormat",
+    "StandardValidatorSpec",
+    "StandardValidatorType",
+    "ValidatorsSpec",
+    "VisualValidatorSpec",
     # Webhooks
     "WebhookVerificationError",
     "WebhookVerifier",
