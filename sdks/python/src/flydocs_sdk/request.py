@@ -82,31 +82,57 @@ class StandardFormat(StrEnum):
 class StandardValidatorType(StrEnum):
     """Built-in field validators the service ships with.
 
-    The list mirrors
-    ``flydocs.interfaces.enums.standard_validator.StandardValidatorType``.
-    New validators added on the service side still parse because we
-    use a :class:`StrEnum` (unknown future values arrive as the raw
-    string when caught upstream).
+    Mirrors ``flydocs.interfaces.enums.standard_validator.StandardValidatorType``
+    member-for-member. New validators added on the service side will
+    show up as unknown :class:`StrEnum` values; pass them as raw strings
+    to :class:`StandardValidatorSpec.type` until the SDK ships a release
+    that exposes them as enum members.
     """
 
+    # --- network / web ---------------------------------------------------
     EMAIL = "email"
     URI = "uri"
+    URL = "url"
     IPV4 = "ipv4"
     IPV6 = "ipv6"
     DOMAIN = "domain"
     SLUG = "slug"
-    URL = "url"
+
+    # --- temporal --------------------------------------------------------
+    DATE = "date"
+    DATETIME = "datetime"
+    TIME = "time"
+    ISO_8601 = "iso_8601"
+
+    # --- identifiers -----------------------------------------------------
+    UUID = "uuid"
+    JSON = "json"
+    HEX_COLOR = "hex_color"
+
+    # --- finance ---------------------------------------------------------
     IBAN = "iban"
     BIC = "bic"
     CREDIT_CARD = "credit_card"
+    CURRENCY_CODE = "currency_code"
+    AMOUNT = "amount"
+
+    # --- telephony -------------------------------------------------------
     PHONE_E164 = "phone_e164"
-    VAT_ID = "vat_id"
+
+    # --- geographic ------------------------------------------------------
+    COUNTRY_CODE = "country_code"
+    LANGUAGE_CODE = "language_code"
+    POSTAL_CODE = "postal_code"
+    LATITUDE = "latitude"
+    LONGITUDE = "longitude"
+
+    # --- national identifiers -------------------------------------------
     NIF = "nif"
     NIE = "nie"
-    DNI = "dni"
-    UUID = "uuid"
-    DATE = "date"
-    DATE_TIME = "date-time"
+    CIF = "cif"
+    VAT_ID = "vat_id"
+    SSN = "ssn"
+    PASSPORT_NUMBER = "passport_number"
 
 
 # ---------------------------------------------------------------------------
@@ -343,6 +369,93 @@ class RuleSpec(_RequestBase):
 
 
 # ---------------------------------------------------------------------------
+# Transformations
+# ---------------------------------------------------------------------------
+
+
+class TransformationScope(StrEnum):
+    """Whether a transformation applies per-document or across the whole request.
+
+    Mirrors ``flydocs.interfaces.dtos.transformation.TransformationScope``.
+    """
+
+    TASK = "task"
+    """One pass per ``(segment, DocSpec)`` task. Use for single-document
+    transformations (format normalisation, single-doc dedup)."""
+
+    REQUEST = "request"
+    """Groups with the matching ``target_group`` are concatenated across
+    every task, the transformation runs once over the consolidated
+    rows, and the result is emitted under
+    ``ExtractionResult.request_transformations``."""
+
+
+def entity_resolution(
+    *,
+    target_group: str,
+    match_by: list[str],
+    min_shared_tokens: int = 2,
+    output_group: str | None = None,
+    scope: TransformationScope = TransformationScope.TASK,
+    id: str | None = None,
+) -> dict[str, Any]:
+    """Build an ``entity_resolution`` transformation payload.
+
+    The matcher dedupes rows of an array field group by (1) exact-match
+    on a normalised key (typically a DNI / VAT id) and (2) token-subset
+    matching on names. See
+    ``flydocs.interfaces.dtos.transformation.EntityResolutionTransformation``
+    for the full algorithm.
+
+    Returns a plain :class:`dict` ready for
+    :attr:`ExtractionOptions.transformations`.
+    """
+    payload: dict[str, Any] = {
+        "type": "entity_resolution",
+        "target_group": target_group,
+        "match_by": list(match_by),
+        "min_shared_tokens": int(min_shared_tokens),
+        "scope": scope.value,
+    }
+    if output_group is not None:
+        payload["output_group"] = output_group
+    if id is not None:
+        payload["id"] = id
+    return payload
+
+
+def llm_transformation(
+    *,
+    target_group: str,
+    intention: str,
+    prompt_id: str | None = None,
+    output_group: str | None = None,
+    scope: TransformationScope = TransformationScope.TASK,
+    id: str | None = None,
+) -> dict[str, Any]:
+    """Build a free-form ``llm`` transformation payload.
+
+    ``intention`` is a one-sentence goal in any language describing what
+    the LLM should do to the target group's rows.
+    """
+    if len(intention) < 10:
+        raise ValueError("intention must be at least 10 characters")
+    payload: dict[str, Any] = {
+        "type": "llm",
+        "target_group": target_group,
+        "intention": intention,
+        "scope": scope.value,
+    }
+    if prompt_id is not None:
+        payload["prompt_id"] = prompt_id
+    if output_group is not None:
+        payload["output_group"] = output_group
+    if id is not None:
+        payload["id"] = id
+    return payload
+
+
+# ---------------------------------------------------------------------------
 # Re-exports for callers that want one import line
 # ---------------------------------------------------------------------------
 
@@ -365,6 +478,9 @@ __all__ = [
     "StandardFormat",
     "StandardValidatorSpec",
     "StandardValidatorType",
+    "TransformationScope",
     "ValidatorsSpec",
     "VisualValidatorSpec",
+    "entity_resolution",
+    "llm_transformation",
 ]
