@@ -134,7 +134,7 @@ def cmd_migrate(_: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="flydocs", description="Firefly Desk IDP service")
+    parser = argparse.ArgumentParser(prog="flydocs", description="flydocs -- pure-multimodal IDP service")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     sub_serve = sub.add_parser("serve", help="Run the FastAPI server")

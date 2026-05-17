@@ -25,11 +25,12 @@ from flydocs.web.openapi_override import install_openapi
 
 _TITLE = "flydocs"
 _DESCRIPTION = (
-    "Intelligent Document Processing for Firefly Desk -- pure-multimodal "
-    "field extraction with normalised bounding boxes, deterministic "
+    "Pure-multimodal Intelligent Document Processing service -- field "
+    "extraction with normalised bounding boxes, deterministic "
     "StandardValidators, LLM judge cross-check, and a DAG business-rule "
     "engine. Synchronous (`POST /api/v1/extract`) and queue-backed "
-    "asynchronous (`POST /api/v1/jobs`) APIs."
+    "asynchronous (`POST /api/v1/jobs`) APIs. Platform-agnostic; "
+    "part of Firefly OperationOS."
 )
 
 # Build PyFlyApplication: loads pyfly.yaml, scans packages, prepares the DI context.
