@@ -1,9 +1,11 @@
 # Documentation
 
-The complete reference set for **flydocs**. Start in the main
-[README.md](../README.md) for the elevator pitch and the
-step-by-step quickstart; come here when you need a specific corner
-of the system.
+The complete reference set for **flydocs**. Start with the top-level
+[QUICKSTART.md](../QUICKSTART.md) for your first extraction, the main
+[README.md](../README.md) for the elevator pitch and the full
+step-by-step walk-through, and [payload-reference.md](payload-reference.md)
+for the authoritative composition guide. Come here when you need a
+specific corner of the system.
 
 ---
 
@@ -13,14 +15,21 @@ Pick the entry point that matches what you're trying to do:
 
 ### "I just want to call the API"
 
-1. [**README.md** § Quickstart](../README.md#quickstart) — clone →
-   first sync extraction → first async multi-file job.
-2. [**api-reference.md**](api-reference.md) — every endpoint, header,
+1. [**QUICKSTART.md**](../QUICKSTART.md) — five minutes from clone to
+   your first extracted invoice, HTTP-only, mock LLM, no API keys.
+2. [**payload-reference.md**](payload-reference.md) — composing the
+   request: every field, every option, every variant, with worked
+   examples covering the 31-validator catalogue, all stage toggles,
+   rules, transformations, async jobs, and the RFC 7807 error catalogue.
+3. [**README.md** § Quickstart](../README.md#quickstart) — the full
+   walk-through (real provider keys, Postgres, worker, multi-file
+   async job + transformation).
+4. [**api-reference.md**](api-reference.md) — every endpoint, header,
    query param, DTO, and error code. Includes the full
    `ExtractionRequest` / `ExtractionResult` shapes, the bbox-refine
    sub-state on async jobs, the webhook envelope, and the RFC 7807
    error catalogue.
-3. [**standard-validators.md**](standard-validators.md) — what each
+5. [**standard-validators.md**](standard-validators.md) — what each
    built-in `StandardValidator` does and which `params` it accepts.
 
 ### "I'm integrating with the async / EDA surface"
@@ -70,6 +79,8 @@ Pick the entry point that matches what you're trying to do:
 
 | Document                                                       | Read it when…                                                                              |
 | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| [../QUICKSTART.md](../QUICKSTART.md)                           | You want your first extraction in five minutes (HTTP / curl).                              |
+| [payload-reference.md](payload-reference.md)                   | You're composing the request payload — every field, option, variant, and worked example.   |
 | [overview.md](overview.md)                                     | You're new and want a guided tour of the system.                                           |
 | [architecture.md](architecture.md)                             | You need to know how `fireflyframework-pyfly` + `fireflyframework-agentic` plug together. |
 | [pipeline.md](pipeline.md)                                     | You're touching the orchestrator, adding a new stage, or chasing a slow request.           |

@@ -77,8 +77,11 @@ from flydocs_sdk.request import (
     StandardFormat,
     StandardValidatorSpec,
     StandardValidatorType,
+    TransformationScope,
     ValidatorsSpec,
     VisualValidatorSpec,
+    entity_resolution,
+    llm_transformation,
 )
 from flydocs_sdk.webhooks import WebhookVerificationError, WebhookVerifier
 
@@ -122,8 +125,11 @@ __all__ = [
     "StandardFormat",
     "StandardValidatorSpec",
     "StandardValidatorType",
+    "TransformationScope",
     "ValidatorsSpec",
     "VisualValidatorSpec",
+    "entity_resolution",
+    "llm_transformation",
     # Webhooks
     "WebhookVerificationError",
     "WebhookVerifier",
