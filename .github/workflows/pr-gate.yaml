@@ -260,3 +260,47 @@ jobs:
             fireflyframework-agentic=./vendor/fireflyframework-agentic
           cache-from: type=gha,scope=${{ matrix.variant }}
           cache-to: type=gha,mode=max,scope=${{ matrix.variant }}
+
+  # --------------------------------------------------------------------
+  # SDK gates — fast, isolated. Neither SDK depends on the sibling
+  # ``pyfly`` / ``agentic`` checkouts, so they don't need the vendor
+  # clone the service lanes do.
+  # --------------------------------------------------------------------
+
+  sdk-python:
+    name: SDK Python
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdks/python
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@e58605a9b6da7c637471fab8847a5e5a6b8df081 # v5
+        with:
+          enable-cache: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: uv sync (dev)
+        run: uv sync --extra dev
+      - name: ruff check
+        run: uv run ruff check src tests
+      - name: pytest
+        run: uv run pytest -q
+
+  sdk-java:
+    name: SDK Java
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdks/java
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Java 25 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: maven
+      - name: mvn verify
+        run: mvn -B -ntp verify
