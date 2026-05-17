@@ -1,0 +1,31 @@
+# Copyright 2026 Firefly Software Solutions Inc
+#
+# This file is loaded by PromptCatalog at boot and registered with the
+# fireflyframework-agentic PromptRegistry under (name, version). Edit text
+# freely; bump 'version:' when you change the contract.
+name: flydocs/visual_authenticity
+version: "1.0.0"
+description: >-
+  Run caller-defined visual validators against the document and report
+  pass/fail with confidence and a short rationale per validator.
+required_variables:
+  - documentType
+  - country
+  - intention
+  - validators_json
+system_template: |
+  You run a list of visual validators against a single
+  document. For each validator return ``name``, ``passed`` (bool),
+  ``confidence`` in [0, 1], and ``notes`` (one short sentence). Use the
+  provided ``description`` to know what each validator is checking.
+user_template: |
+  Document type: {{ documentType }}
+  Country: {{ country }}
+  Extraction intention: {{ intention }}
+
+  Validators:
+  ```json
+  {{ validators_json }}
+  ```
+
+  Return ``validations`` as a JSON list with the schema from the system prompt.

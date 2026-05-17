@@ -8,11 +8,11 @@ import io
 import pytest
 from reportlab.pdfgen import canvas
 
-from flydesk_idp.core.services.binary.errors import (
+from flydocs.core.services.binary.errors import (
     BinaryNormalizationError,
     EncryptedPdfError,
 )
-from flydesk_idp.core.services.binary.pdf_guard import PdfGuard
+from flydocs.core.services.binary.pdf_guard import PdfGuard
 
 
 def _build_pdf() -> bytes:

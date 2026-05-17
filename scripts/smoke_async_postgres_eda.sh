@@ -4,7 +4,7 @@
 # End-to-end async smoke against the Postgres-EDA stack.
 #
 # This is the durable repo-tracked variant of the ad-hoc script that
-# lives in ~/Desktop/flydesk-idp_async.sh -- same payload shape, but
+# lives in ~/Desktop/flydocs_async.sh -- same payload shape, but
 # the model is pinned to ``anthropic:claude-sonnet-4-6`` (the
 # repo-default in ``env_template``) and every step is verified against
 # the EDA outbox so a CI run can confirm Postgres NOTIFY + the worker
@@ -25,8 +25,8 @@
 set -euo pipefail
 
 PDF="${1:-$HOME/Downloads/escritura_poderes_2025.pdf}"
-API="${FLYDESK_IDP_URL:-http://localhost:8400}"
-MODEL="${FLYDESK_IDP_MODEL:-anthropic:claude-sonnet-4-6}"
+API="${FLYDOCS_URL:-http://localhost:8400}"
+MODEL="${FLYDOCS_MODEL:-anthropic:claude-sonnet-4-6}"
 POLL_INTERVAL_S="${POLL_INTERVAL_S:-3}"
 POLL_MAX_S="${POLL_MAX_S:-300}"
 
@@ -41,9 +41,9 @@ echo "[smoke] document=$PDF ($(du -h "$PDF" | cut -f1))"
 echo "[smoke] model=$MODEL"
 echo
 
-TMP_B64="$(mktemp -t flydesk_idp_b64)"
-TMP_BODY="$(mktemp -t flydesk_idp_body)"
-TMP_RESP="$(mktemp -t flydesk_idp_resp)"
+TMP_B64="$(mktemp -t flydocs_b64)"
+TMP_BODY="$(mktemp -t flydocs_body)"
+TMP_RESP="$(mktemp -t flydocs_resp)"
 trap 'rm -f "$TMP_B64" "$TMP_BODY" "$TMP_RESP"' EXIT
 
 base64 -i "$PDF" | tr -d '\n' > "$TMP_B64"
@@ -137,7 +137,7 @@ echo "[smoke] submitted job_id=$JOB_ID status=$(echo "$SUBMIT" | jq -r .status)"
 
 # ---- 2. EDA outbox check -------------------------------------------------
 echo "[smoke] Postgres EDA outbox tail:"
-docker compose exec -T postgres psql -U idp -d flydesk_idp -c "
+docker compose exec -T postgres psql -U idp -d flydocs -c "
   SELECT id, destination, event_type, payload, created_at
   FROM pyfly_eda_outbox
   WHERE payload->>'job_id' = '$JOB_ID';
@@ -195,6 +195,6 @@ curl -sS "$API/actuator/health/readiness" | jq .
 
 echo
 echo "[smoke] final EDA cursor:"
-docker compose exec -T postgres psql -U idp -d flydesk_idp -c "
+docker compose exec -T postgres psql -U idp -d flydocs -c "
   SELECT consumer_group, last_event_id, updated_at FROM pyfly_eda_offsets;
 "

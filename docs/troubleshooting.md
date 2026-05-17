@@ -10,11 +10,11 @@ body (redacting any sensitive content).
 
 ### `Failed to configure data with provider 'EngineLifecycle': password authentication failed`
 
-`FLYDESK_IDP_DATABASE_URL` doesn't match the running Postgres.
+`FLYDOCS_DATABASE_URL` doesn't match the running Postgres.
 
 - Local dev: bring the database up with `task dev:db`, then run
   `task dev:migrate`.
-- Docker compose: the `postgres` service uses `idp/idp/flydesk_idp` by
+- Docker compose: the `postgres` service uses `idp/idp/flydocs` by
   default. Override with `POSTGRES_USER` / `POSTGRES_PASSWORD` in
   `.env`.
 
@@ -24,7 +24,7 @@ The bean is referenced by a constructor but the container can't
 resolve it. Usually one of:
 
 - The package containing the bean isn't in `scan_packages`. Add the
-  parent package to `flydesk_idp/app.py::scan_packages`.
+  parent package to `flydocs/app.py::scan_packages`.
 - The class isn't decorated with `@service`, `@command_handler`,
   `@query_handler`, `@rest_controller`, or `@controller_advice`.
 - The bean is a cross-cutting service that needs to be produced by
@@ -39,7 +39,7 @@ startup with `sys.argv[1:]`.
 - Rename the method to something other than `run`. The
   `PipelineOrchestrator` uses `execute` for exactly this reason.
 
-### `PromptValidationError: Template 'flydesk_idp/X' is missing required variables: Y`
+### `PromptValidationError: Template 'flydocs/X' is missing required variables: Y`
 
 You edited a YAML prompt but forgot to update a call site (or vice
 versa).
@@ -54,19 +54,19 @@ versa).
 
 ### `408 extraction_timeout`
 
-The sync pipeline didn't finish within `FLYDESK_IDP_SYNC_TIMEOUT_S`
+The sync pipeline didn't finish within `FLYDOCS_SYNC_TIMEOUT_S`
 (default 60 s).
 
 - Bump the timeout via the env var if 60 s is genuinely too short.
 - Or switch the caller to the async API (`POST /api/v1/jobs`), which
-  has a much longer ceiling (`FLYDESK_IDP_ASYNC_TIMEOUT_S`, default
+  has a much longer ceiling (`FLYDOCS_ASYNC_TIMEOUT_S`, default
   300 s).
 - Disable expensive stages (judge / content_authenticity / rules) if
   they aren't needed for this caller.
 
 ### `413 document_too_large`
 
-Decoded document is over `FLYDESK_IDP_MAX_BYTES` (default 32 MiB).
+Decoded document is over `FLYDOCS_MAX_BYTES` (default 32 MiB).
 
 - Increase the limit if you trust the source.
 - Or pre-resize / split the document client-side.
@@ -77,7 +77,7 @@ Decoded document is over `FLYDESK_IDP_MAX_BYTES` (default 32 MiB).
 
 - Wrapped in `data:application/pdf;base64,...` — supported, just make
   sure the prefix is intact.
-- The encoding was URL-safe (`-`/`_` instead of `+`/`/`). flydesk-idp
+- The encoding was URL-safe (`-`/`_` instead of `+`/`/`). flydocs
   accepts standard base64; transcode first if needed.
 - Trailing whitespace / newlines — usually fine, but obviously corrupt
   payloads aren't.
@@ -105,7 +105,7 @@ The `extract` stage failed for that specific doc. The response has
 message.
 
 - Often a model-side issue (timeout, content policy). Try a fallback
-  via `options.model` or set `FLYDESK_IDP_FALLBACK_MODEL`.
+  via `options.model` or set `FLYDOCS_FALLBACK_MODEL`.
 
 ---
 
@@ -118,14 +118,14 @@ queue.
 
 - `docker compose ps` — is the `worker` container up?
 - Check the worker logs for `JobWorker … started (adapter=redis)`.
-- Verify both API and worker see the same `FLYDESK_IDP_EDA_ADAPTER`
-  and `FLYDESK_IDP_REDIS_URL`.
+- Verify both API and worker see the same `FLYDOCS_EDA_ADAPTER`
+  and `FLYDOCS_REDIS_URL`.
 
 ### Webhook never arrives
 
-- Check `FLYDESK_IDP_WEBHOOK_HMAC_SECRET` is set on both sides.
+- Check `FLYDOCS_WEBHOOK_HMAC_SECRET` is set on both sides.
 - The worker retries 5xx and 429 up to
-  `FLYDESK_IDP_WEBHOOK_MAX_ATTEMPTS` (default 5). A 4xx (other than
+  `FLYDOCS_WEBHOOK_MAX_ATTEMPTS` (default 5). A 4xx (other than
   429) is treated as permanent and logged.
 - The webhook URL must be reachable from the worker network. In
   Docker compose, `http://host.docker.internal:...` is the canonical
@@ -151,13 +151,13 @@ bucket by accident.
 ### Job retries too quickly / too slowly
 
 The backoff is `min(retry_max_delay_s, retry_base_delay_s * 2^(attempt-1))`
-plus 20% jitter. Tune via `FLYDESK_IDP_RETRY_BASE_DELAY_S` and
-`FLYDESK_IDP_RETRY_MAX_DELAY_S` (seconds). Backoff applies only to
+plus 20% jitter. Tune via `FLYDOCS_RETRY_BASE_DELAY_S` and
+`FLYDOCS_RETRY_MAX_DELAY_S` (seconds). Backoff applies only to
 retryable errors -- permanent ones never re-queue.
 
 ### Escalation re-runs every request
 
-`FLYDESK_IDP_ESCALATION_THRESHOLD` is set too low (or 0.0 means
+`FLYDOCS_ESCALATION_THRESHOLD` is set too low (or 0.0 means
 disabled, but anything > 0 starts evaluating it). Raise the threshold
 or unset both threshold and `options.escalation_threshold` to disable.
 Look for `judge_escalation triggered` log lines to see the failure
@@ -196,7 +196,7 @@ Use a provider-side check for liveness.
 ### `tool 'retries' is deprecated` deprecation warning
 
 Source: `fireflyframework_agentic.agents.base`. Not actionable in
-flydesk-idp; the upstream library still uses the deprecated parameter.
+flydocs; the upstream library still uses the deprecated parameter.
 
 ### Model hallucinates a value with `confidence: 0.99`
 

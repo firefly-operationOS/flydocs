@@ -15,7 +15,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from flydesk_idp.config import IDPSettings
+from flydocs.config import IDPSettings
 
 # ---------------------------------------------------------------------
 # Fake docling -- only the ``export_to_markdown()`` surface is needed.
@@ -78,7 +78,7 @@ def _install_fake_docling(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_noop_anchor_always_returns_none() -> None:
-    from flydesk_idp.core.services.extraction.text_anchor import NoOpTextAnchor
+    from flydocs.core.services.extraction.text_anchor import NoOpTextAnchor
 
     anchor = NoOpTextAnchor()
     assert anchor.produce(b"%PDF-1.4", media_type="application/pdf") is None
@@ -87,7 +87,7 @@ def test_noop_anchor_always_returns_none() -> None:
 
 def test_docling_anchor_returns_markdown_for_pdf(monkeypatch: pytest.MonkeyPatch) -> None:
     _install_fake_docling(monkeypatch)
-    from flydesk_idp.core.services.extraction.text_anchor import DoclingTextAnchor
+    from flydocs.core.services.extraction.text_anchor import DoclingTextAnchor
 
     _FakeConverter.next_markdown = "# Heading\n\nBody paragraph."
 
@@ -100,7 +100,7 @@ def test_docling_anchor_returns_markdown_for_pdf(monkeypatch: pytest.MonkeyPatch
 
 def test_docling_anchor_returns_none_for_unsupported_media(monkeypatch: pytest.MonkeyPatch) -> None:
     _install_fake_docling(monkeypatch)
-    from flydesk_idp.core.services.extraction.text_anchor import DoclingTextAnchor
+    from flydocs.core.services.extraction.text_anchor import DoclingTextAnchor
 
     anchor = DoclingTextAnchor(IDPSettings())
     assert anchor.produce(b"hi", media_type="text/plain") is None
@@ -109,7 +109,7 @@ def test_docling_anchor_returns_none_for_unsupported_media(monkeypatch: pytest.M
 
 def test_docling_anchor_truncates_on_paragraph_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
     _install_fake_docling(monkeypatch)
-    from flydesk_idp.core.services.extraction.text_anchor import DoclingTextAnchor
+    from flydocs.core.services.extraction.text_anchor import DoclingTextAnchor
 
     big_markdown = "Para1.\n\n" + ("Para2 content. " * 200) + "\n\nPara3."
     _FakeConverter.next_markdown = big_markdown
@@ -123,7 +123,7 @@ def test_docling_anchor_truncates_on_paragraph_boundary(monkeypatch: pytest.Monk
 
 def test_docling_anchor_returns_none_when_max_chars_zero(monkeypatch: pytest.MonkeyPatch) -> None:
     _install_fake_docling(monkeypatch)
-    from flydesk_idp.core.services.extraction.text_anchor import DoclingTextAnchor
+    from flydocs.core.services.extraction.text_anchor import DoclingTextAnchor
 
     _FakeConverter.next_markdown = "something"
     anchor = DoclingTextAnchor(IDPSettings(extraction_text_anchor_max_chars=0))
@@ -135,7 +135,7 @@ def test_docling_anchor_swallows_convert_errors(monkeypatch: pytest.MonkeyPatch)
     is a best-effort enrichment, so we degrade gracefully on error.
     """
     _install_fake_docling(monkeypatch)
-    from flydesk_idp.core.services.extraction.text_anchor import DoclingTextAnchor
+    from flydocs.core.services.extraction.text_anchor import DoclingTextAnchor
 
     _FakeConverter.raise_on_convert = RuntimeError("model load failed")
     anchor = DoclingTextAnchor(IDPSettings())
@@ -144,7 +144,7 @@ def test_docling_anchor_swallows_convert_errors(monkeypatch: pytest.MonkeyPatch)
 
 def test_docling_anchor_returns_none_when_markdown_is_empty(monkeypatch: pytest.MonkeyPatch) -> None:
     _install_fake_docling(monkeypatch)
-    from flydesk_idp.core.services.extraction.text_anchor import DoclingTextAnchor
+    from flydocs.core.services.extraction.text_anchor import DoclingTextAnchor
 
     _FakeConverter.next_markdown = "    \n\n   "
     anchor = DoclingTextAnchor(IDPSettings())
@@ -160,7 +160,7 @@ def test_missing_docling_dep_raises_runtime_error_on_first_use(
     test holds whether or not the ``docling`` extra is installed in
     the active venv.
     """
-    from flydesk_idp.core.services.extraction.text_anchor import DoclingTextAnchor
+    from flydocs.core.services.extraction.text_anchor import DoclingTextAnchor
 
     class _Block:
         def find_spec(self, name, path=None, target=None):  # noqa: ANN001
@@ -185,8 +185,8 @@ def test_missing_docling_dep_raises_runtime_error_on_first_use(
 
 
 def test_di_text_anchor_defaults_to_noop() -> None:
-    from flydesk_idp.core.configuration import IDPCoreConfiguration
-    from flydesk_idp.core.services.extraction.text_anchor import NoOpTextAnchor
+    from flydocs.core.configuration import IDPCoreConfiguration
+    from flydocs.core.services.extraction.text_anchor import NoOpTextAnchor
 
     cfg = IDPCoreConfiguration()
     anchor = cfg.text_anchor(settings=IDPSettings())
@@ -194,8 +194,8 @@ def test_di_text_anchor_defaults_to_noop() -> None:
 
 
 def test_di_text_anchor_dispatches_docling() -> None:
-    from flydesk_idp.core.configuration import IDPCoreConfiguration
-    from flydesk_idp.core.services.extraction.text_anchor import DoclingTextAnchor
+    from flydocs.core.configuration import IDPCoreConfiguration
+    from flydocs.core.services.extraction.text_anchor import DoclingTextAnchor
 
     cfg = IDPCoreConfiguration()
     anchor = cfg.text_anchor(settings=IDPSettings(extraction_text_anchor="docling"))
@@ -203,7 +203,7 @@ def test_di_text_anchor_dispatches_docling() -> None:
 
 
 def test_di_text_anchor_unknown_raises_value_error() -> None:
-    from flydesk_idp.core.configuration import IDPCoreConfiguration
+    from flydocs.core.configuration import IDPCoreConfiguration
 
     cfg = IDPCoreConfiguration()
     with pytest.raises(ValueError, match="paddle"):
@@ -231,7 +231,7 @@ def test_extractor_inserts_anchor_into_user_content_when_present() -> None:
     """Pure-Python unit test on ``_build_user_content`` -- avoids
     spinning up the full FireflyAgent.
     """
-    from flydesk_idp.core.services.extraction.extractor import MultimodalExtractor
+    from flydocs.core.services.extraction.extractor import MultimodalExtractor
 
     rec = _RecordingAnchor("# Title\n\nBody.")
     extractor = MultimodalExtractor.__new__(MultimodalExtractor)
@@ -254,7 +254,7 @@ def test_extractor_inserts_anchor_into_user_content_when_present() -> None:
 
 
 def test_extractor_skips_anchor_when_service_returns_none() -> None:
-    from flydesk_idp.core.services.extraction.extractor import MultimodalExtractor
+    from flydocs.core.services.extraction.extractor import MultimodalExtractor
 
     rec = _RecordingAnchor(None)
     extractor = MultimodalExtractor.__new__(MultimodalExtractor)
@@ -273,7 +273,7 @@ def test_extractor_skips_anchor_when_service_returns_none() -> None:
 
 def test_extractor_swallows_anchor_errors() -> None:
     """A raising anchor must not crash extraction -- we log and skip."""
-    from flydesk_idp.core.services.extraction.extractor import MultimodalExtractor
+    from flydocs.core.services.extraction.extractor import MultimodalExtractor
 
     class _BrokenAnchor:
         def produce(self, data: bytes, *, media_type: str, max_chars: int | None = None) -> str | None:

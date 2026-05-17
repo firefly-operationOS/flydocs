@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from flydesk_idp.core.services.workers.job_worker import JobWorker, _is_permanent
+from flydocs.core.services.workers.job_worker import JobWorker, _is_permanent
 
 # -- classification --------------------------------------------------------
 

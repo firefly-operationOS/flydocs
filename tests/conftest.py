@@ -1,5 +1,5 @@
 # Copyright 2026 Firefly Software Solutions Inc
-"""Shared pytest configuration for flydesk-idp tests."""
+"""Shared pytest configuration for flydocs tests."""
 
 from __future__ import annotations
 

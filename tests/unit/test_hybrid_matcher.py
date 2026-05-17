@@ -19,10 +19,10 @@ from dataclasses import field as dc_field
 
 import pytest
 
-from flydesk_idp.core.services.bbox.hybrid_matcher import HybridValueMatcher
-from flydesk_idp.core.services.bbox.value_matcher import MatchResult
-from flydesk_idp.core.services.bbox.word_extractor import PageWords
-from flydesk_idp.interfaces.dtos.bbox import BboxSource
+from flydocs.core.services.bbox.hybrid_matcher import HybridValueMatcher
+from flydocs.core.services.bbox.value_matcher import MatchResult
+from flydocs.core.services.bbox.word_extractor import PageWords
+from flydocs.interfaces.dtos.bbox import BboxSource
 
 
 def _page(num: int) -> PageWords:

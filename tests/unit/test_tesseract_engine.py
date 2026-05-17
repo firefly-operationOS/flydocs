@@ -15,8 +15,8 @@ from collections.abc import Iterator
 import pytest
 from PIL import Image
 
-from flydesk_idp.config import IDPSettings
-from flydesk_idp.core.services.bbox.tesseract_engine import TesseractOcrEngine
+from flydocs.config import IDPSettings
+from flydocs.core.services.bbox.tesseract_engine import TesseractOcrEngine
 
 
 def _png(size: tuple[int, int] = (400, 300)) -> bytes:

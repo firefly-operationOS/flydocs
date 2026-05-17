@@ -33,21 +33,21 @@ from pathlib import Path
 
 import pytest
 
-from flydesk_idp.interfaces.dtos.doc import DocSpec, DocType, ValidatorsSpec, VisualValidatorSpec
-from flydesk_idp.interfaces.dtos.extract import (
+from flydocs.interfaces.dtos.doc import DocSpec, DocType, ValidatorsSpec, VisualValidatorSpec
+from flydocs.interfaces.dtos.extract import (
     DocumentInput,
     ExtractionOptions,
     ExtractionRequest,
     StageToggles,
 )
-from flydesk_idp.interfaces.dtos.field import FieldGroup, FieldSpec
-from flydesk_idp.interfaces.dtos.rule import RuleFieldParent, RuleOutputSpec, RuleSpec
-from flydesk_idp.interfaces.dtos.standard_validator import StandardValidatorSpec
-from flydesk_idp.interfaces.enums.field_type import FieldType
-from flydesk_idp.interfaces.enums.standard_validator import StandardValidatorType
+from flydocs.interfaces.dtos.field import FieldGroup, FieldSpec
+from flydocs.interfaces.dtos.rule import RuleFieldParent, RuleOutputSpec, RuleSpec
+from flydocs.interfaces.dtos.standard_validator import StandardValidatorSpec
+from flydocs.interfaces.enums.field_type import FieldType
+from flydocs.interfaces.enums.standard_validator import StandardValidatorType
 
 PDF_PATH = Path.home() / "Downloads" / "escritura_poderes_2025.pdf"
-MODEL = os.environ.get("FLYDESK_IDP_TEST_MODEL", "anthropic:claude-opus-4-7")
+MODEL = os.environ.get("FLYDOCS_TEST_MODEL", "anthropic:claude-opus-4-7")
 
 
 # ===========================================================================
@@ -178,7 +178,7 @@ _RULES = [
 def _render(result, request) -> str:
     out: list[str] = []
     out.append("=" * 70)
-    out.append(f"  flydesk-idp -- real Claude run ({result.model})")
+    out.append(f"  flydocs -- real Claude run ({result.model})")
     out.append("=" * 70)
     out.append("")
     primary = result.files[0]
@@ -353,10 +353,10 @@ async def _run_via_di(request: ExtractionRequest):
     """Boot pyfly, resolve the orchestrator from the container, run."""
     from pyfly.core import PyFlyApplication
 
-    from flydesk_idp.app import FlydeskIDPApplication
-    from flydesk_idp.core.services.pipeline import PipelineOrchestrator
+    from flydocs.app import FlydocsApplication
+    from flydocs.core.services.pipeline import PipelineOrchestrator
 
-    pyfly_app = PyFlyApplication(FlydeskIDPApplication)
+    pyfly_app = PyFlyApplication(FlydocsApplication)
     await pyfly_app.startup()
     try:
         orchestrator: PipelineOrchestrator = pyfly_app.context.container.resolve(PipelineOrchestrator)

@@ -16,11 +16,11 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from flydesk_idp.core.services.jobs.list_jobs_handler import (
+from flydocs.core.services.jobs.list_jobs_handler import (
     ListJobsHandler,
     ListJobsQuery,
 )
-from flydesk_idp.interfaces.enums.job_status import JobStatus
+from flydocs.interfaces.enums.job_status import JobStatus
 
 
 def _row(**overrides):

@@ -15,11 +15,11 @@ Coverage:
 
 from __future__ import annotations
 
-from flydesk_idp.core.services.transformations.entity_resolution import (
+from flydocs.core.services.transformations.entity_resolution import (
     EntityResolutionTransformer,
 )
-from flydesk_idp.interfaces.dtos.field import ExtractedField, ExtractedFieldGroup
-from flydesk_idp.interfaces.dtos.transformation import EntityResolutionTransformation
+from flydocs.interfaces.dtos.field import ExtractedField, ExtractedFieldGroup
+from flydocs.interfaces.dtos.transformation import EntityResolutionTransformation
 
 
 def _row(values: dict[str, str]) -> ExtractedField:

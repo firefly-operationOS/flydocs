@@ -8,7 +8,7 @@ import zipfile
 
 import pytest
 
-from flydesk_idp.core.services.binary.sniffer import sniff_media_type
+from flydocs.core.services.binary.sniffer import sniff_media_type
 
 
 def test_sniffs_pdf() -> None:

@@ -1,6 +1,6 @@
 # Deployment
 
-Notes for taking flydesk-idp from a developer laptop to a real
+Notes for taking flydocs from a developer laptop to a real
 environment — topology, configuration, scaling, security, and cost.
 
 ---
@@ -28,7 +28,7 @@ A production deployment has three moving parts:
 | Component    | Role |
 | ------------ | ---- |
 | **API**      | One or more uvicorn workers behind a load balancer. Stateless; no sticky sessions. Publishes ``IDPJobSubmitted`` events on the EDA bus. |
-| **Worker**   | One or more processes that subscribe to the EDA bus via `fireflyframework-pyfly`'s `EventPublisher.subscribe`. Each event is delivered to exactly one consumer in the `flydesk-idp-workers` consumer group. |
+| **Worker**   | One or more processes that subscribe to the EDA bus via `fireflyframework-pyfly`'s `EventPublisher.subscribe`. Each event is delivered to exactly one consumer in the `flydocs-workers` consumer group. |
 | **Postgres** | Holds `extraction_jobs` *and* the EDA outbox (`pyfly_eda_outbox` + `pyfly_eda_offsets`). With the Postgres EDA adapter you no longer need a separate broker. |
 
 Redis or Kafka are still supported brokers — see §3 — but the default
@@ -37,8 +37,8 @@ persistence, so reusing it as a durable event bus removes one
 operational dependency.
 
 The API and the worker share the same image; the difference is which
-CLI subcommand starts them (`flydesk-idp serve` vs.
-`flydesk-idp worker`).
+CLI subcommand starts them (`flydocs serve` vs.
+`flydocs worker`).
 
 ### Image variants
 
@@ -47,7 +47,7 @@ Two flavors are published on every release. Pick one per deployment.
 | Tag prefix | Architectures | What's inside | When to pull |
 | --- | --- | --- | --- |
 | _(none)_ -- `latest`, `vX.Y.Z`, `main` | `linux/amd64` + `linux/arm64` | Slim runtime: PyMuPDF + Tesseract OCR, no PyTorch. The canonical artifact. | Default. Use unless you need layout-aware OCR or Markdown text-anchor. |
-| `docling-` -- `docling-latest`, `docling-vX.Y.Z` | `linux/amd64` **only** | Slim image **plus** the `docling` extra: PyTorch + HF model loaders (~2.5 GB). Unlocks `FLYDESK_IDP_BBOX_REFINE_OCR_ENGINE=docling` and `FLYDESK_IDP_EXTRACTION_TEXT_ANCHOR=docling`. | When you want the Heron layout model grounding bboxes on noisy scans, or a Markdown anchor spliced into the extract prompt for multilingual / dense tabular documents. arm64 users build locally with `--build-arg WITH_DOCLING=true`. Details in [docling.md](docling.md). |
+| `docling-` -- `docling-latest`, `docling-vX.Y.Z` | `linux/amd64` **only** | Slim image **plus** the `docling` extra: PyTorch + HF model loaders (~2.5 GB). Unlocks `FLYDOCS_BBOX_REFINE_OCR_ENGINE=docling` and `FLYDOCS_EXTRACTION_TEXT_ANCHOR=docling`. | When you want the Heron layout model grounding bboxes on noisy scans, or a Markdown anchor spliced into the extract prompt for multilingual / dense tabular documents. arm64 users build locally with `--build-arg WITH_DOCLING=true`. Details in [docling.md](docling.md). |
 
 The `docling` variant is **not** distroless-friendly (writable
 `~/.cache/docling`, `libstdc++` runtime). Stay on the slim image for
@@ -61,10 +61,10 @@ The full list lives in [`env_template`](../env_template). The hot
 ones:
 
 ```env
-FLYDESK_IDP_PORT=8400
-FLYDESK_IDP_LOG_LEVEL=INFO
+FLYDOCS_PORT=8400
+FLYDOCS_LOG_LEVEL=INFO
 
-FLYDESK_IDP_DATABASE_URL=postgresql+asyncpg://idp:s3cret@db:5432/flydesk_idp
+FLYDOCS_DATABASE_URL=postgresql+asyncpg://idp:s3cret@db:5432/flydocs
 
 # EDA backend. ``postgres`` is the default and uses LISTEN/NOTIFY +
 # a durable outbox in the same Postgres the service already owns.
@@ -73,44 +73,44 @@ FLYDESK_IDP_DATABASE_URL=postgresql+asyncpg://idp:s3cret@db:5432/flydesk_idp
 # ``pyfly.eda.auto_configuration.EdaAutoConfiguration``;
 # ``fireflyframework-pyfly``'s app config plumbs the env var into
 # ``pyfly.eda.provider``.
-FLYDESK_IDP_EDA_ADAPTER=postgres
-FLYDESK_IDP_REDIS_URL=redis://redis:6379/0   # only used when adapter=redis
-FLYDESK_IDP_JOBS_TOPIC=flydesk.idp.jobs
+FLYDOCS_EDA_ADAPTER=postgres
+FLYDOCS_REDIS_URL=redis://redis:6379/0   # only used when adapter=redis
+FLYDOCS_JOBS_TOPIC=flydocs.jobs
 
 # Model selection. Pick any provider+model id that
 # `fireflyframework-genai` / `fireflyframework-agentic` can resolve —
 # `anthropic:…`, `openai:…`, `google:…`, `mistral:…`. The fallback
 # model is used when the primary errors out; mix providers freely.
-FLYDESK_IDP_MODEL=anthropic:claude-sonnet-4-6
-FLYDESK_IDP_FALLBACK_MODEL=openai:gpt-4o
+FLYDOCS_MODEL=anthropic:claude-sonnet-4-6
+FLYDOCS_FALLBACK_MODEL=openai:gpt-4o
 
 # Timeouts (seconds).
-FLYDESK_IDP_SYNC_TIMEOUT_S=60
-FLYDESK_IDP_ASYNC_TIMEOUT_S=300
-FLYDESK_IDP_JOB_MAX_ATTEMPTS=3
+FLYDOCS_SYNC_TIMEOUT_S=60
+FLYDOCS_ASYNC_TIMEOUT_S=300
+FLYDOCS_JOB_MAX_ATTEMPTS=3
 
 # Retry backoff bounds. The worker schedules each retry at
 # min(retry_max_delay_s, retry_base_delay_s * 2^(attempt-1)) plus 20% jitter.
-FLYDESK_IDP_RETRY_BASE_DELAY_S=5
-FLYDESK_IDP_RETRY_MAX_DELAY_S=300
+FLYDOCS_RETRY_BASE_DELAY_S=5
+FLYDOCS_RETRY_MAX_DELAY_S=300
 
 # Judge-driven escalation. When the judge fails more than this fraction
 # of fields, the orchestrator re-runs extract + judge with the escalation
 # model and keeps the better result. 0.0 disables (default).
-FLYDESK_IDP_ESCALATION_THRESHOLD=0.0
-FLYDESK_IDP_ESCALATION_MODEL=anthropic:claude-opus-4-7
+FLYDOCS_ESCALATION_THRESHOLD=0.0
+FLYDOCS_ESCALATION_MODEL=anthropic:claude-opus-4-7
 
 # Document size / page caps.
-FLYDESK_IDP_MAX_BYTES=33554432       # 32 MiB
-FLYDESK_IDP_MAX_SYNC_PAGES=10
+FLYDOCS_MAX_BYTES=33554432       # 32 MiB
+FLYDOCS_MAX_SYNC_PAGES=10
 
 # Webhook delivery.
-FLYDESK_IDP_WEBHOOK_TIMEOUT_S=15
-FLYDESK_IDP_WEBHOOK_MAX_ATTEMPTS=5
-FLYDESK_IDP_WEBHOOK_HMAC_SECRET=<a-strong-random-string>
+FLYDOCS_WEBHOOK_TIMEOUT_S=15
+FLYDOCS_WEBHOOK_MAX_ATTEMPTS=5
+FLYDOCS_WEBHOOK_HMAC_SECRET=<a-strong-random-string>
 
 # Optional API-key auth (comma-separated).
-FLYDESK_IDP_API_KEYS=tenant-a-secret,tenant-b-secret
+FLYDOCS_API_KEYS=tenant-a-secret,tenant-b-secret
 
 # Provider credentials (standard names; not prefixed). Set whichever
 # matches the model id you picked above — and the fallback too if it's
@@ -131,9 +131,9 @@ Production deploys should pull the prebuilt **multi-arch** image
 published by `.github/workflows/docker-publish.yaml`:
 
 ```bash
-docker pull ghcr.io/firefly-operationos/flydesk-idp:latest      # arm64 + amd64 manifest
-docker pull ghcr.io/firefly-operationos/flydesk-idp:v0.1.0       # SemVer pin
-docker pull --platform linux/arm64 ghcr.io/firefly-operationos/flydesk-idp:latest
+docker pull ghcr.io/firefly-operationos/flydocs:latest      # arm64 + amd64 manifest
+docker pull ghcr.io/firefly-operationos/flydocs:v0.1.0       # SemVer pin
+docker pull --platform linux/arm64 ghcr.io/firefly-operationos/flydocs:latest
 ```
 
 Available tag schemas:
@@ -161,7 +161,7 @@ Or directly:
 docker buildx build \
     --build-context pyfly=../../fireflyframework/fireflyframework-pyfly \
     --build-context fireflyframework-agentic=../../fireflyframework/fireflyframework-agentic \
-    --tag flydesk-idp:0.1.0 \
+    --tag flydocs:0.1.0 \
     .
 ```
 
@@ -181,8 +181,8 @@ parallel via QEMU; on a workstation a single arch is usually enough.
 Migrations are Alembic-based. Three ways to apply them:
 
 1. **From the host**: `task dev:migrate` (requires
-   `FLYDESK_IDP_DATABASE_URL` set in your shell).
-2. **From the image**: `docker run --rm ... flydesk-idp:0.1.0 migrate`.
+   `FLYDOCS_DATABASE_URL` set in your shell).
+2. **From the image**: `docker run --rm ... flydocs:0.1.0 migrate`.
 3. **At container start** (dev / staging): set `RUN_MIGRATIONS=true`
    on the `api` service; the entrypoint runs `alembic upgrade head`
    before serving.
@@ -295,8 +295,8 @@ outbound_call target=worker    op=job.run        status=ok  latency_ms=42557 job
 | Concern          | Posture                                                                                                                                                       |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Document bytes** | Never written to disk on the service side. Only the base64 payload sits in `extraction_jobs.schema_json` for the job lifetime. Replace with a blob-store pointer if your DB can't keep this. |
-| **Webhook HMAC** | Mandatory in production — set `FLYDESK_IDP_WEBHOOK_HMAC_SECRET` to a strong random string. The publisher signs every payload with HMAC-SHA256.                  |
-| **API keys**     | Entry-level gate — set `FLYDESK_IDP_API_KEYS` to a comma-separated list. For OIDC / OAuth2, swap in `fireflyframework-pyfly`'s `security-jwt` starter and add a JWT decoder bean. |
+| **Webhook HMAC** | Mandatory in production — set `FLYDOCS_WEBHOOK_HMAC_SECRET` to a strong random string. The publisher signs every payload with HMAC-SHA256.                  |
+| **API keys**     | Entry-level gate — set `FLYDOCS_API_KEYS` to a comma-separated list. For OIDC / OAuth2, swap in `fireflyframework-pyfly`'s `security-jwt` starter and add a JWT decoder bean. |
 | **LLM keys**     | Provider credentials are read from each provider's standard env var (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`, `MISTRAL_API_KEY`, …). `fireflyframework-genai` resolves the right one from the model id prefix. Use your secrets manager; never bake them into the image. |
 | **TLS**          | Terminate at the load balancer. The service serves plain HTTP inside the cluster.                                                                              |
 
@@ -312,11 +312,11 @@ to lean on:
    per-level rule eval multiply this further). Disable judges and
    content_authenticity for high-volume bulk runs; reserve them for
    high-risk paths.
-2. **Model choice.** `FLYDESK_IDP_MODEL` is the default; override per
+2. **Model choice.** `FLYDOCS_MODEL` is the default; override per
    request via `options.model`. Lighter models (haiku, gpt-4o-mini)
    are fine for high-volume extraction; reserve the heavier ones for
    adversarial or low-confidence cases.
-3. **Fallback.** `FLYDESK_IDP_FALLBACK_MODEL` is used when the primary
+3. **Fallback.** `FLYDOCS_FALLBACK_MODEL` is used when the primary
    errors out. Setting it to a cheaper model avoids double-paying for
    a single failed call — and gives you a graceful degradation path.
 

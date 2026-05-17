@@ -12,25 +12,25 @@ from typing import Any
 import pytest
 from reportlab.pdfgen import canvas
 
-from flydesk_idp.config import IDPSettings
-from flydesk_idp.core.services.bbox import (
+from flydocs.config import IDPSettings
+from flydocs.core.services.bbox import (
     BboxRefiner,
     NoneOcrEngine,
     PyMuPDFWordExtractor,
     ValueMatcher,
     WordRouter,
 )
-from flydesk_idp.core.services.binary import BinaryNormalizer
-from flydesk_idp.core.services.binary.archive import ArchiveUnpacker
-from flydesk_idp.core.services.binary.email import EmailUnpacker
-from flydesk_idp.core.services.binary.image import ImageNormalizer
-from flydesk_idp.core.services.binary.libreoffice import LibreOfficeConverter
-from flydesk_idp.core.services.binary.pdf_guard import PdfGuard
-from flydesk_idp.core.services.workers.bbox_refine_worker import BboxRefineWorker
-from flydesk_idp.interfaces.dtos.bbox import BboxSource, BoundingBox
-from flydesk_idp.interfaces.dtos.extract import ExtractedDocument, ExtractionResult
-from flydesk_idp.interfaces.dtos.field import ExtractedField, ExtractedFieldGroup
-from flydesk_idp.interfaces.enums.job_status import JobStatus
+from flydocs.core.services.binary import BinaryNormalizer
+from flydocs.core.services.binary.archive import ArchiveUnpacker
+from flydocs.core.services.binary.email import EmailUnpacker
+from flydocs.core.services.binary.image import ImageNormalizer
+from flydocs.core.services.binary.libreoffice import LibreOfficeConverter
+from flydocs.core.services.binary.pdf_guard import PdfGuard
+from flydocs.core.services.workers.bbox_refine_worker import BboxRefineWorker
+from flydocs.interfaces.dtos.bbox import BboxSource, BoundingBox
+from flydocs.interfaces.dtos.extract import ExtractedDocument, ExtractionResult
+from flydocs.interfaces.dtos.field import ExtractedField, ExtractedFieldGroup
+from flydocs.interfaces.enums.job_status import JobStatus
 
 
 def _real_pdf() -> bytes:

@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import pytest
 
-from flydesk_idp.core.services.extraction.loader import load_document, sniff_media_type
+from flydocs.core.services.extraction.loader import load_document, sniff_media_type
 
 
 def test_sniff_pdf() -> None:

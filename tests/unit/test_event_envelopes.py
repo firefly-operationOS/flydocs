@@ -21,7 +21,7 @@ from datetime import UTC, datetime
 
 from pydantic import TypeAdapter
 
-from flydesk_idp.interfaces.dtos.event import (
+from flydocs.interfaces.dtos.event import (
     IDPBboxRefineCompletedEvent,
     IDPBboxRefineRequestedEvent,
     IDPEvent,
@@ -29,7 +29,7 @@ from flydesk_idp.interfaces.dtos.event import (
     IDPJobSubmittedEvent,
     envelope_for_publish,
 )
-from flydesk_idp.interfaces.enums.job_status import JobStatus
+from flydocs.interfaces.enums.job_status import JobStatus
 
 
 def test_submitted_event_defaults() -> None:

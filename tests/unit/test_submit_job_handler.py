@@ -17,15 +17,15 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from flydesk_idp.core.services.jobs.submit_job_handler import (
+from flydocs.core.services.jobs.submit_job_handler import (
     SubmitJobCommand,
     SubmitJobHandler,
 )
-from flydesk_idp.core.services.validation import ValidationReport
-from flydesk_idp.interfaces.dtos.doc import DocSpec, DocType
-from flydesk_idp.interfaces.dtos.extract import DocumentInput
-from flydesk_idp.interfaces.dtos.job import SubmitJobRequest
-from flydesk_idp.interfaces.enums.job_status import JobStatus
+from flydocs.core.services.validation import ValidationReport
+from flydocs.interfaces.dtos.doc import DocSpec, DocType
+from flydocs.interfaces.dtos.extract import DocumentInput
+from flydocs.interfaces.dtos.job import SubmitJobRequest
+from flydocs.interfaces.enums.job_status import JobStatus
 
 
 def _pdf_b64(marker: bytes) -> str:

@@ -1,5 +1,5 @@
 # =============================================================================
-# flydesk-idp -- .gitignore
+# flydocs -- .gitignore
 #
 # Tracked: source, tests, docs, build manifests, Dockerfile, docker-compose
 # files, prompt YAMLs, Alembic migrations, env_template, and the Taskfile.
@@ -62,7 +62,7 @@ secrets/
 *.sqlite
 *.sqlite3
 *.sqlite3-journal
-flydesk_idp_dev.db
+flydocs_dev.db
 local_data/
 
 # --- Logs --------------------------------------------------------------------

@@ -1,6 +1,8 @@
 <div align="center">
 
-# flydesk-idp
+<img src="docs/assets/logo.png" alt="flydocs — document intelligence" width="320" />
+
+# flydocs
 
 ### **Intelligent Document Processing for Firefly Desk**
 
@@ -13,9 +15,9 @@ asynchronous APIs.
 [![pyfly](https://img.shields.io/badge/runtime-fireflyframework--pyfly-orange)](https://github.com/fireflyframework/fireflyframework-pyfly)
 [![agentic](https://img.shields.io/badge/genai-fireflyframework--agentic-purple)](https://github.com/fireflyframework/fireflyframework-agentic)
 [![OpenAPI](https://img.shields.io/badge/api-openapi%203.1-green)](docs/api-reference.md)
-[![PR gate](https://github.com/firefly-operationOS/flydesk-idp/actions/workflows/pr-gate.yaml/badge.svg)](https://github.com/firefly-operationOS/flydesk-idp/actions/workflows/pr-gate.yaml)
-[![Docker publish](https://github.com/firefly-operationOS/flydesk-idp/actions/workflows/docker-publish.yaml/badge.svg)](https://github.com/firefly-operationOS/flydesk-idp/actions/workflows/docker-publish.yaml)
-[![Image](https://img.shields.io/badge/ghcr-flydesk--idp-blue)](https://github.com/firefly-operationOS/flydesk-idp/pkgs/container/flydesk-idp)
+[![PR gate](https://github.com/firefly-operationOS/flydocs/actions/workflows/pr-gate.yaml/badge.svg)](https://github.com/firefly-operationOS/flydocs/actions/workflows/pr-gate.yaml)
+[![Docker publish](https://github.com/firefly-operationOS/flydocs/actions/workflows/docker-publish.yaml/badge.svg)](https://github.com/firefly-operationOS/flydocs/actions/workflows/docker-publish.yaml)
+[![Image](https://img.shields.io/badge/ghcr-flydocs-blue)](https://github.com/firefly-operationOS/flydocs/pkgs/container/flydocs)
 
 </div>
 
@@ -33,7 +35,7 @@ Doing that with traditional OCR pipelines is brittle: layouts change,
 new document types arrive every quarter, and the team ends up
 hand-coding extraction rules that don't survive a single redesign.
 
-**flydesk-idp** collapses the whole workflow into one HTTP call. You
+**flydocs** collapses the whole workflow into one HTTP call. You
 ship the document, declare the fields and rules you care about as
 JSON, and the service returns a structured verdict — every value
 tagged with a bounding box, a confidence score, a validation outcome,
@@ -66,7 +68,7 @@ object containing, for every document you asked about:
 | **Execution trace**            | `trace[]` lists every executed pipeline node in DAG order with `started_at`, `completed_at`, `latency_ms`, and `status` (`success` / `failed` / `skipped`) — drop-in latency breakdown for ops dashboards. |
 | **Audit trail**                | Request id, per-stage latencies, per-doc model used, structured `outbound_call` log lines for every LLM / webhook / queue call, W3C trace context (`traceparent`, `tracestate`, `X-Correlation-Id`, `X-Tenant-Id`) propagated end-to-end. |
 | **Cost telemetry**             | Aggregated `usage` block in every response: input/output tokens + estimated USD cost — sourced from `genai-prices`, which is **provider-agnostic** (Anthropic, OpenAI, Google, Mistral, …). Broken down by agent and by model. Plus a per-call `cost_usd` on every `outbound_call` log line. |
-| **Prompt caching**             | Provider-aware across the full Anthropic + OpenAI + Google + Bedrock + Azure matrix. Anthropic / Bedrock-Anthropic: explicit `cache_control` on the system prompt + last user-message block (5-minute or 1-hour TTL). OpenAI / Azure-OpenAI: automatic caching for prompts ≥1024 tokens + a stable `prompt_cache_key` routing hint so concurrent requests from the same agent share cache-backend affinity. Google Gemini: caller-supplied `CachedContent` resource ids wired through to pydantic-ai. Cache writes / reads surface as `cache_creation_tokens` / `cache_read_tokens` on the response. Toggle the whole middleware with `FLYDESK_IDP_PROMPT_CACHE=off`. |
+| **Prompt caching**             | Provider-aware across the full Anthropic + OpenAI + Google + Bedrock + Azure matrix. Anthropic / Bedrock-Anthropic: explicit `cache_control` on the system prompt + last user-message block (5-minute or 1-hour TTL). OpenAI / Azure-OpenAI: automatic caching for prompts ≥1024 tokens + a stable `prompt_cache_key` routing hint so concurrent requests from the same agent share cache-backend affinity. Google Gemini: caller-supplied `CachedContent` resource ids wired through to pydantic-ai. Cache writes / reads surface as `cache_creation_tokens` / `cache_read_tokens` on the response. Toggle the whole middleware with `FLYDOCS_PROMPT_CACHE=off`. |
 
 A single request always carries a non-empty `documents` list — a
 single file is just a one-element list. Submit several entries to ship
@@ -108,8 +110,8 @@ id prefix.
 ### 1. Clone and install
 
 ```bash
-git clone https://github.com/firefly-operationOS/flydesk-idp.git
-cd flydesk-idp
+git clone https://github.com/firefly-operationOS/flydocs.git
+cd flydocs
 task deps:install        # uv sync --extra dev: pins the venv at .venv/
 ```
 
@@ -123,9 +125,9 @@ Edit `.env`. The two knobs you actually need to think about:
 
 ```env
 # Pick any provider + model id that fireflyframework-genai can resolve.
-FLYDESK_IDP_MODEL=anthropic:claude-sonnet-4-6
+FLYDOCS_MODEL=anthropic:claude-sonnet-4-6
 # Optional second provider used on transient errors. Mix providers freely.
-FLYDESK_IDP_FALLBACK_MODEL=openai:gpt-4o
+FLYDOCS_FALLBACK_MODEL=openai:gpt-4o
 
 # Set the credential matching the prefix you chose above. Set the
 # fallback's credential too if it's a different provider.
@@ -174,7 +176,7 @@ curl -s http://localhost:8400/api/v1/extract \
 ```
 
 The endpoint blocks until the pipeline finishes (or hits
-`FLYDESK_IDP_SYNC_TIMEOUT_S`, default 60 s). The response carries every
+`FLYDOCS_SYNC_TIMEOUT_S`, default 60 s). The response carries every
 extracted field with its bounding box, validation outcome, judge
 verdict, business-rule decisions, and a `usage` block with the USD
 cost. See [docs/api-reference.md](docs/api-reference.md) for the full
@@ -222,8 +224,8 @@ curl -s http://localhost:8400/api/v1/jobs/$JOB_ID/result | jq
 The webhook payload mirrors the EDA event envelope (`event_id`,
 `event_type`, `occurred_at`, `correlation_id`, …) and carries the full
 `ExtractionResult` for terminal `SUCCEEDED` / `PARTIAL_SUCCEEDED`
-states. Signed with HMAC-SHA256 in `X-FLYDESK-Signature` using
-`FLYDESK_IDP_WEBHOOK_HMAC_SECRET`.
+states. Signed with HMAC-SHA256 in `X-Flydocs-Signature` using
+`FLYDOCS_WEBHOOK_HMAC_SECRET`.
 
 ### 7. (Optional) Skip steps 3–4 with the full container stack
 
@@ -284,7 +286,7 @@ accurate); image-PDFs and rasters route to a pluggable `OcrEngine`.
 Pick `tesseract` (default), `docling` (layout-aware, surfaces
 table-cell + reading-order metadata -- see
 [docs/docling.md](docs/docling.md)), or `none`. The extractor can also
-splice a Markdown text-anchor (`FLYDESK_IDP_EXTRACTION_TEXT_ANCHOR=docling`)
+splice a Markdown text-anchor (`FLYDOCS_EXTRACTION_TEXT_ANCHOR=docling`)
 into the user prompt for the LLM to cross-reference -- useful for
 multilingual scans and dense tabular documents.
 
@@ -305,10 +307,10 @@ business logic stays small.
 | Async pipeline DAG               | `fireflyframework-agentic` `PipelineEngine` / `PipelineBuilder` |
 | Prompt management                | `fireflyframework-agentic` `PromptTemplate` + `PromptRegistry` (YAML-backed) |
 | LLM agents (multimodal)          | `fireflyframework-agentic` `FireflyAgent` over `pydantic-ai` |
-| EDA / async jobs                 | `fireflyframework-pyfly` `EventPublisher` — default `postgres` (durable outbox + LISTEN/NOTIFY); flip `FLYDESK_IDP_EDA_ADAPTER` to `memory` / `redis` / `kafka` |
+| EDA / async jobs                 | `fireflyframework-pyfly` `EventPublisher` — default `postgres` (durable outbox + LISTEN/NOTIFY); flip `FLYDOCS_EDA_ADAPTER` to `memory` / `redis` / `kafka` |
 | W3C trace context                | `fireflyframework-pyfly` `CorrelationFilter` (default web filter) + `pyfly.observability.correlation` |
 | K8s probes                       | `/actuator/health/liveness` + `/actuator/health/readiness` with `database_health` + `eda_health` indicators |
-| Multi-arch container             | `ghcr.io/firefly-operationos/flydesk-idp:latest` — linux/amd64 + linux/arm64 manifest |
+| Multi-arch container             | `ghcr.io/firefly-operationos/flydocs:latest` — linux/amd64 + linux/arm64 manifest |
 | Observability                    | structlog JSON, OTLP tracing, Prometheus metrics, actuator |
 | Persistence                      | SQLAlchemy async, Alembic, Postgres (SQLite for tests)  |
 | RFC 7807 error responses         | `@controller_advice` exception handler                  |
@@ -323,7 +325,7 @@ manually-constructed singletons** outside the DI graph.
 ## Project layout
 
 ```
-src/flydesk_idp/
+src/flydocs/
 ├── interfaces/              Public DTOs + enums — the stable HTTP contract
 ├── models/                  SQLAlchemy entities + async repositories
 ├── core/
@@ -398,7 +400,7 @@ finding but keeps the field valid). See
 [docs/standard-validators.md](docs/standard-validators.md).
 
 **Prompt catalog** — every LLM stage reads its system + user prompt
-from a YAML file under `src/flydesk_idp/resources/prompts/`. The
+from a YAML file under `src/flydocs/resources/prompts/`. The
 catalog is a normal `fireflyframework-pyfly` bean; you can swap templates, bump versions,
 or A/B-test prompts without touching Python. See
 [docs/prompts.md](docs/prompts.md).
@@ -447,7 +449,7 @@ Cycles are rejected before any LLM call is issued. See
 task deps:install        # uv sync --extra dev
 task lint:check          # ruff + pyright
 task test                # unit suite (~26 tests, <1s)
-task test:llm            # real-LLM smoke test (needs the provider key matching FLYDESK_IDP_MODEL)
+task test:llm            # real-LLM smoke test (needs the provider key matching FLYDOCS_MODEL)
 task dev:serve           # API on :8400
 task dev:worker          # async job consumer
 task migrate             # alembic upgrade head
@@ -465,7 +467,7 @@ Full task surface is in [Taskfile.yml](Taskfile.yml).
 
 <div align="center">
 
-**flydesk-idp** is part of [Firefly OperationOS](../) — the back-office
+**flydocs** is part of [Firefly OperationOS](../) — the back-office
 plane for Firefly Desk.
 
 Copyright © 2026 Firefly Software Solutions Inc
