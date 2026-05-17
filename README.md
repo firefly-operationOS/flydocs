@@ -470,6 +470,11 @@ open back-office plane. flydocs itself is product- and vertical-agnostic:
 plug it into any platform that needs to turn documents into structured,
 verifiable data.
 
+Official SDKs: [Python](sdks/python/) (`flydocs-sdk` — wheel on GitHub
+Releases, install with `uv add <release-url>`) · [Java / Spring
+Boot](sdks/java/) (`com.firefly.flydocs:flydocs-sdk` on GitHub
+Packages). See [sdks/README.md](sdks/) for install + quickstart.
+
 Copyright © 2026 Firefly Software Solutions Inc
 
 </div>

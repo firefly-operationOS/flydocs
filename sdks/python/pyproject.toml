@@ -1,0 +1,56 @@
+[project]
+name = "flydocs-sdk"
+version = "0.1.0"
+description = "Official Python SDK for flydocs — pure-multimodal Intelligent Document Processing. Sync + async clients, typed RFC 7807 errors, and an HMAC webhook verifier."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Firefly Software Solutions Inc" }]
+keywords = ["flydocs", "idp", "document-extraction", "multimodal-llm", "sdk", "client", "firefly-operationos"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "httpx>=0.27",
+    "pydantic>=2.6",
+]
+
+[project.urls]
+Homepage = "https://github.com/firefly-operationOS/flydocs"
+Documentation = "https://github.com/firefly-operationOS/flydocs/tree/main/sdks/python"
+Repository = "https://github.com/firefly-operationOS/flydocs"
+Issues = "https://github.com/firefly-operationOS/flydocs/issues"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "respx>=0.21",
+    "ruff>=0.6",
+]
+
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/flydocs_sdk"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+filterwarnings = ["error"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "N", "SIM"]
