@@ -5,9 +5,20 @@ Official Java/Spring Boot client for [flydocs](https://github.com/firefly-operat
 - **Java 25** toolchain (compiled to release 25).
 - **Spring Boot 3.5.x** managed dependencies — drops cleanly into any Boot 3.5 app.
 - **Reactive WebClient** with a blocking `FlydocsClient` facade.
+- **`flydocs-spring-boot-starter`** — drop-in autoconfig driven by `flydocs.*` properties.
 - **Records** for every DTO, immutable + null-tolerant.
 - **Typed errors** mapping the service's RFC 7807 problem-details.
 - **HMAC webhook verifier** with constant-time comparison.
+- **Opt-in retries** for transient 5xx + timeouts with exponential backoff.
+- **`AutoCloseable`** — own the Netty pool lifecycle explicitly, or let the starter manage it.
+
+## Modules
+
+| Artifact                          | Use it when …                                          |
+|-----------------------------------|--------------------------------------------------------|
+| `flydocs-sdk`                     | You're not on Spring Boot, or you want to build the client manually. |
+| `flydocs-spring-boot-starter`     | You're on Boot 3.5.x and want the client autowired from `flydocs.*` properties. Pulls in `flydocs-sdk` transitively. |
+| `flydocs-examples`                | Runnable, compile-checked examples; not deployed.      |
 
 ## Install (Maven)
 
@@ -37,12 +48,47 @@ Then in your project's `pom.xml`:
   </repository>
 </repositories>
 
+<!-- Plain SDK -->
 <dependency>
   <groupId>com.firefly.flydocs</groupId>
   <artifactId>flydocs-sdk</artifactId>
   <version>26.05.01</version>
 </dependency>
+
+<!-- ...OR Spring Boot starter (recommended on Boot 3.5.x) -->
+<dependency>
+  <groupId>com.firefly.flydocs</groupId>
+  <artifactId>flydocs-spring-boot-starter</artifactId>
+  <version>26.05.01</version>
+</dependency>
 ```
+
+## Quickstart — Spring Boot autoconfig
+
+```yaml
+# application.yaml
+flydocs:
+  base-url: http://localhost:8400
+  timeout: 60s
+  max-attempts: 3                 # retry transient 5xx with exponential backoff
+  webhook:
+    hmac-secret: ${FLYDOCS_WEBHOOK_HMAC_SECRET}     # optional; only set if you receive webhooks
+```
+
+```java
+@RestController
+class MyController {
+  private final FlydocsClientAsync flydocs;     // autowired by the starter
+  MyController(FlydocsClientAsync flydocs) { this.flydocs = flydocs; }
+
+  @PostMapping("/extract")
+  public Mono<ExtractionResult> extract(@RequestBody ExtractionRequest req) {
+    return flydocs.extract(req);
+  }
+}
+```
+
+The starter publishes a `FlydocsClientAsync`, a `FlydocsClient`, and (when `flydocs.webhook.hmac-secret` is set) a `WebhookVerifier`. The Netty pool is released cleanly on context shutdown.
 
 ## Quickstart — blocking (typed builders)
 
@@ -168,11 +214,36 @@ try {
 }
 ```
 
+## Examples
+
+Six runnable examples live in [`flydocs-examples/`](./flydocs-examples), in 1:1 parity with the [Python SDK's examples](../python/examples/):
+
+| Class                         | Mirrors                                  |
+|-------------------------------|------------------------------------------|
+| `FirstExtractionExample`      | `01_first_extraction.py`                 |
+| `TypedSchemaAndRulesExample`  | `02_typed_schema_and_rules.py`           |
+| `AsyncJobWithWaitExample`     | `03_async_job_with_wait.py`              |
+| `WebhookReceiverApplication`  | `04_webhook_receiver_fastapi.py`         |
+| `ErrorHandlingExample`        | `05_error_handling.py`                   |
+| `SyncFacadeExample`           | `06_sync_facade.py`                      |
+
+Run an example with:
+
+```bash
+mvn -pl flydocs-examples compile exec:java \
+  -Dexec.mainClass=com.firefly.flydocs.examples.FirstExtractionExample \
+  -Dexec.args="path/to/invoice.pdf"
+```
+
 ## Build + test locally
 
 ```bash
 cd sdks/java
-mvn verify
+mvn verify                                              # core + starter unit tests
+
+# Live integration tests against a running service (tag-gated):
+FLYDOCS_BASE_URL=http://localhost:8400 \
+  mvn -pl flydocs-sdk test -Dgroups=integration
 ```
 
 ## License

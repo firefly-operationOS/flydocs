@@ -45,7 +45,7 @@ import org.jspecify.annotations.Nullable;
  * ExtractionResult result = flydocs.extract(request);
  * }</pre>
  */
-public class FlydocsClient {
+public class FlydocsClient implements AutoCloseable {
     private final FlydocsClientAsync async;
 
     public FlydocsClient(FlydocsClientAsync async) {
@@ -54,6 +54,17 @@ public class FlydocsClient {
 
     public static Builder builder() {
         return new Builder();
+    }
+
+    /** Release the underlying Netty pool. Forwards to the async client. */
+    @Override
+    public void close() {
+        this.async.close();
+    }
+
+    /** Expose the async client for callers that need to drop down to {@link reactor.core.publisher.Mono}. */
+    public FlydocsClientAsync async() {
+        return this.async;
     }
 
     public VersionInfo version() {
@@ -144,6 +155,31 @@ public class FlydocsClient {
 
         public Builder defaultHeader(String name, String value) {
             inner.defaultHeader(name, value);
+            return this;
+        }
+
+        public Builder maxAttempts(int maxAttempts) {
+            inner.maxAttempts(maxAttempts);
+            return this;
+        }
+
+        public Builder retryMinBackoff(Duration backoff) {
+            inner.retryMinBackoff(backoff);
+            return this;
+        }
+
+        public Builder maxConnections(int maxConnections) {
+            inner.maxConnections(maxConnections);
+            return this;
+        }
+
+        public Builder pendingAcquireTimeout(Duration timeout) {
+            inner.pendingAcquireTimeout(timeout);
+            return this;
+        }
+
+        public Builder maxInMemorySize(int bytes) {
+            inner.maxInMemorySize(bytes);
             return this;
         }
 
