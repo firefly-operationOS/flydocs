@@ -53,7 +53,15 @@ def cmd_serve(_: argparse.Namespace) -> int:
 
 
 def cmd_worker(_: argparse.Namespace) -> int:
-    """Boot pyfly, resolve :class:`JobWorker` from the container, run forever."""
+    """Boot pyfly, run the :class:`JobWorker` and :class:`JobReaper` together.
+
+    The reaper is colocated with the worker so a single container fulfils
+    both responsibilities: drain the EDA outbox AND revive orphans whose
+    triggering event was lost (worker crash, submit-publish crash,
+    delayed-publish task killed before its sleep completed). Running the
+    reaper in every worker replica is safe -- duplicate republishes are
+    deduped at claim time by the atomic ``mark_running`` transition.
+    """
 
     async def _run() -> None:
         from pyfly.core import PyFlyApplication
@@ -63,22 +71,46 @@ def cmd_worker(_: argparse.Namespace) -> int:
         from flydocs.config import IDPSettings
         from flydocs.core.services.pipeline import PipelineOrchestrator
         from flydocs.core.services.webhook import WebhookPublisher
+        from flydocs.core.services.workers.job_reaper import JobReaper
         from flydocs.core.services.workers.job_worker import JobWorker
         from flydocs.models.repositories import ExtractionJobRepository
 
         pyfly_app = PyFlyApplication(FlydocsApplication)
         await pyfly_app.startup()
+        worker: JobWorker | None = None
+        reaper: JobReaper | None = None
         try:
             container = pyfly_app.context.container
+            settings = container.resolve(IDPSettings)
             worker = JobWorker(
                 orchestrator=container.resolve(PipelineOrchestrator),
                 repository=container.resolve(ExtractionJobRepository),
                 event_publisher=container.resolve(EventPublisher),
                 webhook=container.resolve(WebhookPublisher),
-                settings=container.resolve(IDPSettings),
+                settings=settings,
             )
-            await worker.run_forever()
+            reaper = JobReaper(
+                repository=container.resolve(ExtractionJobRepository),
+                event_publisher=container.resolve(EventPublisher),
+                settings=settings,
+            )
+            worker_task = asyncio.create_task(worker.run_forever(), name="job-worker")
+            reaper_task = asyncio.create_task(reaper.run_forever(), name="job-reaper")
+            done, pending = await asyncio.wait(
+                {worker_task, reaper_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for task in pending:
+                task.cancel()
+            for task in done:
+                exc = task.exception()
+                if exc is not None:
+                    raise exc
         finally:
+            if worker is not None:
+                worker.stop()
+            if reaper is not None:
+                reaper.stop()
             await pyfly_app.shutdown()
 
     asyncio.run(_run())
@@ -86,7 +118,7 @@ def cmd_worker(_: argparse.Namespace) -> int:
 
 
 def cmd_bbox_worker(_: argparse.Namespace) -> int:
-    """Boot pyfly, resolve :class:`BboxRefineWorker`, run forever."""
+    """Boot pyfly, run :class:`BboxRefineWorker` + :class:`BboxReaper` together."""
 
     async def _run() -> None:
         from pyfly.core import PyFlyApplication
@@ -97,23 +129,47 @@ def cmd_bbox_worker(_: argparse.Namespace) -> int:
         from flydocs.core.services.bbox import BboxRefiner
         from flydocs.core.services.binary import BinaryNormalizer
         from flydocs.core.services.webhook import WebhookPublisher
+        from flydocs.core.services.workers.bbox_reaper import BboxReaper
         from flydocs.core.services.workers.bbox_refine_worker import BboxRefineWorker
         from flydocs.models.repositories import ExtractionJobRepository
 
         pyfly_app = PyFlyApplication(FlydocsApplication)
         await pyfly_app.startup()
+        worker: BboxRefineWorker | None = None
+        reaper: BboxReaper | None = None
         try:
             container = pyfly_app.context.container
+            settings = container.resolve(IDPSettings)
             worker = BboxRefineWorker(
                 repository=container.resolve(ExtractionJobRepository),
                 event_publisher=container.resolve(EventPublisher),
                 webhook=container.resolve(WebhookPublisher),
                 normalizer=container.resolve(BinaryNormalizer),
                 refiner=container.resolve(BboxRefiner),
-                settings=container.resolve(IDPSettings),
+                settings=settings,
             )
-            await worker.run_forever()
+            reaper = BboxReaper(
+                repository=container.resolve(ExtractionJobRepository),
+                event_publisher=container.resolve(EventPublisher),
+                settings=settings,
+            )
+            worker_task = asyncio.create_task(worker.run_forever(), name="bbox-worker")
+            reaper_task = asyncio.create_task(reaper.run_forever(), name="bbox-reaper")
+            done, pending = await asyncio.wait(
+                {worker_task, reaper_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for task in pending:
+                task.cancel()
+            for task in done:
+                exc = task.exception()
+                if exc is not None:
+                    raise exc
         finally:
+            if worker is not None:
+                worker.stop()
+            if reaper is not None:
+                reaper.stop()
             await pyfly_app.shutdown()
 
     asyncio.run(_run())
