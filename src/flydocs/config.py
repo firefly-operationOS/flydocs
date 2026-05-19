@@ -100,14 +100,39 @@ class IDPSettings(BaseSettings):
     job_max_attempts: int = 3
     # Stale-RUNNING lease window. A job in RUNNING whose ``started_at``
     # is older than this is treated as orphaned (worker crashed mid-run)
-    # and becomes re-claimable on the next at-least-once redelivery.
-    # The atomic ``mark_running`` claim uses this to reject concurrent
-    # second deliveries while still permitting crash recovery. Sized to
-    # 2x ``async_timeout_s`` so a slow-but-alive worker always wins its
-    # own lease over a redelivery.
-    job_run_lease_s: int = 2400
-    # Same idea for the bbox-refine leg; sized to 2x ``bbox_refine_timeout_s``.
-    bbox_refine_lease_s: int = 1200
+    # and becomes re-claimable. The atomic ``mark_running`` claim uses
+    # this to reject concurrent second deliveries while still permitting
+    # crash recovery via the periodic reaper. Sized to
+    # ``async_timeout_s + 60s`` so a legit run that uses the full
+    # asyncio.wait_for budget still wins its own lease, with 60s
+    # headroom for connection teardown / commit latency.
+    job_run_lease_s: int = 1260
+    # Same for the bbox-refine leg.
+    bbox_refine_lease_s: int = 660
+    # ----- Reaper -----------------------------------------------------
+    # The reaper runs alongside each worker (one task per process) and
+    # republishes events for jobs stuck in non-terminal states. It is
+    # the only path that revives orphans:
+    #   * RUNNING whose claimant crashed past its lease;
+    #   * QUEUED whose submit handler crashed between row INSERT and
+    #     outbox PUBLISH (or whose worker died during ``_delayed_publish``);
+    #   * PARTIAL_SUCCEEDED whose bbox-refine event was never published;
+    #   * REFINING_BBOXES whose bbox claimant crashed past its lease.
+    # Each republish is deduped at claim time by the atomic ``mark_*``
+    # transitions, so running multiple replicas of the reaper is safe
+    # (it just wastes a few outbox INSERTs per stale job).
+    reaper_sweep_interval_s: int = 60
+    # Threshold to consider a QUEUED row's event lost. Sized to 2x
+    # ``retry_max_delay_s`` so a legit in-flight ``_delayed_publish``
+    # task is never trampled by the reaper.
+    queued_orphan_threshold_s: int = 600
+    # Threshold to consider a PARTIAL_SUCCEEDED row's bbox event lost
+    # when ``bbox_refine_started_at`` is still NULL (first publish never
+    # landed). The clock starts at the row's ``started_at`` (main
+    # extraction claim time), so this has to cover any reasonable
+    # extraction wall-clock plus the bus poll cycle. Default
+    # ``async_timeout_s + 120s``.
+    partial_succeeded_orphan_threshold_s: int = 1320
 
     # Per-pipeline-step timeouts (env-tunable). Conservative defaults so
     # multi-file requests + the empty-array auto-retry don't run into a
