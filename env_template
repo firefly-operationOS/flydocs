@@ -57,6 +57,35 @@ FLYDOCS_SYNC_TIMEOUT_S=60
 FLYDOCS_ASYNC_TIMEOUT_S=300
 FLYDOCS_JOB_MAX_ATTEMPTS=3
 
+# ----------------------------------------------------------------------------
+# Concurrency: lease windows + reaper (see docs/concurrency.md)
+# ----------------------------------------------------------------------------
+# How long a RUNNING claim is considered fresh. Past this, the row is
+# treated as orphaned (worker crashed mid-run) and the reaper republishes
+# the triggering event for another worker to pick up. Must be > the
+# per-attempt budget the orchestrator uses (asyncio.wait_for ceiling).
+# Defaults are sized to ``async_timeout_s + 60`` and ``bbox_refine_timeout_s
+# + 60``; tighten them only if you've also tightened the per-attempt
+# budgets above.
+FLYDOCS_JOB_RUN_LEASE_S=1260
+FLYDOCS_BBOX_REFINE_LEASE_S=660
+
+# How often each reaper sweeps for stuck jobs (per worker process).
+FLYDOCS_REAPER_SWEEP_INTERVAL_S=60
+
+# How long a QUEUED row can sit before the reaper concludes its triggering
+# event was lost (submit handler crashed between row INSERT and outbox
+# PUBLISH, or worker's delayed-publish task was killed before its delay
+# fired). Sized to ``2 * retry_max_delay_s`` so a legitimate retry is
+# never trampled.
+FLYDOCS_QUEUED_ORPHAN_THRESHOLD_S=600
+
+# How long after the main extraction's ``started_at`` we conclude the
+# bbox-refine event was lost (PARTIAL_SUCCEEDED with bbox_refine_status=
+# 'pending' and bbox_refine_started_at IS NULL). Sized to
+# ``async_timeout_s + 120``.
+FLYDOCS_PARTIAL_SUCCEEDED_ORPHAN_THRESHOLD_S=1320
+
 # Optional pre-extraction text rendering. ``none`` (default) sends only the
 # binary to the LLM. ``docling`` runs Docling over the document first and
 # splices the resulting Markdown into the user prompt ahead of the binary

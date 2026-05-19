@@ -68,7 +68,7 @@ import reactor.util.retry.Retry;
  * }</pre>
  */
 public class FlydocsClientAsync implements AutoCloseable {
-    private static final String USER_AGENT = "flydocs-sdk-java/26.05.01";
+    private static final String USER_AGENT = "flydocs-sdk-java/26.05.02";
     /** Default timeout when the caller does not override. */
     public static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(60);
 

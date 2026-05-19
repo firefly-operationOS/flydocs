@@ -52,14 +52,14 @@ Then in your project's `pom.xml`:
 <dependency>
   <groupId>com.firefly.flydocs</groupId>
   <artifactId>flydocs-sdk</artifactId>
-  <version>26.05.01</version>
+  <version>26.05.02</version>
 </dependency>
 
 <!-- ...OR Spring Boot starter (recommended on Boot 3.5.x) -->
 <dependency>
   <groupId>com.firefly.flydocs</groupId>
   <artifactId>flydocs-spring-boot-starter</artifactId>
-  <version>26.05.01</version>
+  <version>26.05.02</version>
 </dependency>
 ```
 
