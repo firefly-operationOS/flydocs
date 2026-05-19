@@ -98,6 +98,16 @@ class IDPSettings(BaseSettings):
     # 7-PDF multi-file bundles with the empty-array auto-retry path.
     async_timeout_s: int = 1200
     job_max_attempts: int = 3
+    # Stale-RUNNING lease window. A job in RUNNING whose ``started_at``
+    # is older than this is treated as orphaned (worker crashed mid-run)
+    # and becomes re-claimable on the next at-least-once redelivery.
+    # The atomic ``mark_running`` claim uses this to reject concurrent
+    # second deliveries while still permitting crash recovery. Sized to
+    # 2x ``async_timeout_s`` so a slow-but-alive worker always wins its
+    # own lease over a redelivery.
+    job_run_lease_s: int = 2400
+    # Same idea for the bbox-refine leg; sized to 2x ``bbox_refine_timeout_s``.
+    bbox_refine_lease_s: int = 1200
 
     # Per-pipeline-step timeouts (env-tunable). Conservative defaults so
     # multi-file requests + the empty-array auto-retry don't run into a

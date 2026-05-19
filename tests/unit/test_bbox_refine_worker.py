@@ -92,11 +92,18 @@ class _StubRepo:
     async def get(self, job_id: str) -> _StubJob | None:
         return self.job if self.job.id == job_id else None
 
-    async def mark_bbox_refining(self, job_id: str) -> _StubJob | None:
+    async def mark_bbox_refining(self, job_id: str, *, lease_seconds: int) -> _StubJob | None:
+        # Mirror the production semantics: only claim PARTIAL_SUCCEEDED
+        # (or stale REFINING_BBOXES); return None otherwise.
+        if self.job.status not in (
+            JobStatus.PARTIAL_SUCCEEDED.value,
+            JobStatus.REFINING_BBOXES.value,
+        ):
+            return None
         self.job.status = JobStatus.REFINING_BBOXES.value
         self.job.bbox_refine_status = "running"
         self.job.bbox_refine_attempts = (self.job.bbox_refine_attempts or 0) + 1
-        self.calls.append(("mark_bbox_refining", {"job_id": job_id}))
+        self.calls.append(("mark_bbox_refining", {"job_id": job_id, "lease_seconds": lease_seconds}))
         return self.job
 
     async def mark_bbox_refined(self, job_id: str, *, result: dict[str, Any]) -> _StubJob | None:
@@ -116,6 +123,14 @@ class _StubRepo:
         for k, v in changes.items():
             setattr(self.job, k, v)
         self.calls.append(("update", changes))
+        return self.job
+
+    async def requeue_bbox_refine(self, job_id: str) -> _StubJob | None:
+        if self.job.status != JobStatus.REFINING_BBOXES.value:
+            return None
+        self.job.status = JobStatus.PARTIAL_SUCCEEDED.value
+        self.job.bbox_refine_status = "pending"
+        self.calls.append(("requeue_bbox_refine", {"job_id": job_id}))
         return self.job
 
 

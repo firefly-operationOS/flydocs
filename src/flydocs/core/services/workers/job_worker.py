@@ -143,12 +143,25 @@ class JobWorker:
         if job is None:
             logger.warning("EDA delivered unknown job %s -- dropping", job_id)
             return
-        if JobStatus(job.status) in (JobStatus.SUCCEEDED, JobStatus.CANCELLED):
+        if JobStatus(job.status) in (JobStatus.SUCCEEDED, JobStatus.CANCELLED, JobStatus.FAILED):
             logger.info("Job %s already in terminal status %s -- skipping", job.id, job.status)
             return
 
-        # mark_running increments attempts atomically in Postgres.
-        job = await self._repository.mark_running(job.id) or job
+        # Atomic compare-and-swap: only one worker can claim a QUEUED
+        # (or stale-RUNNING) job. ``None`` means another worker beat us
+        # to it or the job was cancelled between our ``get`` and this
+        # claim -- both are silent no-ops.
+        claimed = await self._repository.mark_running(
+            job.id, lease_seconds=self._settings.job_run_lease_s
+        )
+        if claimed is None:
+            logger.info(
+                "Job %s could not be claimed -- already owned by another worker or "
+                "no longer in a claimable state. Skipping at-least-once redelivery.",
+                job.id,
+            )
+            return
+        job = claimed
         attempts = job.attempts or 1
         log_outbound(
             "worker",
@@ -193,9 +206,23 @@ class JobWorker:
             # the bboxes change between PARTIAL_SUCCEEDED and SUCCEEDED.
             terminal_status = JobStatus.PARTIAL_SUCCEEDED if wants_bbox_refine else JobStatus.SUCCEEDED
             if wants_bbox_refine:
-                await self._repository.mark_partial_succeeded(job.id, result=result_payload)
+                finalised = await self._repository.mark_partial_succeeded(
+                    job.id, result=result_payload
+                )
             else:
-                await self._repository.mark_succeeded(job.id, result=result_payload)
+                finalised = await self._repository.mark_succeeded(
+                    job.id, result=result_payload
+                )
+            if finalised is None:
+                # Another worker (or the bbox leg) already advanced the
+                # row past RUNNING. Our work is duplicate -- don't fire
+                # the webhook a second time, don't republish.
+                logger.info(
+                    "Job %s already finalised by another worker -- "
+                    "discarding our duplicate result",
+                    job.id,
+                )
+                return
             log_outbound(
                 "worker",
                 op="job.run",
@@ -256,7 +283,16 @@ class JobWorker:
             )
 
             if terminal:
-                await self._repository.mark_failed(job.id, code=error_code, message=str(exc))
+                failed = await self._repository.mark_failed(
+                    job.id, code=error_code, message=str(exc)
+                )
+                if failed is None:
+                    logger.info(
+                        "Job %s no longer in RUNNING -- another worker handled the "
+                        "terminal transition, skipping our webhook",
+                        job.id,
+                    )
+                    return
                 await self._fire_webhook(
                     job_id=job.id,
                     status=JobStatus.FAILED,
@@ -279,10 +315,20 @@ class JobWorker:
                     exc,
                     delay,
                 )
-                # Mark QUEUED again so the API surface reflects the retry,
-                # then schedule the re-publish without blocking the handler.
-                await self._repository.update(job.id, status=JobStatus.QUEUED.value)
-                asyncio.create_task(self._delayed_publish(job.id, delay))
+                # Atomic RUNNING -> QUEUED so the API surface reflects
+                # the retry. If the row is no longer in RUNNING (e.g. a
+                # cancel won the race against our claim, or another
+                # worker took over after our lease expired) we skip the
+                # republish: someone else owns the next step.
+                requeued = await self._repository.requeue_for_retry(job.id)
+                if requeued is None:
+                    logger.info(
+                        "Job %s not requeueable (status changed under us) -- "
+                        "skipping retry publish",
+                        job.id,
+                    )
+                else:
+                    asyncio.create_task(self._delayed_publish(job.id, delay))
 
     def _backoff_delay(self, attempts: int) -> float:
         """Capped exponential backoff with a 20% jitter."""

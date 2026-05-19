@@ -2,19 +2,35 @@
 """Async repository for :class:`ExtractionJob`.
 
 Wraps an ``AsyncSession`` factory so callers can be ignorant of the
-transaction boundaries. Each method opens its own short-lived session
-+ transaction; results are detached pydantic-style dicts so callers
-don't accidentally lazy-load through a closed session.
+transaction boundaries. Each method opens its own short-lived session +
+transaction.
+
+Concurrency model
+=================
+
+Every state-changing method is a **single conditional UPDATE** with an
+explicit precondition on ``status`` (and where relevant, a lease
+threshold on ``started_at``). The query returns the new row only when
+the precondition matched; otherwise it returns ``None`` so the caller
+can detect "I lost the race". This pattern makes the transitions safe
+under concurrent delivery from multiple worker replicas without needing
+``SELECT ... FOR UPDATE`` or serialisable isolation -- two writers
+trying the same transition will be serialised by Postgres' row-level
+lock on UPDATE, and the loser's ``WHERE`` clause won't match the
+already-updated row.
+
+The legal predecessor set for each transition is documented inline.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from flydocs.models.entities.extraction_job import ExtractionJob
@@ -111,8 +127,20 @@ class ExtractionJobRepository:
             await session.refresh(job)
             return job
 
+    # ``IntegrityError`` re-export so callers can ``except`` it without
+    # importing SQLAlchemy themselves -- keeps the repository the single
+    # ORM-facing boundary.
+    IntegrityError = IntegrityError
+
     async def update(self, job_id: str, **changes: Any) -> ExtractionJob | None:
-        """Apply *changes* atomically; returns the updated row or None."""
+        """Unconditional field update.
+
+        WARNING: this is a read-modify-write and is NOT safe for
+        status transitions or any other field where concurrent writers
+        can race. Use it only for fields no other writer touches (or
+        idempotent overwrites). Status transitions go through the
+        ``mark_*`` methods below.
+        """
         async with self._session_factory() as session:
             job = await session.get(ExtractionJob, job_id)
             if job is None:
@@ -123,106 +151,285 @@ class ExtractionJobRepository:
             await session.refresh(job)
             return job
 
-    async def mark_running(self, job_id: str) -> ExtractionJob | None:
-        """Transition to RUNNING and increment the attempts counter atomically."""
-        async with self._session_factory() as session:
-            job = await session.get(ExtractionJob, job_id)
-            if job is None:
-                return None
-            job.status = "RUNNING"
-            job.started_at = _utcnow()
-            # Increment in Python: the SQLAlchemy ORM session writes back the
-            # new scalar on commit. A bare ``Column + 1`` expression doesn't
-            # work with setattr on a managed instance.
-            job.attempts = (job.attempts or 0) + 1
-            await session.commit()
-            await session.refresh(job)
-            return job
+    # ------------------------------------------------------------------
+    # Atomic state transitions.
+    #
+    # Each method runs a single ``UPDATE ... WHERE id=? AND status IN
+    # (legal_predecessors)`` against Postgres. The row-level lock on
+    # UPDATE serialises concurrent writers; the WHERE precondition then
+    # decides who wins. A return value of ``None`` means "the row was
+    # already past this transition" -- the caller should treat the work
+    # as having been done by someone else.
+    # ------------------------------------------------------------------
 
-    async def mark_succeeded(self, job_id: str, *, result: dict[str, Any]) -> ExtractionJob | None:
-        return await self.update(
-            job_id,
-            status="SUCCEEDED",
-            finished_at=_utcnow(),
-            result_json=result,
-            error_code=None,
-            error_message=None,
+    async def _atomic_update(
+        self,
+        *,
+        job_id: str,
+        where: Any,
+        values: dict[str, Any],
+    ) -> ExtractionJob | None:
+        """Execute ``UPDATE ... WHERE id AND <where> RETURNING *``.
+
+        ``RETURNING`` works on Postgres (always) and SQLite >= 3.35 (the
+        Python 3.13 stdlib ships >=3.45). Combining row-level UPDATE
+        locking with the WHERE-precondition predicate gives us a
+        compare-and-swap without ``FOR UPDATE``.
+        """
+        async with self._session_factory() as session:
+            stmt = (
+                update(ExtractionJob)
+                .where(ExtractionJob.id == job_id, where)
+                .values(**values)
+                .returning(ExtractionJob)
+                .execution_options(synchronize_session=False)
+            )
+            result = await session.execute(stmt)
+            row = result.scalar_one_or_none()
+            await session.commit()
+            return row
+
+    async def mark_running(
+        self,
+        job_id: str,
+        *,
+        lease_seconds: int,
+    ) -> ExtractionJob | None:
+        """Atomically claim a QUEUED job and transition it to RUNNING.
+
+        Legal predecessors:
+
+        * ``QUEUED`` -- first delivery (or the worker requeued itself
+          for a retry).
+        * ``RUNNING`` with a stale ``started_at`` -- the worker that
+          owned the previous claim crashed (``lease_seconds`` window
+          elapsed), so another worker can pick the orphan up.
+
+        Returns the post-claim row when the claim won, ``None`` when
+        the job is no longer claimable (e.g. cancelled, succeeded, or
+        another worker holds a fresh lease).
+        """
+        now = _utcnow()
+        stale_cutoff = now - timedelta(seconds=max(0, lease_seconds))
+        return await self._atomic_update(
+            job_id=job_id,
+            where=or_(
+                ExtractionJob.status == "QUEUED",
+                and_(
+                    ExtractionJob.status == "RUNNING",
+                    # ``started_at < cutoff`` evaluates NULL → row excluded,
+                    # so jobs that somehow have RUNNING without started_at
+                    # are not reclaimed (defensive).
+                    ExtractionJob.started_at < stale_cutoff,
+                ),
+            ),
+            values={
+                "status": "RUNNING",
+                "started_at": now,
+                "attempts": ExtractionJob.attempts + 1,
+            },
         )
 
-    async def mark_failed(self, job_id: str, *, code: str, message: str) -> ExtractionJob | None:
-        return await self.update(
-            job_id,
-            status="FAILED",
-            finished_at=_utcnow(),
-            error_code=code,
-            error_message=message,
+    async def mark_succeeded(
+        self,
+        job_id: str,
+        *,
+        result: dict[str, Any],
+    ) -> ExtractionJob | None:
+        """RUNNING (or REFINING_BBOXES) -> SUCCEEDED with the final result.
+
+        ``REFINING_BBOXES`` is allowed because the bbox-refine leg
+        terminates by writing SUCCEEDED through this method.
+        """
+        return await self._atomic_update(
+            job_id=job_id,
+            where=ExtractionJob.status.in_(("RUNNING", "REFINING_BBOXES")),
+            values={
+                "status": "SUCCEEDED",
+                "finished_at": _utcnow(),
+                "result_json": result,
+                "error_code": None,
+                "error_message": None,
+            },
+        )
+
+    async def mark_failed(
+        self,
+        job_id: str,
+        *,
+        code: str,
+        message: str,
+    ) -> ExtractionJob | None:
+        """RUNNING -> FAILED (terminal). No-op if the row already moved on."""
+        return await self._atomic_update(
+            job_id=job_id,
+            where=ExtractionJob.status == "RUNNING",
+            values={
+                "status": "FAILED",
+                "finished_at": _utcnow(),
+                "error_code": code,
+                "error_message": message,
+            },
         )
 
     async def mark_cancelled(self, job_id: str) -> ExtractionJob | None:
-        return await self.update(job_id, status="CANCELLED", finished_at=_utcnow())
+        """QUEUED -> CANCELLED. Returns None if the worker has already started.
+
+        We deliberately do NOT permit cancelling a RUNNING job — there's
+        no mid-flight cancellation hook in the orchestrator today. The
+        atomic precondition guarantees a cancel sent the same instant
+        the worker claims the row will either: (a) win and the worker's
+        ``mark_running`` returns ``None``, or (b) lose and the caller
+        gets a ``JobNotCancellable`` response. There is no third state.
+        """
+        return await self._atomic_update(
+            job_id=job_id,
+            where=ExtractionJob.status == "QUEUED",
+            values={
+                "status": "CANCELLED",
+                "finished_at": _utcnow(),
+            },
+        )
+
+    async def requeue_for_retry(self, job_id: str) -> ExtractionJob | None:
+        """RUNNING -> QUEUED. Used by the worker's retry path.
+
+        Atomic: a cancel arriving in the same instant can race with this.
+        The retry's WHERE matches RUNNING; the cancel's WHERE matches
+        QUEUED. They cannot both succeed -- one will return None and
+        bail. (Cancel cannot match RUNNING anyway, so concretely:
+        requeue wins, cancel was already rejected upstream.)
+        """
+        return await self._atomic_update(
+            job_id=job_id,
+            where=ExtractionJob.status == "RUNNING",
+            values={"status": "QUEUED"},
+        )
 
     # -- bbox-refine leg ----------------------------------------------
 
-    async def mark_partial_succeeded(self, job_id: str, *, result: dict[str, Any]) -> ExtractionJob | None:
-        """Main extraction done; bbox refine pending.
+    async def mark_partial_succeeded(
+        self,
+        job_id: str,
+        *,
+        result: dict[str, Any],
+    ) -> ExtractionJob | None:
+        """RUNNING -> PARTIAL_SUCCEEDED. Main extraction done; bbox pending.
 
-        Persists the LLM-bbox result, transitions the job to
-        ``PARTIAL_SUCCEEDED``, and stamps the bbox leg as ``pending``.
-        Callers reading ``GET /api/v1/jobs/{id}/result`` get the
-        ungrounded result immediately; grounded coordinates land once
-        the refine worker finishes.
+        Persists the LLM-bbox result, transitions the job, and stamps
+        the bbox leg as ``pending``. Callers reading
+        ``GET /api/v1/jobs/{id}/result`` get the ungrounded result
+        immediately; grounded coordinates land once the refine worker
+        finishes.
         """
-        return await self.update(
-            job_id,
-            status="PARTIAL_SUCCEEDED",
-            result_json=result,
-            error_code=None,
-            error_message=None,
-            bbox_refine_status="pending",
+        return await self._atomic_update(
+            job_id=job_id,
+            where=ExtractionJob.status == "RUNNING",
+            values={
+                "status": "PARTIAL_SUCCEEDED",
+                "result_json": result,
+                "error_code": None,
+                "error_message": None,
+                "bbox_refine_status": "pending",
+            },
         )
 
-    async def mark_bbox_refining(self, job_id: str) -> ExtractionJob | None:
-        """Bbox worker has picked up the event and started grounding.
+    async def mark_bbox_refining(
+        self,
+        job_id: str,
+        *,
+        lease_seconds: int,
+    ) -> ExtractionJob | None:
+        """Atomically claim a PARTIAL_SUCCEEDED job for bbox refinement.
 
-        Atomically transitions ``PARTIAL_SUCCEEDED`` -> ``REFINING_BBOXES``
-        and increments the bbox attempt counter so retries are bounded.
+        Legal predecessors:
+
+        * ``PARTIAL_SUCCEEDED`` -- the main extraction just finished
+          and published the refine event.
+        * ``REFINING_BBOXES`` with stale ``bbox_refine_started_at`` --
+          the previous bbox-worker crashed; reclaim is allowed.
+
+        Returns ``None`` when another worker holds a fresh lease, or
+        when the job advanced to SUCCEEDED / FAILED in the meantime.
         """
-        async with self._session_factory() as session:
-            job = await session.get(ExtractionJob, job_id)
-            if job is None:
-                return None
-            job.status = "REFINING_BBOXES"
-            job.bbox_refine_status = "running"
-            job.bbox_refine_started_at = _utcnow()
-            job.bbox_refine_attempts = (job.bbox_refine_attempts or 0) + 1
-            await session.commit()
-            await session.refresh(job)
-            return job
-
-    async def mark_bbox_refined(self, job_id: str, *, result: dict[str, Any]) -> ExtractionJob | None:
-        """Refiner produced grounded coordinates; flip to fully SUCCEEDED."""
-        return await self.update(
-            job_id,
-            status="SUCCEEDED",
-            finished_at=_utcnow(),
-            result_json=result,
-            bbox_refine_status="succeeded",
-            bbox_refine_finished_at=_utcnow(),
-            bbox_refine_error_code=None,
-            bbox_refine_error_message=None,
+        now = _utcnow()
+        stale_cutoff = now - timedelta(seconds=max(0, lease_seconds))
+        return await self._atomic_update(
+            job_id=job_id,
+            where=or_(
+                ExtractionJob.status == "PARTIAL_SUCCEEDED",
+                and_(
+                    ExtractionJob.status == "REFINING_BBOXES",
+                    ExtractionJob.bbox_refine_started_at < stale_cutoff,
+                ),
+            ),
+            values={
+                "status": "REFINING_BBOXES",
+                "bbox_refine_status": "running",
+                "bbox_refine_started_at": now,
+                "bbox_refine_attempts": ExtractionJob.bbox_refine_attempts + 1,
+            },
         )
 
-    async def mark_bbox_refine_failed(self, job_id: str, *, code: str, message: str) -> ExtractionJob | None:
-        """Refiner gave up; revert to ``PARTIAL_SUCCEEDED`` so the LLM-bbox
-        result stays readable. Failure context is captured on the row.
+    async def requeue_bbox_refine(self, job_id: str) -> ExtractionJob | None:
+        """REFINING_BBOXES -> PARTIAL_SUCCEEDED (with status=pending).
+
+        Used by the bbox worker's retry path: revert the leg so the next
+        delivery's claim precondition matches again.
         """
-        return await self.update(
-            job_id,
-            status="PARTIAL_SUCCEEDED",
-            bbox_refine_status="failed",
-            bbox_refine_finished_at=_utcnow(),
-            bbox_refine_error_code=code,
-            bbox_refine_error_message=message,
+        return await self._atomic_update(
+            job_id=job_id,
+            where=ExtractionJob.status == "REFINING_BBOXES",
+            values={
+                "status": "PARTIAL_SUCCEEDED",
+                "bbox_refine_status": "pending",
+            },
+        )
+
+    async def mark_bbox_refined(
+        self,
+        job_id: str,
+        *,
+        result: dict[str, Any],
+    ) -> ExtractionJob | None:
+        """REFINING_BBOXES -> SUCCEEDED with grounded coordinates."""
+        return await self._atomic_update(
+            job_id=job_id,
+            where=ExtractionJob.status == "REFINING_BBOXES",
+            values={
+                "status": "SUCCEEDED",
+                "finished_at": _utcnow(),
+                "result_json": result,
+                "bbox_refine_status": "succeeded",
+                "bbox_refine_finished_at": _utcnow(),
+                "bbox_refine_error_code": None,
+                "bbox_refine_error_message": None,
+            },
+        )
+
+    async def mark_bbox_refine_failed(
+        self,
+        job_id: str,
+        *,
+        code: str,
+        message: str,
+    ) -> ExtractionJob | None:
+        """REFINING_BBOXES -> PARTIAL_SUCCEEDED with a failure record.
+
+        The LLM-bbox result stays readable; only the grounded overlay
+        is missing. The caller (bbox worker) already published a
+        partial webhook -- nothing new to deliver.
+        """
+        return await self._atomic_update(
+            job_id=job_id,
+            where=ExtractionJob.status == "REFINING_BBOXES",
+            values={
+                "status": "PARTIAL_SUCCEEDED",
+                "bbox_refine_status": "failed",
+                "bbox_refine_finished_at": _utcnow(),
+                "bbox_refine_error_code": code,
+                "bbox_refine_error_message": message,
+            },
         )
 
 
