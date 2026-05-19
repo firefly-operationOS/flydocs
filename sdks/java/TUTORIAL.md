@@ -21,7 +21,9 @@ A complete walkthrough of the flydocs Java/Spring Boot SDK. Every section is a s
 6. [Asynchronous extraction with `waitForCompletion`](#6-asynchronous-extraction-with-waitforcompletion)
 7. [Webhook delivery + signature verification](#7-webhook-delivery--signature-verification)
 8. [Error handling — RFC 7807 problem-details](#8-error-handling--rfc-7807-problem-details)
-9. [Reactive usage](#9-reactive-usage)
+9. [Spring Boot starter](#9-spring-boot-starter)
+10. [Resilience knobs (opt-in retry + pool sizing)](#10-resilience-knobs-opt-in-retry--pool-sizing)
+11. [Reactive usage](#11-reactive-usage)
 
 ---
 
@@ -56,7 +58,7 @@ Add the repository + dependency to your `pom.xml`:
 <dependency>
   <groupId>com.firefly.flydocs</groupId>
   <artifactId>flydocs-sdk</artifactId>
-  <version>26.05.01</version>
+  <version>26.05.02</version>
 </dependency>
 ```
 
@@ -327,7 +329,108 @@ Common `code` values:
 
 ---
 
-## 9. Reactive usage
+## 9. Spring Boot starter
+
+`flydocs-spring-boot-starter` autowires the client from `flydocs.*`
+properties. The starter declares `@ConditionalOnClass(FlydocsClientAsync)`
++ `@ConditionalOnProperty("flydocs.base-url")`, so it only activates
+when the SDK is on the classpath and the base URL is configured.
+
+```xml
+<dependency>
+  <groupId>com.firefly.flydocs</groupId>
+  <artifactId>flydocs-spring-boot-starter</artifactId>
+  <version>26.05.02</version>
+</dependency>
+```
+
+```yaml
+# application.yaml
+flydocs:
+  base-url: http://localhost:8400
+  timeout: 60s
+  max-attempts: 3                              # retry transient 5xx + timeouts
+  retry-min-backoff: 200ms
+  max-connections: 50
+  pending-acquire-timeout: 45s
+  max-in-memory-size: 67108864                 # 64 MiB
+  tenant-id: my-tenant                         # optional X-Tenant-Id default
+  webhook:
+    hmac-secret: ${FLYDOCS_WEBHOOK_HMAC_SECRET}  # optional WebhookVerifier
+```
+
+```java
+@Service
+class DocumentService {
+  private final FlydocsClientAsync flydocs;  // autowired -- reactive
+  private final FlydocsClient sync;          // autowired -- blocking facade
+  private final WebhookVerifier verifier;    // only when hmac-secret is set
+
+  DocumentService(FlydocsClientAsync flydocs, FlydocsClient sync, WebhookVerifier verifier) {
+    this.flydocs = flydocs;
+    this.sync = sync;
+    this.verifier = verifier;
+  }
+}
+```
+
+Beans published by the starter:
+
+| Bean                  | Conditional on                              |
+|-----------------------|---------------------------------------------|
+| `FlydocsClientAsync`  | `flydocs.base-url` set                      |
+| `FlydocsClient`       | `flydocs.base-url` set                      |
+| `WebhookVerifier`     | `flydocs.webhook.hmac-secret` set           |
+
+All three are `@ConditionalOnMissingBean`, so your own `@Bean` wins
+trivially. The two client beans declare `destroyMethod="close"`, so
+the underlying Netty `ConnectionProvider` is released cleanly when the
+Spring context shuts down — no leaked threads on hot reload.
+
+---
+
+## 10. Resilience knobs (opt-in retry + pool sizing)
+
+The builder exposes the same knobs the starter binds to properties.
+Useful when you're constructing the client manually (CLI, integration
+test, non-Spring app):
+
+```java
+FlydocsClientAsync flydocs = FlydocsClientAsync.builder()
+        .baseUrl("http://localhost:8400")
+        .timeout(Duration.ofSeconds(60))
+        .maxAttempts(3)                        // retry 5xx + timeouts
+        .retryMinBackoff(Duration.ofMillis(200))  // exponential with jitter
+        .maxConnections(50)
+        .pendingAcquireTimeout(Duration.ofSeconds(45))
+        .maxInMemorySize(64 * 1024 * 1024)
+        .build();
+```
+
+Retry semantics:
+
+- **Retried:** `FlydocsHttpException` with `statusCode >= 500`,
+  `FlydocsTimeoutException`, `FlydocsClientException` (transport).
+- **Not retried:** any 4xx (including `409 job_not_cancellable`,
+  `422 invalid_request`). Bad requests stay bad on retry; intentional
+  conflicts shouldn't be papered over.
+
+Both `FlydocsClientAsync` and `FlydocsClient` implement
+`AutoCloseable`. Use `try-with-resources` when you construct them
+yourself; let Spring handle it when you use the starter.
+
+```java
+try (FlydocsClient flydocs = FlydocsClient.builder()
+        .baseUrl("http://localhost:8400")
+        .maxAttempts(3)
+        .build()) {
+    ExtractionResult result = flydocs.extract(req);
+}
+```
+
+---
+
+## 11. Reactive usage
 
 If you're already on Project Reactor (WebFlux, R2DBC, Kafka reactive consumers), use `FlydocsClientAsync` directly — there's no blocking wrapper cost:
 
