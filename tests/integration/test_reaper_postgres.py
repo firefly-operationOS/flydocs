@@ -127,9 +127,7 @@ async def test_job_reaper_revives_all_three_job_orphan_classes(
 
     await reaper._sweep()
 
-    published_ids = [
-        c.kwargs["payload"]["job_id"] for c in publisher.publish.await_args_list
-    ]
+    published_ids = [c.kwargs["payload"]["job_id"] for c in publisher.publish.await_args_list]
     assert submit_orphan.id in published_ids
     assert crashed_runner.id in published_ids
     assert retry_orphan.id in published_ids
@@ -175,9 +173,7 @@ async def test_bbox_reaper_revives_both_bbox_orphan_classes(
 
     await reaper._sweep()
 
-    published_ids = [
-        c.kwargs["payload"]["job_id"] for c in publisher.publish.await_args_list
-    ]
+    published_ids = [c.kwargs["payload"]["job_id"] for c in publisher.publish.await_args_list]
     assert publish_orphan.id in published_ids
     assert crashed_bbox.id in published_ids
     assert fresh.id not in published_ids

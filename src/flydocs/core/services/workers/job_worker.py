@@ -151,9 +151,7 @@ class JobWorker:
         # (or stale-RUNNING) job. ``None`` means another worker beat us
         # to it or the job was cancelled between our ``get`` and this
         # claim -- both are silent no-ops.
-        claimed = await self._repository.mark_running(
-            job.id, lease_seconds=self._settings.job_run_lease_s
-        )
+        claimed = await self._repository.mark_running(job.id, lease_seconds=self._settings.job_run_lease_s)
         if claimed is None:
             logger.info(
                 "Job %s could not be claimed -- already owned by another worker or "
@@ -206,20 +204,15 @@ class JobWorker:
             # the bboxes change between PARTIAL_SUCCEEDED and SUCCEEDED.
             terminal_status = JobStatus.PARTIAL_SUCCEEDED if wants_bbox_refine else JobStatus.SUCCEEDED
             if wants_bbox_refine:
-                finalised = await self._repository.mark_partial_succeeded(
-                    job.id, result=result_payload
-                )
+                finalised = await self._repository.mark_partial_succeeded(job.id, result=result_payload)
             else:
-                finalised = await self._repository.mark_succeeded(
-                    job.id, result=result_payload
-                )
+                finalised = await self._repository.mark_succeeded(job.id, result=result_payload)
             if finalised is None:
                 # Another worker (or the bbox leg) already advanced the
                 # row past RUNNING. Our work is duplicate -- don't fire
                 # the webhook a second time, don't republish.
                 logger.info(
-                    "Job %s already finalised by another worker -- "
-                    "discarding our duplicate result",
+                    "Job %s already finalised by another worker -- discarding our duplicate result",
                     job.id,
                 )
                 return
@@ -283,9 +276,7 @@ class JobWorker:
             )
 
             if terminal:
-                failed = await self._repository.mark_failed(
-                    job.id, code=error_code, message=str(exc)
-                )
+                failed = await self._repository.mark_failed(job.id, code=error_code, message=str(exc))
                 if failed is None:
                     logger.info(
                         "Job %s no longer in RUNNING -- another worker handled the "
@@ -323,8 +314,7 @@ class JobWorker:
                 requeued = await self._repository.requeue_for_retry(job.id)
                 if requeued is None:
                     logger.info(
-                        "Job %s not requeueable (status changed under us) -- "
-                        "skipping retry publish",
+                        "Job %s not requeueable (status changed under us) -- skipping retry publish",
                         job.id,
                     )
                 else:

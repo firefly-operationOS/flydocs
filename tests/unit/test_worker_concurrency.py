@@ -223,9 +223,7 @@ async def test_job_worker_skips_webhook_when_finalise_returns_none() -> None:
                     ],
                 }
             ],
-            "documents": [
-                {"filename": "a.pdf", "content_base64": "Zm9v", "content_type": "application/pdf"}
-            ],
+            "documents": [{"filename": "a.pdf", "content_base64": "Zm9v", "content_type": "application/pdf"}],
         },
     )
     repo = _Repo(job, finalise_returns_none=True)
@@ -257,9 +255,7 @@ async def test_job_worker_retry_path_uses_atomic_requeue() -> None:
                     ],
                 }
             ],
-            "documents": [
-                {"filename": "a.pdf", "content_base64": "Zm9v", "content_type": "application/pdf"}
-            ],
+            "documents": [{"filename": "a.pdf", "content_base64": "Zm9v", "content_type": "application/pdf"}],
         },
     )
     repo = _Repo(job)
