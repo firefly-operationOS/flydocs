@@ -202,9 +202,7 @@ async def test_concurrent_idempotent_submit_resolves_winning_row() -> None:
         ],
         docs=[_doc_spec()],
     )
-    response = await handler.do_handle(
-        SubmitJobCommand(request=request, idempotency_key="dupe-key")
-    )
+    response = await handler.do_handle(SubmitJobCommand(request=request, idempotency_key="dupe-key"))
 
     assert response.job_id == "winner-job-id"
     assert response.status is JobStatus.QUEUED

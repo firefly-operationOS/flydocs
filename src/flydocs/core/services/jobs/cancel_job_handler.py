@@ -60,6 +60,4 @@ class CancelJobHandler(CommandHandler[CancelJobCommand, JobStatusResponse | None
         job = await self._repository.get(command.job_id)
         if job is None:
             return None
-        raise JobNotCancellable(
-            f"Job {job.id!r} cannot be cancelled in status {job.status}"
-        )
+        raise JobNotCancellable(f"Job {job.id!r} cannot be cancelled in status {job.status}")

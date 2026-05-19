@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime, timedelta
-from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -224,10 +223,7 @@ async def test_job_reaper_republishes_stale_running_and_queued() -> None:
 
     await reaper._sweep()
 
-    published_ids = [
-        call.kwargs["payload"]["job_id"]
-        for call in publisher.publish.await_args_list
-    ]
+    published_ids = [call.kwargs["payload"]["job_id"] for call in publisher.publish.await_args_list]
     assert stale_running.id in published_ids
     assert orphan_queued.id in published_ids
     assert fresh_running.id not in published_ids
@@ -272,10 +268,7 @@ async def test_bbox_reaper_republishes_stale_refining_and_pending() -> None:
 
     await reaper._sweep()
 
-    published_ids = [
-        call.kwargs["payload"]["job_id"]
-        for call in publisher.publish.await_args_list
-    ]
+    published_ids = [call.kwargs["payload"]["job_id"] for call in publisher.publish.await_args_list]
     assert stale_refining.id in published_ids
     assert pending_orphan.id in published_ids
     assert fresh_refining.id not in published_ids
