@@ -118,6 +118,127 @@ class ExtractionJobRepository:
             rows = list((await session.execute(data_stmt)).scalars().all())
         return rows, total
 
+    # -- reaper helpers ------------------------------------------------
+    #
+    # The :class:`flydocs.core.services.workers.JobReaper` /
+    # :class:`BboxReaper` use these to find rows that are stuck in
+    # non-terminal states because their triggering event was lost or
+    # because the claimant crashed past its lease window. The reaper
+    # republishes a fresh EDA event for each id returned; the atomic
+    # ``mark_*`` claims dedupe duplicate publishes.
+
+    async def find_stale_running(
+        self,
+        *,
+        lease_seconds: int,
+        limit: int = 100,
+    ) -> list[str]:
+        """Job ids where status='RUNNING' AND started_at < now()-lease."""
+        cutoff = _utcnow() - timedelta(seconds=max(0, lease_seconds))
+        async with self._session_factory() as session:
+            result = await session.execute(
+                select(ExtractionJob.id)
+                .where(
+                    ExtractionJob.status == "RUNNING",
+                    ExtractionJob.started_at < cutoff,
+                )
+                .limit(limit)
+            )
+            return list(result.scalars().all())
+
+    async def find_stale_queued(
+        self,
+        *,
+        older_than_seconds: int,
+        limit: int = 100,
+    ) -> list[str]:
+        """Job ids where status='QUEUED' AND nothing's happened in a while.
+
+        Covers both submit-crash orphans (started_at IS NULL → fall back
+        to created_at) and retry-publish orphans (started_at IS NOT NULL,
+        from the prior failed run). ``COALESCE`` picks the most recent
+        timestamp so jobs that were briefly running and got requeued
+        aren't reaped any earlier than necessary.
+        """
+        cutoff = _utcnow() - timedelta(seconds=max(0, older_than_seconds))
+        async with self._session_factory() as session:
+            result = await session.execute(
+                select(ExtractionJob.id)
+                .where(
+                    ExtractionJob.status == "QUEUED",
+                    func.coalesce(
+                        ExtractionJob.started_at,
+                        ExtractionJob.created_at,
+                    ) < cutoff,
+                )
+                .limit(limit)
+            )
+            return list(result.scalars().all())
+
+    async def find_stale_refining_bboxes(
+        self,
+        *,
+        lease_seconds: int,
+        limit: int = 100,
+    ) -> list[str]:
+        """Bbox-leg analogue of ``find_stale_running``."""
+        cutoff = _utcnow() - timedelta(seconds=max(0, lease_seconds))
+        async with self._session_factory() as session:
+            result = await session.execute(
+                select(ExtractionJob.id)
+                .where(
+                    ExtractionJob.status == "REFINING_BBOXES",
+                    ExtractionJob.bbox_refine_started_at < cutoff,
+                )
+                .limit(limit)
+            )
+            return list(result.scalars().all())
+
+    async def find_pending_bbox_revive(
+        self,
+        *,
+        partial_threshold_seconds: int,
+        bbox_lease_seconds: int,
+        limit: int = 100,
+    ) -> list[str]:
+        """PARTIAL_SUCCEEDED rows whose bbox event needs republishing.
+
+        Two sub-cases unified into one query:
+
+        * ``bbox_refine_started_at IS NULL`` -- the initial publish never
+          landed (worker crashed between ``mark_partial_succeeded`` and
+          ``publish``). The clock starts at ``started_at`` (the main
+          extraction's claim time).
+        * ``bbox_refine_started_at IS NOT NULL`` -- the row was
+          previously REFINING_BBOXES, the bbox worker requeued itself
+          via ``requeue_bbox_refine``, and the delayed-publish task was
+          lost. The clock starts at ``bbox_refine_started_at`` (the
+          previous refine attempt's claim time).
+        """
+        now = _utcnow()
+        main_cutoff = now - timedelta(seconds=max(0, partial_threshold_seconds))
+        refine_cutoff = now - timedelta(seconds=max(0, bbox_lease_seconds))
+        async with self._session_factory() as session:
+            result = await session.execute(
+                select(ExtractionJob.id)
+                .where(
+                    ExtractionJob.status == "PARTIAL_SUCCEEDED",
+                    ExtractionJob.bbox_refine_status == "pending",
+                    or_(
+                        and_(
+                            ExtractionJob.bbox_refine_started_at.is_(None),
+                            ExtractionJob.started_at < main_cutoff,
+                        ),
+                        and_(
+                            ExtractionJob.bbox_refine_started_at.is_not(None),
+                            ExtractionJob.bbox_refine_started_at < refine_cutoff,
+                        ),
+                    ),
+                )
+                .limit(limit)
+            )
+            return list(result.scalars().all())
+
     # -- mutations -----------------------------------------------------
 
     async def add(self, job: ExtractionJob) -> ExtractionJob:
