@@ -78,6 +78,13 @@ class SubmitJobHandler(CommandHandler[SubmitJobCommand, SubmitJobResponse]):
                     submitted_at=existing.created_at,
                 )
 
+        # NOTE: the SELECT-then-INSERT above has a TOCTOU window when
+        # two requests submit the same idempotency_key concurrently:
+        # both SELECTs miss, both INSERTs are attempted, the second
+        # hits the partial unique index and the repository raises
+        # ``IntegrityError``. We catch it below and re-resolve the
+        # winning row instead of surfacing a 500.
+
         payload = command.request
         # Reuse the sync semantic validator over an ExtractionRequest
         # built from the submit payload -- same checks, same error shape.
@@ -153,7 +160,29 @@ class SubmitJobHandler(CommandHandler[SubmitJobCommand, SubmitJobResponse]):
             callback_url=str(payload.callback_url) if payload.callback_url else None,
             metadata_json=metadata,
         )
-        job = await self._repository.add(job)
+        try:
+            job = await self._repository.add(job)
+        except self._repository.IntegrityError:
+            # Concurrent submit with the same idempotency_key collided
+            # on the partial unique index. Re-resolve the winning row
+            # and return its identifier -- the caller sees the same
+            # idempotent response shape whether they win or lose the
+            # race. We only enter this branch when an idempotency key
+            # was supplied; any other unique-constraint violation
+            # would be a programming error and should re-raise.
+            if not command.idempotency_key:
+                raise
+            winner = await self._repository.get_by_idempotency_key(command.idempotency_key)
+            if winner is None:
+                # Vanishingly unlikely: the row that caused the
+                # violation was rolled back between INSERT and our
+                # follow-up SELECT. Re-raise so the caller retries.
+                raise
+            return SubmitJobResponse(
+                job_id=winner.id,
+                status=JobStatus(winner.status),
+                submitted_at=winner.created_at,
+            )
         submitted_at = job.created_at or datetime.now(UTC)
         event = IDPJobSubmittedEvent(
             job_id=job.id,
