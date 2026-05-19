@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  flydocs-examples
+
+  Runnable examples for the Java SDK, in parity with the Python SDK's
+  ``sdks/python/examples/``. Not deployed; built only to keep the
+  examples compile-checked as the SDK surface evolves.
+
+  Run individually:
+      mvn -pl flydocs-examples compile exec:java -Dexec.mainClass=com.firefly.flydocs.examples.FirstExtractionExample
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+                             https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.firefly.flydocs</groupId>
+        <artifactId>flydocs-sdk-parent</artifactId>
+        <version>26.05.01</version>
+    </parent>
+
+    <artifactId>flydocs-examples</artifactId>
+    <packaging>jar</packaging>
+
+    <name>flydocs Java SDK — Examples</name>
+    <description>
+        Runnable examples that mirror the Python SDK's example set.
+        Not published; compile-only sanity check against the SDK surface.
+    </description>
+
+    <properties>
+        <!-- Never deploy or install examples to a repository. -->
+        <maven.deploy.skip>true</maven.deploy.skip>
+        <maven.install.skip>true</maven.install.skip>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.firefly.flydocs</groupId>
+            <artifactId>flydocs-sdk</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.firefly.flydocs</groupId>
+            <artifactId>flydocs-spring-boot-starter</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-webflux</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-simple</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.jspecify</groupId>
+            <artifactId>jspecify</artifactId>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+            </plugin>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.5.0</version>
+            </plugin>
+        </plugins>
+    </build>
+</project>

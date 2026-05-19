@@ -38,13 +38,17 @@ import java.util.List;
 import java.util.Map;
 import org.jspecify.annotations.Nullable;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.reactive.ReactorClientHttpConnector;
 import org.springframework.web.reactive.function.client.ExchangeStrategies;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.util.UriBuilder;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.netty.http.client.HttpClient;
+import reactor.netty.resources.ConnectionProvider;
+import reactor.util.retry.Retry;
 
 /**
  * Reactive (non-blocking) client for the flydocs HTTP API.
@@ -63,7 +67,7 @@ import reactor.netty.http.client.HttpClient;
  *        .subscribe(result -> ...);
  * }</pre>
  */
-public class FlydocsClientAsync {
+public class FlydocsClientAsync implements AutoCloseable {
     private static final String USER_AGENT = "flydocs-sdk-java/26.05.01";
     /** Default timeout when the caller does not override. */
     public static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(60);
@@ -71,20 +75,37 @@ public class FlydocsClientAsync {
     private final WebClient http;
     private final ObjectMapper mapper;
     private final Duration timeout;
+    @Nullable
+    private final ConnectionProvider ownedConnectionProvider;
+    private final int maxAttempts;
+    @Nullable
+    private final Duration retryMinBackoff;
 
     private FlydocsClientAsync(Builder b) {
         this.timeout = b.timeout == null ? DEFAULT_TIMEOUT : b.timeout;
         this.mapper = b.objectMapper != null ? b.objectMapper : defaultMapper();
-        HttpClient nettyClient = HttpClient.create()
+        this.maxAttempts = Math.max(1, b.maxAttempts);
+        this.retryMinBackoff = b.retryMinBackoff;
+        // Own the connection provider so close() can release it on a
+        // shutdown. Bound the pool to keep the SDK well-behaved when
+        // dropped into a service that may have many client instances.
+        this.ownedConnectionProvider = ConnectionProvider.builder("flydocs-sdk")
+                .maxConnections(b.maxConnections)
+                .pendingAcquireTimeout(b.pendingAcquireTimeout)
+                .build();
+        HttpClient nettyClient = HttpClient.create(this.ownedConnectionProvider)
                 .responseTimeout(this.timeout);
         WebClient.Builder wb = WebClient.builder()
                 .baseUrl(b.baseUrl)
                 .clientConnector(new ReactorClientHttpConnector(nettyClient))
                 .defaultHeader(HttpHeaders.ACCEPT, MediaType.APPLICATION_JSON_VALUE)
                 .defaultHeader(HttpHeaders.USER_AGENT, USER_AGENT)
-                .codecs(c -> c.defaultCodecs().maxInMemorySize(64 * 1024 * 1024))
-                .exchangeStrategies(ExchangeStrategies.builder().codecs(c ->
-                        c.defaultCodecs().maxInMemorySize(64 * 1024 * 1024)).build());
+                // Single source of truth for codec sizing -- the prior
+                // ``.codecs(...)`` + ``.exchangeStrategies(...)`` pair
+                // was redundant; exchangeStrategies wins.
+                .exchangeStrategies(ExchangeStrategies.builder()
+                        .codecs(c -> c.defaultCodecs().maxInMemorySize(b.maxInMemorySize))
+                        .build());
         if (b.defaultHeaders != null) {
             b.defaultHeaders.forEach((k, v) -> {
                 if (v != null && !v.isEmpty()) {
@@ -97,6 +118,19 @@ public class FlydocsClientAsync {
 
     public static Builder builder() {
         return new Builder();
+    }
+
+    /**
+     * Release the underlying Netty connection pool. Idempotent. Call
+     * during application shutdown if you constructed the client
+     * yourself; the Spring Boot starter wires this via the bean
+     * destroy method.
+     */
+    @Override
+    public void close() {
+        if (this.ownedConnectionProvider != null) {
+            this.ownedConnectionProvider.disposeLater().block(Duration.ofSeconds(5));
+        }
     }
 
     // ------------------------------------------------------------------
@@ -203,13 +237,17 @@ public class FlydocsClientAsync {
      * {@link JobStatusResponse#status()} on success to decide what to
      * do next — the helper does not treat FAILED/CANCELLED as errors,
      * they're the caller's branching decision.</p>
+     *
+     * <p>Implementation note: this uses Reactor's
+     * {@code repeatWhenEmpty} so the polling chain is bounded by a
+     * single timeout subscriber. No recursive {@code Mono} construction;
+     * no nested timeouts.</p>
      */
     public Mono<JobStatusResponse> waitForCompletion(
             String jobId, Duration pollInterval, Duration timeout) {
-        return getJob(jobId)
-                .flatMap(s -> s.isTerminal()
-                        ? Mono.just(s)
-                        : Mono.delay(pollInterval).then(waitForCompletion(jobId, pollInterval, timeout)))
+        return Mono.defer(() -> getJob(jobId))
+                .flatMap(s -> s.isTerminal() ? Mono.just(s) : Mono.<JobStatusResponse>empty())
+                .repeatWhenEmpty(Integer.MAX_VALUE, attempts -> attempts.delayElements(pollInterval))
                 .timeout(timeout);
     }
 
@@ -326,7 +364,7 @@ public class FlydocsClientAsync {
         if (body != null) {
             headers = spec.contentType(MediaType.APPLICATION_JSON).bodyValue(body);
         }
-        return headers.exchangeToMono(response -> response.bodyToMono(byte[].class)
+        Mono<byte[]> exchange = headers.exchangeToMono(response -> response.bodyToMono(byte[].class)
                 .defaultIfEmpty(new byte[0])
                 .flatMap(bytes -> {
                     int status = response.statusCode().value();
@@ -336,6 +374,38 @@ public class FlydocsClientAsync {
                     return Mono.just(bytes);
                 }))
                 .onErrorMap(this::mapTransport);
+        if (this.maxAttempts > 1) {
+            Retry policy = Retry.backoff(
+                            this.maxAttempts - 1L,
+                            this.retryMinBackoff == null
+                                    ? Duration.ofMillis(200)
+                                    : this.retryMinBackoff)
+                    .filter(FlydocsClientAsync::isTransient)
+                    .transientErrors(true);
+            exchange = exchange.retryWhen(policy);
+        }
+        return exchange;
+    }
+
+    /**
+     * Decide whether a thrown exception is worth retrying. Transient
+     * = the service has a fighting chance of succeeding on a re-issue:
+     * 5xx (the service had a hiccup) and our own
+     * {@link FlydocsTimeoutException} (we never heard back).
+     *
+     * <p>4xx is NEVER retried -- a bad request stays bad on retry, and
+     * a 409 ``job_not_cancellable`` is intentional state.
+     * {@link FlydocsClientException} covers transport failures we have
+     * already mapped to a non-Netty type; we treat those as transient
+     * too so a flaky network on the first connect doesn't surface as a
+     * hard failure.</p>
+     */
+    private static boolean isTransient(Throwable t) {
+        if (t instanceof FlydocsHttpException http) {
+            int s = http.statusCode();
+            return s >= 500 && s < 600;
+        }
+        return t instanceof FlydocsTimeoutException || t instanceof FlydocsClientException;
     }
 
     private <T> Mono<T> decodeBody(byte[] bytes, Class<T> type) {
@@ -423,6 +493,11 @@ public class FlydocsClientAsync {
         private @Nullable Duration timeout;
         private @Nullable Map<String, String> defaultHeaders;
         private @Nullable ObjectMapper objectMapper;
+        private int maxAttempts = 1;
+        private @Nullable Duration retryMinBackoff;
+        private int maxConnections = 50;
+        private Duration pendingAcquireTimeout = Duration.ofSeconds(45);
+        private int maxInMemorySize = 64 * 1024 * 1024;
 
         public Builder baseUrl(String baseUrl) {
             this.baseUrl = baseUrl;
@@ -444,6 +519,56 @@ public class FlydocsClientAsync {
 
         public Builder objectMapper(ObjectMapper mapper) {
             this.objectMapper = mapper;
+            return this;
+        }
+
+        /**
+         * Maximum number of HTTP attempts per request (including the
+         * first). ``1`` (default) disables retries. Set to 2-3 to
+         * opportunistically retry transient 5xx and timeouts with
+         * exponential backoff; the SDK never retries 4xx.
+         */
+        public Builder maxAttempts(int maxAttempts) {
+            this.maxAttempts = maxAttempts;
+            return this;
+        }
+
+        /**
+         * Initial backoff between retries (exponentially extended on
+         * each subsequent retry, with jitter). Default 200 ms when
+         * retries are enabled.
+         */
+        public Builder retryMinBackoff(Duration backoff) {
+            this.retryMinBackoff = backoff;
+            return this;
+        }
+
+        /**
+         * Maximum simultaneous HTTP connections the underlying Netty
+         * pool will open. Default 50; lower if your runtime is
+         * memory-constrained.
+         */
+        public Builder maxConnections(int maxConnections) {
+            this.maxConnections = maxConnections;
+            return this;
+        }
+
+        /**
+         * How long a request waits for a free connection before
+         * failing with a {@link FlydocsClientException}. Default 45 s.
+         */
+        public Builder pendingAcquireTimeout(Duration timeout) {
+            this.pendingAcquireTimeout = timeout;
+            return this;
+        }
+
+        /**
+         * Maximum response body the client is willing to buffer in
+         * memory before failing. Default 64 MiB -- generous enough for
+         * the largest documented extraction result the service emits.
+         */
+        public Builder maxInMemorySize(int bytes) {
+            this.maxInMemorySize = bytes;
             return this;
         }
 
