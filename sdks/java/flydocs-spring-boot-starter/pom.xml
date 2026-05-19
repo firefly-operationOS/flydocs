@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  flydocs-spring-boot-starter
+
+  Drop this artifact into a Boot 3.5.x app and get FlydocsClientAsync
+  (plus a blocking FlydocsClient facade) wired into the application
+  context, driven by ``flydocs.*`` properties.
+
+  Conditionally enabled: defining ``flydocs.base-url`` is the only
+  required step. Everything else has a sane default.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+                             https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.firefly.flydocs</groupId>
+        <artifactId>flydocs-sdk-parent</artifactId>
+        <version>26.05.01</version>
+    </parent>
+
+    <artifactId>flydocs-spring-boot-starter</artifactId>
+    <packaging>jar</packaging>
+
+    <name>flydocs Spring Boot Starter</name>
+    <description>
+        Auto-configures FlydocsClient and FlydocsClientAsync from the
+        ``flydocs.*`` property namespace for any Spring Boot 3.5.x
+        application.
+    </description>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.firefly.flydocs</groupId>
+            <artifactId>flydocs-sdk</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-autoconfigure</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-configuration-processor</artifactId>
+            <optional>true</optional>
+        </dependency>
+        <dependency>
+            <groupId>org.jspecify</groupId>
+            <artifactId>jspecify</artifactId>
+        </dependency>
+
+        <!-- Test deps -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.assertj</groupId>
+            <artifactId>assertj-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-source-plugin</artifactId>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-javadoc-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+</project>
