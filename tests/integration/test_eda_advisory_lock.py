@@ -14,7 +14,6 @@ import asyncio
 import os
 
 import pytest
-
 from pyfly.eda.adapters.postgres import PostgresEventBus
 
 _PG_URL = os.environ.get("FLYDOCS_TEST_PG_URL")
@@ -72,7 +71,6 @@ async def test_two_buses_same_group_dispatch_each_event_exactly_once() -> None:
         await bus_b.start()
         try:
             # Publish 20 events; each must be delivered exactly once.
-            published_ids: list[str] = []
             for i in range(20):
                 # Use bus_a as the producer; events land in the shared outbox.
                 await bus_a.publish(

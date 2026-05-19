@@ -26,7 +26,6 @@ from flydocs.core.services.workers.bbox_refine_worker import BboxRefineWorker
 from flydocs.core.services.workers.job_worker import JobWorker
 from flydocs.interfaces.enums.job_status import JobStatus
 
-
 # --------------------------------------------------------------- shared fixtures
 
 
@@ -224,9 +223,7 @@ async def test_job_worker_skips_webhook_when_finalise_returns_none() -> None:
                     ],
                 }
             ],
-            "documents": [
-                {"filename": "a.pdf", "content_base64": "Zm9v", "content_type": "application/pdf"}
-            ],
+            "documents": [{"filename": "a.pdf", "content_base64": "Zm9v", "content_type": "application/pdf"}],
         },
     )
     repo = _Repo(job, finalise_returns_none=True)
@@ -258,9 +255,7 @@ async def test_job_worker_retry_path_uses_atomic_requeue() -> None:
                     ],
                 }
             ],
-            "documents": [
-                {"filename": "a.pdf", "content_base64": "Zm9v", "content_type": "application/pdf"}
-            ],
+            "documents": [{"filename": "a.pdf", "content_base64": "Zm9v", "content_type": "application/pdf"}],
         },
     )
     repo = _Repo(job)

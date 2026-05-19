@@ -169,7 +169,8 @@ class ExtractionJobRepository:
                     func.coalesce(
                         ExtractionJob.started_at,
                         ExtractionJob.created_at,
-                    ) < cutoff,
+                    )
+                    < cutoff,
                 )
                 .limit(limit)
             )
