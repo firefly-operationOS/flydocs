@@ -26,7 +26,6 @@ from flydocs.core.services.workers.bbox_refine_worker import BboxRefineWorker
 from flydocs.core.services.workers.job_worker import JobWorker
 from flydocs.interfaces.enums.job_status import JobStatus
 
-
 # --------------------------------------------------------------- shared fixtures
 
 

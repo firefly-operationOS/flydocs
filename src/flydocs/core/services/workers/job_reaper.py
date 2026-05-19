@@ -26,9 +26,9 @@ Recovery time is bounded by ``settings.reaper_sweep_interval_s`` +
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import socket
-from typing import Any
 
 from pyfly.eda import EventPublisher
 
@@ -70,13 +70,11 @@ class JobReaper:
                 await self._sweep()
             except Exception:  # noqa: BLE001
                 logger.exception("JobReaper sweep failed; will retry next interval")
-            try:
+            with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(
                     self._stop.wait(),
                     timeout=max(1, self._settings.reaper_sweep_interval_s),
                 )
-            except asyncio.TimeoutError:
-                pass
 
     def stop(self) -> None:
         self._stop.set()
