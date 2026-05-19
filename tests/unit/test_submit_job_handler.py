@@ -153,3 +153,84 @@ def test_request_rejects_empty_documents() -> None:
     """``documents`` is required and must have at least one entry."""
     with pytest.raises(ValueError):
         SubmitJobRequest(documents=[], docs=[_doc_spec()])
+
+
+@pytest.mark.asyncio
+async def test_concurrent_idempotent_submit_resolves_winning_row() -> None:
+    """Two submits with the same key racing past the SELECT must not 500.
+
+    Concrete scenario: the SELECT-by-key inside ``do_handle`` returns
+    ``None`` (no existing row), so the handler proceeds to INSERT. The
+    partial unique index on the DB raises ``IntegrityError`` for the
+    loser. The handler must catch it, re-resolve the winning row by
+    key, and return its identifier with the idempotent shape.
+    """
+    from datetime import UTC, datetime
+
+    from sqlalchemy.exc import IntegrityError
+
+    from flydocs.interfaces.dtos.job import SubmitJobResponse  # noqa: F401
+
+    handler, repository, captured = _handler()
+
+    # First call: SELECT returns None, INSERT raises IntegrityError, then
+    # the recovery path SELECTs again and finds the winning row.
+    winning_row = MagicMock()
+    winning_row.id = "winner-job-id"
+    winning_row.status = JobStatus.QUEUED.value
+    winning_row.created_at = datetime.now(UTC)
+
+    select_calls = {"n": 0}
+
+    async def _get_by_key(key: str):
+        select_calls["n"] += 1
+        # First call (before INSERT) returns None; second call (after
+        # IntegrityError) returns the winner.
+        return None if select_calls["n"] == 1 else winning_row
+
+    repository.get_by_idempotency_key = AsyncMock(side_effect=_get_by_key)
+    repository.IntegrityError = IntegrityError
+    repository.add = AsyncMock(side_effect=IntegrityError("", None, None))
+
+    request = SubmitJobRequest(
+        documents=[
+            DocumentInput(
+                filename="invoice.pdf",
+                content_base64=_pdf_b64(b"x"),
+                content_type="application/pdf",
+            )
+        ],
+        docs=[_doc_spec()],
+    )
+    response = await handler.do_handle(
+        SubmitJobCommand(request=request, idempotency_key="dupe-key")
+    )
+
+    assert response.job_id == "winner-job-id"
+    assert response.status is JobStatus.QUEUED
+    # Two SELECTs: pre-INSERT probe + post-IntegrityError recovery probe.
+    assert select_calls["n"] == 2
+
+
+@pytest.mark.asyncio
+async def test_idempotent_submit_reraises_if_no_winner_resolved() -> None:
+    """IntegrityError with no recoverable row re-raises (vanishingly rare)."""
+    from sqlalchemy.exc import IntegrityError
+
+    handler, repository, captured = _handler()
+    repository.get_by_idempotency_key = AsyncMock(return_value=None)
+    repository.IntegrityError = IntegrityError
+    repository.add = AsyncMock(side_effect=IntegrityError("", None, None))
+
+    request = SubmitJobRequest(
+        documents=[
+            DocumentInput(
+                filename="invoice.pdf",
+                content_base64=_pdf_b64(b"x"),
+                content_type="application/pdf",
+            )
+        ],
+        docs=[_doc_spec()],
+    )
+    with pytest.raises(IntegrityError):
+        await handler.do_handle(SubmitJobCommand(request=request, idempotency_key="k"))

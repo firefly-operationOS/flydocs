@@ -144,19 +144,23 @@ class BboxRefineWorker:
         if job is None:
             logger.warning("EDA delivered unknown bbox-refine job %s -- dropping", job_id)
             return
-        current = JobStatus(job.status)
-        # Idempotent re-delivery guard: only PARTIAL_SUCCEEDED is the
-        # legal entry state. SUCCEEDED / FAILED / CANCELLED / REFINING
-        # mean someone else handled this already.
-        if current != JobStatus.PARTIAL_SUCCEEDED:
+        # Atomic claim: precondition matches PARTIAL_SUCCEEDED (first
+        # delivery) or stale REFINING_BBOXES (previous claimant crashed
+        # past its lease). Anything else -- SUCCEEDED, FAILED,
+        # fresh REFINING_BBOXES -- returns None so we treat the event
+        # as already handled and bail.
+        claimed = await self._repository.mark_bbox_refining(
+            job.id, lease_seconds=self._settings.bbox_refine_lease_s
+        )
+        if claimed is None:
             logger.info(
-                "Skipping bbox refine for job %s: status=%s (not PARTIAL_SUCCEEDED)",
+                "Bbox refine for job %s could not be claimed (status=%s) -- "
+                "another worker owns it or the job advanced past PARTIAL_SUCCEEDED",
                 job.id,
-                current.value,
+                job.status,
             )
             return
-
-        job = await self._repository.mark_bbox_refining(job.id) or job
+        job = claimed
         attempts = job.bbox_refine_attempts or 1
         log_outbound(
             "bbox-worker",
@@ -173,9 +177,16 @@ class BboxRefineWorker:
                 self._refine_job_result(job),
                 timeout=self._settings.bbox_refine_timeout_s,
             )
-            await self._repository.mark_bbox_refined(
+            finalised = await self._repository.mark_bbox_refined(
                 job.id, result=refined.model_dump(mode="json", by_alias=True)
             )
+            if finalised is None:
+                logger.info(
+                    "Bbox refine for job %s no longer in REFINING_BBOXES -- "
+                    "another worker finalised it, discarding our result",
+                    job.id,
+                )
+                return
             log_outbound(
                 "bbox-worker",
                 op="bbox.refine",
@@ -212,7 +223,15 @@ class BboxRefineWorker:
                 error=type(exc).__name__,
             )
             if terminal:
-                await self._repository.mark_bbox_refine_failed(job.id, code=error_code, message=str(exc))
+                failed = await self._repository.mark_bbox_refine_failed(
+                    job.id, code=error_code, message=str(exc)
+                )
+                if failed is None:
+                    logger.info(
+                        "Bbox refine for job %s already past REFINING_BBOXES -- "
+                        "another worker handled the terminal transition",
+                        job.id,
+                    )
                 # No webhook on bbox-refine permanent failure: the caller
                 # already received the ``idp.job.partial`` payload with
                 # the LLM-bbox result; nothing new to deliver.
@@ -225,14 +244,18 @@ class BboxRefineWorker:
                     exc,
                     delay,
                 )
-                # Revert to PARTIAL_SUCCEEDED so the next delivery's
-                # status check passes.
-                await self._repository.update(
-                    job.id,
-                    status=JobStatus.PARTIAL_SUCCEEDED.value,
-                    bbox_refine_status="pending",
-                )
-                asyncio.create_task(self._delayed_publish(job.id, delay))
+                # Atomically revert REFINING_BBOXES -> PARTIAL_SUCCEEDED
+                # so the next delivery's claim precondition passes. If
+                # we lost the row (another worker advanced it), skip the
+                # republish: someone else owns the lifecycle now.
+                requeued = await self._repository.requeue_bbox_refine(job.id)
+                if requeued is None:
+                    logger.info(
+                        "Bbox refine for job %s not requeueable -- skipping retry",
+                        job.id,
+                    )
+                else:
+                    asyncio.create_task(self._delayed_publish(job.id, delay))
 
     # ------------------------------------------------------------------
 
