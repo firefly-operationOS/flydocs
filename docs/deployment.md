@@ -284,9 +284,10 @@ outbound_call target=worker    op=job.run        status=ok  latency_ms=42557 job
 | Component  | Strategy                                                                                                                                                                |
 | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **API**    | Stateless — scale horizontally. Set uvicorn workers via `--workers` (one per CPU is a good default). Sticky sessions are not required.                                  |
-| **Worker** | Stateless — scale horizontally. Redis consumer groups shard message delivery. Right-size against peak job arrival; one worker handles ~1 job/min if each takes ~30 s.    |
-| **Postgres** | A single primary is fine for the `extraction_jobs` table size you'll see. Add a read replica only if `/api/v1/jobs/{id}` reads dominate and you want to offload them. |
-| **Redis**  | Single primary is fine; the stream durability covers worker restarts. Use a managed offering or a small Sentinel setup for HA.                                          |
+| **Worker** | Stateless — scale horizontally. Multi-worker safety is enforced at three layers: a per-group `pg_try_advisory_lock` in the Postgres EDA adapter (or competitive consumer for Redis/Kafka), atomic `UPDATE … WHERE … RETURNING` state transitions on `extraction_jobs`, and a periodic reaper sidecar that republishes orphans whose triggering events were lost to a crash. See [concurrency.md](concurrency.md). Right-size against peak job arrival; one worker handles ~1 job/min if each takes ~30 s. |
+| **Bbox worker** | Same scaling story as the main worker, on a separate consumer group (`flydocs-bbox-workers`). Its `BboxReaper` sidecar revives `REFINING_BBOXES` and `PARTIAL_SUCCEEDED` orphans the same way. |
+| **Postgres** | A single primary is fine for the `extraction_jobs` table size you'll see. Add a read replica only if `/api/v1/jobs/{id}` reads dominate and you want to offload them. The EDA outbox grows monotonically — schedule a periodic VACUUM of `pyfly_eda_outbox` if you don't already. |
+| **Redis**  | Only required when `FLYDOCS_EDA_ADAPTER=redis`. Single primary is fine; the stream durability covers worker restarts. Postgres adapter (default) uses the database itself for the outbox — no Redis dependency. |
 
 ---
 

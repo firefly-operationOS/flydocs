@@ -212,6 +212,75 @@ DAG nodes were changed back to `RuleSpec` objects. Nodes are strings
 
 ---
 
+## Stuck jobs (concurrency / orphan recovery)
+
+The reaper sidecar in each worker container revives jobs whose
+triggering event was lost. If a job appears stuck, walk this short
+checklist first. See [concurrency.md](concurrency.md) for the model.
+
+### Job stuck in `RUNNING` for > 22 minutes
+
+`async_timeout_s` (default 1200 s) caps any legitimate run; the lease
+(default 1260 s = `async_timeout_s + 60`) adds a small grace period.
+Past the lease, the reaper's next sweep republishes the event:
+
+```sql
+SELECT id, started_at, attempts, finished_at
+FROM extraction_jobs
+WHERE status='RUNNING'
+  AND started_at < now() - INTERVAL '21 minutes';
+```
+
+If the reaper is running but the row stays `RUNNING`, check the worker
+container logs for `JobReaper republished job <id>` lines. No
+republish over multiple sweep intervals means the reaper isn't seeing
+the row -- usually `started_at` was bumped by a heartbeat we don't yet
+implement, or the worker isn't actually crashed. Operator override:
+
+```sql
+UPDATE extraction_jobs
+SET started_at = now() - INTERVAL '24 hours'
+WHERE id = '<job-id>' AND status='RUNNING';
+```
+
+The next reaper sweep will pick it up.
+
+### Job stuck in `QUEUED` for > 10 minutes
+
+Either the submit handler crashed between row INSERT and outbox
+PUBLISH, or a worker's retry-path `_delayed_publish` task died before
+its `asyncio.sleep` fired. The reaper republishes after
+`FLYDOCS_QUEUED_ORPHAN_THRESHOLD_S` (default 600 s).
+
+Backlog vs. orphan: if many `QUEUED` rows are old, your workers are
+saturated, not crashed -- check throughput, not lifecycle. Add worker
+replicas (`docker compose --scale worker=N` or the K8s equivalent;
+multi-worker safe by design).
+
+### Job stuck in `PARTIAL_SUCCEEDED` with `bbox_refine_status='pending'`
+
+Main extraction finished but the bbox-refine event wasn't published
+(main worker crashed between `mark_partial_succeeded` and the publish
+call). `BboxReaper` revives it after
+`FLYDOCS_PARTIAL_SUCCEEDED_ORPHAN_THRESHOLD_S` (default 1320 s, sized
+to `async_timeout_s + 120`). Until then the LLM-bbox result is
+already readable via `GET /api/v1/jobs/{id}/result`.
+
+### "Cannot cancel a RUNNING job"
+
+Mid-flight cancellation is intentionally not supported. To stop a
+runaway extraction:
+
+1. Wait for the lease to expire (or trim `started_at` per the override
+   above).
+2. The reaper republishes; the row briefly transitions to `QUEUED`
+   when a worker requeues itself on the next failure, OR stays
+   `RUNNING` if the redelivery wins again.
+3. Issue `DELETE /api/v1/jobs/{id}` while it's `QUEUED` to land in
+   `CANCELLED`.
+
+---
+
 ## Observability
 
 ### No metrics on `/actuator/metrics`
