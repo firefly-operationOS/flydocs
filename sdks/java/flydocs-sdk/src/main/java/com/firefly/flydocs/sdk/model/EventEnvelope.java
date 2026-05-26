@@ -17,32 +17,47 @@
 package com.firefly.flydocs.sdk.model;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.time.OffsetDateTime;
 import java.util.Map;
 import org.jspecify.annotations.Nullable;
 
 /**
- * Body the service POSTs to the configured {@code callback_url} on a
- * job's terminal status. Signed with HMAC-SHA256 in the
- * {@code X-Flydocs-Signature} header; use
- * {@link com.firefly.flydocs.sdk.webhook.WebhookVerifier} to verify.
+ * Unified envelope for EDA events and webhook deliveries.
+ *
+ * <p>One envelope shape shared between the EDA bus and HTTP webhook
+ * POSTs. Operators see the same payload over Kafka, Redis, Postgres
+ * LISTEN/NOTIFY, and HTTP webhook calls. Event types are
+ * dotted snake_case: {@code extraction.submitted},
+ * {@code extraction.completed},
+ * {@code extraction.post_processing.requested},
+ * {@code extraction.post_processing.completed}.</p>
+ *
+ * <p>{@link #extraction()} carries a current-state snapshot of the
+ * resource. {@link #result()} is populated only on
+ * {@code extraction.completed} when the terminal status is
+ * {@code succeeded}; otherwise {@code null}.</p>
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public record JobWebhookPayload(
+@JsonInclude(JsonInclude.Include.NON_NULL)
+public record EventEnvelope(
         @JsonProperty("event_id") String eventId,
         @JsonProperty("event_type") String eventType,
-        String version,
-        @JsonProperty("job_id") String jobId,
-        JobStatus status,
+        @JsonProperty("version") String version,
         @JsonProperty("occurred_at") OffsetDateTime occurredAt,
-        @JsonProperty("started_at") @Nullable OffsetDateTime startedAt,
-        @JsonProperty("finished_at") @Nullable OffsetDateTime finishedAt,
-        int attempts,
         @JsonProperty("correlation_id") @Nullable String correlationId,
         @JsonProperty("tenant_id") @Nullable String tenantId,
-        Map<String, Object> metadata,
-        @Nullable ExtractionResult result,
-        @JsonProperty("error_code") @Nullable String errorCode,
-        @JsonProperty("error_message") @Nullable String errorMessage) {
+        @JsonProperty("extraction") Extraction extraction,
+        @JsonProperty("result") @Nullable ExtractionResult result,
+        @JsonProperty("metadata") Map<String, Object> metadata) {
+
+    public EventEnvelope {
+        metadata = metadata == null ? Map.of() : Map.copyOf(metadata);
+    }
+
+    public static final String TYPE_EXTRACTION_SUBMITTED = "extraction.submitted";
+    public static final String TYPE_EXTRACTION_COMPLETED = "extraction.completed";
+    public static final String TYPE_EXTRACTION_POST_PROCESSING_REQUESTED = "extraction.post_processing.requested";
+    public static final String TYPE_EXTRACTION_POST_PROCESSING_COMPLETED = "extraction.post_processing.completed";
 }

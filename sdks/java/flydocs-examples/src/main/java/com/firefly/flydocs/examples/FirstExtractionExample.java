@@ -17,24 +17,21 @@
 package com.firefly.flydocs.examples;
 
 import com.firefly.flydocs.sdk.FlydocsClientAsync;
-import com.firefly.flydocs.sdk.model.DocSpec;
-import com.firefly.flydocs.sdk.model.DocumentInput;
+import com.firefly.flydocs.sdk.model.DocumentTypeSpec;
 import com.firefly.flydocs.sdk.model.ExtractionRequest;
 import com.firefly.flydocs.sdk.model.ExtractionResult;
-import com.firefly.flydocs.sdk.model.FieldSpec;
+import com.firefly.flydocs.sdk.model.Field;
 import com.firefly.flydocs.sdk.model.FieldType;
+import com.firefly.flydocs.sdk.model.FileInput;
 import java.io.IOException;
 import java.nio.file.Path;
 
 /**
  * 01 — Hello, flydocs.
  *
- * <p>The smallest runnable example: build a one-field schema, send a
- * PDF, print the extracted result. Mirrors
+ * <p>The smallest runnable example: build a one-field schema, send a PDF,
+ * print the extracted result. Mirrors
  * {@code sdks/python/examples/01_first_extraction.py}.</p>
- *
- * <p>Run with a flydocs service reachable at
- * {@code FLYDOCS_BASE_URL} (default {@code http://localhost:8400}):</p>
  *
  * <pre>{@code
  * mvn -pl flydocs-examples compile exec:java \
@@ -51,17 +48,17 @@ public final class FirstExtractionExample {
         }
         Path pdf = Path.of(args[0]);
 
-        DocSpec invoice = DocSpec.builder("invoice")
+        DocumentTypeSpec invoice = DocumentTypeSpec.builder("invoice")
                 .description("Any invoice with at least a total amount")
                 .addFieldGroup(
                         "totals",
-                        FieldSpec.required("total_amount", FieldType.NUMBER),
-                        FieldSpec.required("currency", FieldType.STRING))
+                        Field.required("total_amount", FieldType.NUMBER),
+                        Field.required("currency", FieldType.STRING))
                 .build();
 
         ExtractionRequest req = ExtractionRequest.builder()
-                .addDocument(DocumentInput.ofPath(pdf))
-                .addDocSpec(invoice)
+                .addFile(FileInput.ofPath(pdf))
+                .addDocumentType(invoice)
                 .build();
 
         try (FlydocsClientAsync flydocs = FlydocsClientAsync.builder()
@@ -74,15 +71,15 @@ public final class FirstExtractionExample {
                 System.exit(1);
                 return;
             }
-            System.out.printf("model=%s  latency=%dms  documents=%d%n",
-                    result.model(), result.latencyMs(), result.documents().size());
-            // The deeply-nested per-document shape is intentionally a
-            // raw map (the SDK doesn't hard-code field schemas) -- pull
-            // attributes by key.
+            System.out.printf("id=%s  status=%s  model=%s  latency=%dms  documents=%d%n",
+                    result.id(),
+                    result.status(),
+                    result.pipeline().model(),
+                    result.pipeline().latencyMs(),
+                    result.documents().size());
             for (var doc : result.documents()) {
-                System.out.printf(
-                        "  doc[type=%s]%n",
-                        doc.getOrDefault("document_type", "?"));
+                System.out.printf("  doc[type=%s] pages=%s field_groups=%d%n",
+                        doc.type(), doc.pages(), doc.fieldGroups().size());
             }
         }
     }

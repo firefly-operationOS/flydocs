@@ -17,10 +17,10 @@
 package com.firefly.flydocs.examples;
 
 import com.firefly.flydocs.sdk.FlydocsClientAsync;
-import com.firefly.flydocs.sdk.model.DocumentInput;
 import com.firefly.flydocs.sdk.model.ExtractionOptions;
 import com.firefly.flydocs.sdk.model.ExtractionRequest;
 import com.firefly.flydocs.sdk.model.ExtractionResult;
+import com.firefly.flydocs.sdk.model.FileInput;
 import com.firefly.flydocs.sdk.model.StageToggles;
 import java.io.IOException;
 import java.nio.file.Path;
@@ -49,8 +49,8 @@ public final class TypedSchemaAndRulesExample {
         Path pdf = Path.of(args[0]);
 
         ExtractionRequest req = ExtractionRequest.builder()
-                .addDocument(DocumentInput.ofPath(pdf))
-                .addDocSpec(ExampleHelpers.invoiceDocSpec())
+                .addFile(FileInput.ofPath(pdf))
+                .addDocumentType(ExampleHelpers.invoiceDocumentType())
                 .addRule(ExampleHelpers.totalIsPositiveRule())
                 .addRule(ExampleHelpers.customerNamePresentRule())
                 .options(ExtractionOptions.builder()
@@ -70,13 +70,10 @@ public final class TypedSchemaAndRulesExample {
             }
             System.out.printf("documents=%d  rule_results=%d%n",
                     result.documents().size(),
-                    result.ruleResults() == null ? 0 : result.ruleResults().size());
-            if (result.ruleResults() != null) {
-                for (var rr : result.ruleResults()) {
-                    System.out.printf("  rule %s -> %s%n",
-                            rr.getOrDefault("rule_id", "?"),
-                            rr.getOrDefault("status", "?"));
-                }
+                    result.ruleResults().size());
+            for (var rr : result.ruleResults()) {
+                System.out.printf("  rule %s -> %s%n",
+                        rr.ruleId(), rr.output());
             }
         }
     }

@@ -20,49 +20,63 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.ArrayList;
 import java.util.List;
+import org.jspecify.annotations.Nullable;
 
-/** One expected document type plus its field schema. */
+/**
+ * One expected document type the caller is submitting fields for.
+ *
+ * <p>v1 collapses the v0 {@code docType.documentType} stutter into
+ * {@code id} at the top level, and moves visual checks out of the
+ * v0 {@code validators.visual[]} envelope onto a flat
+ * {@code visual_checks[]} list.</p>
+ */
 @JsonInclude(JsonInclude.Include.NON_NULL)
-public record DocSpec(
-        @JsonProperty("docType") DocType docType,
-        @JsonProperty("fieldGroups") List<FieldGroup> fieldGroups,
-        ValidatorsSpec validators) {
+public record DocumentTypeSpec(
+        @JsonProperty("id") String id,
+        @JsonProperty("description") @Nullable String description,
+        @JsonProperty("country") @Nullable String country,
+        @JsonProperty("field_groups") List<FieldGroup> fieldGroups,
+        @JsonProperty("visual_checks") List<VisualCheck> visualChecks) {
 
-    public DocSpec {
+    public DocumentTypeSpec {
         fieldGroups = List.copyOf(fieldGroups);
-        if (validators == null) validators = ValidatorsSpec.none();
+        visualChecks = visualChecks == null ? List.of() : List.copyOf(visualChecks);
     }
 
-    public static Builder builder(String documentType) {
-        return new Builder(documentType);
+    public static Builder builder(String id) {
+        return new Builder(id);
     }
 
     /** Fluent builder. */
     public static final class Builder {
-        private final String documentType;
-        private String description = "";
-        private String country = "";
+        private final String id;
+        private @Nullable String description;
+        private @Nullable String country;
         private final List<FieldGroup> fieldGroups = new ArrayList<>();
-        private ValidatorsSpec validators = ValidatorsSpec.none();
+        private final List<VisualCheck> visualChecks = new ArrayList<>();
 
-        Builder(String documentType) {
-            this.documentType = documentType;
+        Builder(String id) {
+            this.id = id;
         }
 
-        public Builder description(String v) { this.description = v; return this; }
-        public Builder country(String v) { this.country = v; return this; }
+        public Builder description(@Nullable String v) { this.description = v; return this; }
+        public Builder country(@Nullable String v) { this.country = v; return this; }
         public Builder addFieldGroup(FieldGroup g) { this.fieldGroups.add(g); return this; }
-        public Builder addFieldGroup(String name, FieldSpec... fields) {
+        public Builder addFieldGroup(String name, Field... fields) {
             this.fieldGroups.add(FieldGroup.of(name, fields));
             return this;
         }
-        public Builder validators(ValidatorsSpec v) { this.validators = v; return this; }
+        public Builder addVisualCheck(VisualCheck v) { this.visualChecks.add(v); return this; }
+        public Builder addVisualCheck(String name, String description) {
+            this.visualChecks.add(new VisualCheck(name, description));
+            return this;
+        }
 
-        public DocSpec build() {
-            return new DocSpec(
-                    new DocType(documentType, description, country),
+        public DocumentTypeSpec build() {
+            return new DocumentTypeSpec(
+                    id, description, country,
                     List.copyOf(fieldGroups),
-                    validators);
+                    List.copyOf(visualChecks));
         }
     }
 }

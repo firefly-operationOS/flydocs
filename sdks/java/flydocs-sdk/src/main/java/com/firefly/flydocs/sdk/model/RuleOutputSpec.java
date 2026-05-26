@@ -24,11 +24,13 @@ import org.jspecify.annotations.Nullable;
 /** Shape of a {@link RuleSpec}'s resolved output. */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record RuleOutputSpec(
-        String type,
+        @JsonProperty("type") String type,
         @JsonProperty("valid_outputs") @Nullable List<String> validOutputs) {
 
     public RuleOutputSpec {
-        if (type == null) type = "boolean";
+        if (type == null) {
+            type = "boolean";
+        }
     }
 
     public static RuleOutputSpec bool() {

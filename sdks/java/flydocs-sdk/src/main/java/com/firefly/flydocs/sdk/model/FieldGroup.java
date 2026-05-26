@@ -19,21 +19,26 @@ package com.firefly.flydocs.sdk.model;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.List;
+import org.jspecify.annotations.Nullable;
 
-/** A named bundle of {@link FieldSpec}s the service should extract together. */
+/**
+ * A named bundle of {@link Field}s the service should extract together.
+ *
+ * <p>v1 drops the {@code fieldGroup*} prefix stutter: members are just
+ * {@code name}, {@code description}, {@code fields}.</p>
+ */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record FieldGroup(
-        @JsonProperty("fieldGroupName") String name,
-        @JsonProperty("fieldGroupDesc") String description,
-        @JsonProperty("fieldGroupFields") List<FieldSpec> fields) {
+        @JsonProperty("name") String name,
+        @JsonProperty("description") @Nullable String description,
+        @JsonProperty("fields") List<Field> fields) {
 
     public FieldGroup {
-        if (description == null) description = "";
         fields = List.copyOf(fields);
     }
 
-    /** {@code FieldGroup.of("totals", FieldSpec.of(...), FieldSpec.of(...))} */
-    public static FieldGroup of(String name, FieldSpec... fields) {
-        return new FieldGroup(name, "", List.of(fields));
+    /** {@code FieldGroup.of("totals", Field.required("amount", FieldType.NUMBER))} */
+    public static FieldGroup of(String name, Field... fields) {
+        return new FieldGroup(name, null, List.of(fields));
     }
 }

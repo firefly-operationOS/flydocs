@@ -16,17 +16,14 @@
 
 package com.firefly.flydocs.sdk.model;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 /**
  * Opt-in switches for every optional pipeline stage.
  *
  * <p>The multimodal extractor is always on; everything else is opt-in.
- * Defaults match the service-side {@code StageToggles} defaults so an
- * empty {@code StageToggles} produces the same behaviour as omitting
- * the field on the wire.</p>
- *
- * <p>Use the {@link #builder() builder} for readable construction:</p>
+ * Defaults mirror the service-side {@code StageToggles}.</p>
  *
  * <pre>{@code
  * StageToggles s = StageToggles.builder()
@@ -35,17 +32,18 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  *         .build();
  * }</pre>
  */
+@JsonInclude(JsonInclude.Include.NON_NULL)
 public record StageToggles(
-        boolean splitter,
-        boolean classifier,
+        @JsonProperty("splitter") boolean splitter,
+        @JsonProperty("classifier") boolean classifier,
         @JsonProperty("field_validation") boolean fieldValidation,
         @JsonProperty("visual_authenticity") boolean visualAuthenticity,
         @JsonProperty("content_authenticity") boolean contentAuthenticity,
-        boolean judge,
+        @JsonProperty("judge") boolean judge,
         @JsonProperty("rule_engine") boolean ruleEngine,
         @JsonProperty("judge_escalation") boolean judgeEscalation,
         @JsonProperty("bbox_refine") boolean bboxRefine,
-        boolean transform) {
+        @JsonProperty("transform") boolean transform) {
 
     /** Service-default toggles (classifier + field_validation on, everything else off). */
     public static StageToggles defaults() {

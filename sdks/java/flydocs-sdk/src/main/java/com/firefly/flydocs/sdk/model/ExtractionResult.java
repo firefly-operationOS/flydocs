@@ -17,33 +17,42 @@
 package com.firefly.flydocs.sdk.model;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.List;
-import java.util.Map;
-import java.util.UUID;
-import org.jspecify.annotations.Nullable;
 
 /**
- * Response body for {@code POST /api/v1/extract} and the {@code result}
- * field of {@link JobResult}.
+ * Top-level response shape for {@code POST /api/v1/extract} and the
+ * {@code result} field of {@link ExtractionResultEnvelope}.
  *
- * <p>Top-level identity / metadata is typed strictly; deeply nested
- * per-document / per-field shapes stay as raw maps so the SDK keeps
- * working when the service adds new attributes without a coordinated
- * release.</p>
+ * <p>v1 reshape:</p>
+ * <ul>
+ *   <li>{@code request_id} → {@code id} (prefixed {@code ext_…}).</li>
+ *   <li>New {@code status} ({@code success} | {@code partial}).</li>
+ *   <li>{@code additional_documents} → {@code discovered_documents}.</li>
+ *   <li>Pipeline meta (model, latency, trace, errors, escalation, usage)
+ *       nested under {@link #pipeline()}.</li>
+ *   <li>Top-level shapes are now strongly typed records (no more raw
+ *       {@code Map<String,Object>} columns).</li>
+ * </ul>
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
+@JsonInclude(JsonInclude.Include.NON_NULL)
 public record ExtractionResult(
-        @JsonProperty("request_id") UUID requestId,
-        List<Map<String, Object>> files,
-        List<Map<String, Object>> documents,
-        @JsonProperty("additional_documents") List<Map<String, Object>> additionalDocuments,
-        @JsonProperty("rule_results") List<Map<String, Object>> ruleResults,
-        @JsonProperty("request_transformations") List<Map<String, Object>> requestTransformations,
-        String model,
-        @JsonProperty("latency_ms") int latencyMs,
-        @JsonProperty("pipeline_errors") List<Map<String, Object>> pipelineErrors,
-        @Nullable Map<String, Object> escalation,
-        @Nullable Map<String, Object> usage,
-        List<Map<String, Object>> trace) {
+        @JsonProperty("id") String id,
+        @JsonProperty("status") String status,
+        @JsonProperty("files") List<FileSummary> files,
+        @JsonProperty("documents") List<Document> documents,
+        @JsonProperty("discovered_documents") List<Document> discoveredDocuments,
+        @JsonProperty("rule_results") List<RuleResult> ruleResults,
+        @JsonProperty("request_transformations") List<ExtractedFieldGroup> requestTransformations,
+        @JsonProperty("pipeline") PipelineMeta pipeline) {
+
+    public ExtractionResult {
+        files = files == null ? List.of() : List.copyOf(files);
+        documents = documents == null ? List.of() : List.copyOf(documents);
+        discoveredDocuments = discoveredDocuments == null ? List.of() : List.copyOf(discoveredDocuments);
+        ruleResults = ruleResults == null ? List.of() : List.copyOf(ruleResults);
+        requestTransformations = requestTransformations == null ? List.of() : List.copyOf(requestTransformations);
+    }
 }

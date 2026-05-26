@@ -16,39 +16,46 @@
 
 package com.firefly.flydocs.sdk.model;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonValue;
 import java.util.Map;
 import org.jspecify.annotations.Nullable;
 
 /**
- * One built-in validator declaration attached to a {@link FieldSpec}.
+ * One named built-in validator attached to a {@link Field}.
  *
- * <p>{@code type} is a free string so new server-side validators don't
- * require an SDK release; the canonical names live in
- * {@code flydocs.interfaces.enums.standard_validator}.</p>
+ * <p>The dispatch key is {@code name} (not {@code type} — renamed to avoid
+ * collision with {@link Field#type()} when both appear in the same parent
+ * envelope). Canonical catalogue names: {@code iban}, {@code bic},
+ * {@code phone_e164}, {@code vat_id}, {@code email}, {@code uri}, {@code uuid},
+ * {@code date}, {@code datetime}, {@code time}, {@code iso_8601}, …</p>
+ *
+ * <p>{@link Severity#ERROR} (default) hard-fails the field. {@link Severity#WARNING}
+ * records the issue but keeps the field {@code valid=true}.</p>
  */
-@JsonInclude(JsonInclude.Include.NON_DEFAULT)
-public record StandardValidatorSpec(
-        String type,
-        @Nullable Map<String, Object> params,
-        Severity severity) {
+@JsonInclude(JsonInclude.Include.NON_NULL)
+public record ValidatorSpec(
+        @JsonProperty("name") String name,
+        @JsonProperty("params") @Nullable Map<String, Object> params,
+        @JsonProperty("severity") Severity severity) {
 
-    /** Default severity is {@link Severity#ERROR} -- mirrors the service's contract. */
-    public StandardValidatorSpec {
+    public ValidatorSpec {
         if (severity == null) {
             severity = Severity.ERROR;
         }
     }
 
-    public StandardValidatorSpec(String type) {
-        this(type, null, Severity.ERROR);
+    public ValidatorSpec(String name) {
+        this(name, null, Severity.ERROR);
     }
 
-    public StandardValidatorSpec(String type, Map<String, Object> params) {
-        this(type, params, Severity.ERROR);
+    public ValidatorSpec(String name, Map<String, Object> params) {
+        this(name, params, Severity.ERROR);
     }
 
-    /** Whether a validation error is hard (``error``) or soft (``warning``). */
+    /** Hard error vs soft warning. */
     public enum Severity {
         ERROR("error"),
         WARNING("warning");
@@ -59,9 +66,22 @@ public record StandardValidatorSpec(
             this.wire = wire;
         }
 
-        @com.fasterxml.jackson.annotation.JsonValue
+        @JsonValue
         public String wire() {
             return wire;
+        }
+
+        @JsonCreator
+        public static Severity fromWire(String value) {
+            if (value == null) {
+                throw new IllegalArgumentException("Severity value is null");
+            }
+            for (Severity s : values()) {
+                if (s.wire.equals(value)) {
+                    return s;
+                }
+            }
+            throw new IllegalArgumentException("unknown Severity: " + value);
         }
     }
 }

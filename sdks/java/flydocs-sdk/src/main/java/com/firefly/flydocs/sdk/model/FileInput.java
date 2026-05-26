@@ -27,47 +27,50 @@ import org.jspecify.annotations.Nullable;
 /**
  * One input file for an extraction request.
  *
- * <p>{@code contentBase64} is sent on the wire as {@code content_base64};
- * Jackson handles the snake_case mapping via the {@link JsonProperty}
- * annotation. The {@link #ofBytes} / {@link #ofPath} factories handle
- * base64 encoding for callers that don't want to fiddle with
- * {@link Base64} themselves.</p>
+ * <p>JSON mode: caller sets {@code content_base64}. Multipart mode: the
+ * binary rides in a separate file part and {@code content_base64} is
+ * absent (the part body is the binary).</p>
+ *
+ * <p>{@code expected_type} is a soft hint that must reference one of the
+ * declared {@code document_types[].id} values. When present, the
+ * classifier is skipped for this file even if the classifier stage is
+ * enabled.</p>
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
-public record DocumentInput(
-        String filename,
-        @JsonProperty("content_base64") String contentBase64,
+public record FileInput(
+        @JsonProperty("filename") String filename,
+        @JsonProperty("content_base64") @Nullable String contentBase64,
         @JsonProperty("content_type") @Nullable String contentType,
-        @JsonProperty("document_type") @Nullable String documentType) {
+        @JsonProperty("expected_type") @Nullable String expectedType) {
 
-    /** Build a {@link DocumentInput} from raw bytes (handles base64 encoding). */
-    public static DocumentInput ofBytes(byte[] data, String filename) {
+    /** Build a {@link FileInput} from raw bytes (handles base64 encoding). */
+    public static FileInput ofBytes(byte[] data, String filename) {
         return ofBytes(data, filename, null, null);
     }
 
-    /** Build a {@link DocumentInput} from raw bytes with optional content/document type hints. */
-    public static DocumentInput ofBytes(
+    /** Build a {@link FileInput} from raw bytes with optional content/expected type hints. */
+    public static FileInput ofBytes(
             byte[] data,
             String filename,
             @Nullable String contentType,
-            @Nullable String documentType) {
-        return new DocumentInput(
+            @Nullable String expectedType) {
+        return new FileInput(
                 filename,
                 Base64.getEncoder().encodeToString(data),
                 contentType,
-                documentType);
+                expectedType);
     }
 
-    /** Read a file off disk and produce a {@link DocumentInput}. */
-    public static DocumentInput ofPath(Path path) throws IOException {
+    /** Read a file off disk and produce a {@link FileInput}. */
+    public static FileInput ofPath(Path path) throws IOException {
         return ofPath(path, null, null);
     }
 
-    /** Read a file off disk with optional content/document type hints. */
-    public static DocumentInput ofPath(
+    /** Read a file off disk with optional content/expected type hints. */
+    public static FileInput ofPath(
             Path path,
             @Nullable String contentType,
-            @Nullable String documentType) throws IOException {
-        return ofBytes(Files.readAllBytes(path), path.getFileName().toString(), contentType, documentType);
+            @Nullable String expectedType) throws IOException {
+        return ofBytes(Files.readAllBytes(path), path.getFileName().toString(), contentType, expectedType);
     }
 }

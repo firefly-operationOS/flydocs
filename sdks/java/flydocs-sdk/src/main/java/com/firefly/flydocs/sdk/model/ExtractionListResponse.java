@@ -17,9 +17,18 @@
 package com.firefly.flydocs.sdk.model;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.List;
 
-/** Response body for {@code GET /api/v1/jobs}. */
+/** Response body for {@code GET /api/v1/extractions}. */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public record JobListResponse(List<JobStatusResponse> items, int total, int limit, int offset) {
+public record ExtractionListResponse(
+        @JsonProperty("items") List<Extraction> items,
+        @JsonProperty("total") int total,
+        @JsonProperty("limit") int limit,
+        @JsonProperty("offset") int offset) {
+
+    public ExtractionListResponse {
+        items = items == null ? List.of() : List.copyOf(items);
+    }
 }

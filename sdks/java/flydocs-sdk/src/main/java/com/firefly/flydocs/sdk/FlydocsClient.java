@@ -16,13 +16,13 @@
 
 package com.firefly.flydocs.sdk;
 
+import com.firefly.flydocs.sdk.model.Extraction;
+import com.firefly.flydocs.sdk.model.ExtractionListQuery;
+import com.firefly.flydocs.sdk.model.ExtractionListResponse;
 import com.firefly.flydocs.sdk.model.ExtractionRequest;
 import com.firefly.flydocs.sdk.model.ExtractionResult;
-import com.firefly.flydocs.sdk.model.JobListResponse;
-import com.firefly.flydocs.sdk.model.JobResult;
-import com.firefly.flydocs.sdk.model.JobStatusResponse;
-import com.firefly.flydocs.sdk.model.SubmitJobRequest;
-import com.firefly.flydocs.sdk.model.SubmitJobResponse;
+import com.firefly.flydocs.sdk.model.ExtractionResultEnvelope;
+import com.firefly.flydocs.sdk.model.SubmitExtractionRequest;
 import com.firefly.flydocs.sdk.model.VersionInfo;
 import java.time.Duration;
 import java.util.Map;
@@ -41,15 +41,23 @@ import org.jspecify.annotations.Nullable;
  *         .baseUrl("http://localhost:8400")
  *         .build();
  *
- * VersionInfo info = flydocs.version();
+ * VersionInfo info        = flydocs.version();
  * ExtractionResult result = flydocs.extract(request);
+ *
+ * Extraction queued       = flydocs.extractions().create(submitReq, "idem-key");
+ * Extraction current      = flydocs.extractions().get(id);
+ * ExtractionResultEnvelope e = flydocs.extractions().getResult(id, true, Duration.ofSeconds(60));
+ * Extraction cancelled    = flydocs.extractions().cancel(id);
+ * ExtractionListResponse page = flydocs.extractions().list(query);
  * }</pre>
  */
 public class FlydocsClient implements AutoCloseable {
     private final FlydocsClientAsync async;
+    private final Extractions extractions;
 
     public FlydocsClient(FlydocsClientAsync async) {
         this.async = async;
+        this.extractions = new Extractions();
     }
 
     public static Builder builder() {
@@ -67,6 +75,10 @@ public class FlydocsClient implements AutoCloseable {
         return this.async;
     }
 
+    // ------------------------------------------------------------------
+    // Identity / health
+    // ------------------------------------------------------------------
+
     public VersionInfo version() {
         return async.version().block();
     }
@@ -78,6 +90,10 @@ public class FlydocsClient implements AutoCloseable {
     public Map<String, Object> health(String probe) {
         return async.health(probe).block();
     }
+
+    // ------------------------------------------------------------------
+    // Sync extraction
+    // ------------------------------------------------------------------
 
     public Map<String, Object> validate(ExtractionRequest request) {
         return async.validate(request).block();
@@ -94,49 +110,65 @@ public class FlydocsClient implements AutoCloseable {
         return async.extract(request, idempotencyKey, correlationId).block();
     }
 
-    public SubmitJobResponse submitJob(SubmitJobRequest request) {
-        return async.submitJob(request).block();
+    // ------------------------------------------------------------------
+    // Async extractions sub-resource (blocking facade)
+    // ------------------------------------------------------------------
+
+    public Extractions extractions() {
+        return this.extractions;
     }
 
-    public SubmitJobResponse submitJob(
-            SubmitJobRequest request,
-            @Nullable String idempotencyKey,
-            @Nullable String correlationId) {
-        return async.submitJob(request, idempotencyKey, correlationId).block();
-    }
+    /** Blocking facade over {@link FlydocsClientAsync.Extractions}. */
+    public final class Extractions {
 
-    public JobStatusResponse getJob(String jobId) {
-        return async.getJob(jobId).block();
-    }
+        private Extractions() {}
 
-    public JobStatusResponse cancelJob(String jobId) {
-        return async.cancelJob(jobId).block();
-    }
+        public Extraction create(SubmitExtractionRequest request) {
+            return async.extractions().create(request).block();
+        }
 
-    /** Blocking wrapper around {@link FlydocsClientAsync#waitForCompletion(String, Duration, Duration)}. */
-    public JobStatusResponse waitForCompletion(String jobId, Duration pollInterval, Duration timeout) {
-        return async.waitForCompletion(jobId, pollInterval, timeout).block();
-    }
+        public Extraction create(SubmitExtractionRequest request, @Nullable String idempotencyKey) {
+            return async.extractions().create(request, idempotencyKey).block();
+        }
 
-    /** Blocking wrapper with default poll interval (2s) and timeout (10m). */
-    public JobStatusResponse waitForCompletion(String jobId) {
-        return async.waitForCompletion(jobId).block();
-    }
+        public Extraction create(
+                SubmitExtractionRequest request,
+                @Nullable String idempotencyKey,
+                @Nullable String correlationId) {
+            return async.extractions().create(request, idempotencyKey, correlationId).block();
+        }
 
-    public JobResult getJobResult(String jobId) {
-        return async.getJobResult(jobId).block();
-    }
+        public Extraction get(String id) {
+            return async.extractions().get(id).block();
+        }
 
-    public JobResult getJobResult(String jobId, boolean waitForBboxes, Duration timeout) {
-        return async.getJobResult(jobId, waitForBboxes, timeout).block();
-    }
+        public Extraction waitForCompletion(String id, Duration pollInterval, Duration timeout) {
+            return async.extractions().waitForCompletion(id, pollInterval, timeout).block();
+        }
 
-    public JobListResponse listJobs() {
-        return async.listJobs().block();
-    }
+        public Extraction waitForCompletion(String id) {
+            return async.extractions().waitForCompletion(id).block();
+        }
 
-    public JobListResponse listJobs(FlydocsClientAsync.JobListFilter filter) {
-        return async.listJobs(filter).block();
+        public Extraction cancel(String id) {
+            return async.extractions().cancel(id).block();
+        }
+
+        public ExtractionResultEnvelope getResult(String id) {
+            return async.extractions().getResult(id).block();
+        }
+
+        public ExtractionResultEnvelope getResult(String id, boolean waitForBboxes, Duration timeout) {
+            return async.extractions().getResult(id, waitForBboxes, timeout).block();
+        }
+
+        public ExtractionListResponse list() {
+            return async.extractions().list().block();
+        }
+
+        public ExtractionListResponse list(ExtractionListQuery query) {
+            return async.extractions().list(query).block();
+        }
     }
 
     /** Convenience builder that delegates to {@link FlydocsClientAsync.Builder}. */
@@ -145,6 +177,11 @@ public class FlydocsClient implements AutoCloseable {
 
         public Builder baseUrl(String baseUrl) {
             inner.baseUrl(baseUrl);
+            return this;
+        }
+
+        public Builder apiKey(@Nullable String apiKey) {
+            inner.apiKey(apiKey);
             return this;
         }
 

@@ -17,20 +17,23 @@
 package com.firefly.flydocs.sdk.model;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.ArrayList;
 import java.util.List;
 
 /** One business rule expressed as a natural-language predicate over its parents. */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record RuleSpec(
-        String id,
-        String predicate,
-        List<RuleParent> parents,
-        RuleOutputSpec output) {
+        @JsonProperty("id") String id,
+        @JsonProperty("predicate") String predicate,
+        @JsonProperty("parents") List<RuleParent> parents,
+        @JsonProperty("output") RuleOutputSpec output) {
 
     public RuleSpec {
         parents = parents == null ? List.of() : List.copyOf(parents);
-        if (output == null) output = RuleOutputSpec.bool();
+        if (output == null) {
+            output = RuleOutputSpec.bool();
+        }
     }
 
     public static Builder builder(String id, String predicate) {
@@ -50,14 +53,14 @@ public record RuleSpec(
         }
 
         public Builder addParent(RuleParent p) { this.parents.add(p); return this; }
-        public Builder addFieldParent(String documentType, String... fieldNames) {
-            return addParent(new RuleParent.FieldParent(documentType, List.of(fieldNames)));
+        public Builder addFieldParent(String documentType, String... fields) {
+            return addParent(new RuleParent.Field(documentType, List.of(fields)));
         }
-        public Builder addValidatorParent(String documentType, String validatorName) {
-            return addParent(new RuleParent.ValidatorParent(documentType, validatorName));
+        public Builder addValidatorParent(String documentType, String validator) {
+            return addParent(new RuleParent.Validator(documentType, validator));
         }
-        public Builder addRuleParent(String ruleId) {
-            return addParent(new RuleParent.RuleRef(ruleId));
+        public Builder addRuleParent(String rule) {
+            return addParent(new RuleParent.Rule(rule));
         }
         public Builder output(RuleOutputSpec o) { this.output = o; return this; }
 

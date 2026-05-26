@@ -4,11 +4,11 @@ Runnable reactive examples mirroring the [Python SDK's example set](../../python
 
 | # | Class                                                                                       | Mirrors                                | What it shows                                                                |
 |---|---------------------------------------------------------------------------------------------|----------------------------------------|------------------------------------------------------------------------------|
-| 1 | [`FirstExtractionExample`](./src/main/java/com/firefly/flydocs/examples/FirstExtractionExample.java)         | `01_first_extraction.py`               | Smallest reactive extraction; hand-written `DocSpec`; `try-with-resources` on the client. |
+| 1 | [`FirstExtractionExample`](./src/main/java/com/firefly/flydocs/examples/FirstExtractionExample.java)         | `01_first_extraction.py`               | Smallest reactive extraction; hand-written `DocumentTypeSpec`; `try-with-resources` on the client. |
 | 2 | [`TypedSchemaAndRulesExample`](./src/main/java/com/firefly/flydocs/examples/TypedSchemaAndRulesExample.java) | `02_typed_schema_and_rules.py`         | Realistic invoice schema + two business rules + opt-in `judge` + `ruleEngine` stages. |
-| 3 | [`AsyncJobWithWaitExample`](./src/main/java/com/firefly/flydocs/examples/AsyncJobWithWaitExample.java)       | `03_async_job_with_wait.py`            | Submit + `waitForCompletion` + `getJobResult` as a single chained `Mono` pipeline. |
-| 4 | [`WebhookReceiverApplication`](./src/main/java/com/firefly/flydocs/examples/WebhookReceiverApplication.java) | `04_webhook_receiver_fastapi.py`       | Spring Boot starter wiring + an annotated controller that verifies `X-Flydocs-Signature`. |
-| 5 | [`ErrorHandlingExample`](./src/main/java/com/firefly/flydocs/examples/ErrorHandlingExample.java)             | `05_error_handling.py`                 | Typed `FlydocsHttpException` / `FlydocsTimeoutException`; sync→async fallback on `extraction_timeout`. |
+| 3 | [`AsyncJobWithWaitExample`](./src/main/java/com/firefly/flydocs/examples/AsyncJobWithWaitExample.java)       | `03_async_job_with_wait.py`            | Submit + `waitForCompletion` + `getResult` as a single chained `Mono` pipeline. |
+| 4 | [`WebhookReceiverApplication`](./src/main/java/com/firefly/flydocs/examples/WebhookReceiverApplication.java) | `04_webhook_receiver_fastapi.py`       | Spring Boot starter + `@FlydocsWebhook` resolver injecting a verified `EventEnvelope`. |
+| 5 | [`ErrorHandlingExample`](./src/main/java/com/firefly/flydocs/examples/ErrorHandlingExample.java)             | `05_error_handling.py`                 | Typed `FlydocsHttpException` / `FlydocsTimeoutException`; sync→async fallback on `timeout`. |
 | 6 | [`SyncFacadeExample`](./src/main/java/com/firefly/flydocs/examples/SyncFacadeExample.java)                   | `06_sync_facade.py`                    | The blocking `FlydocsClient` facade for non-reactive callers.                |
 
 Plus [`ExampleHelpers`](./src/main/java/com/firefly/flydocs/examples/ExampleHelpers.java) — the `examples_helpers.py` analogue (shared invoice schema + rules + base-URL resolution).
@@ -21,7 +21,7 @@ Spin up a local flydocs first:
 task docker:up:test     # serves http://localhost:8400 backed by the mock LLM
 ```
 
-Then run any example. The plain extractor / async / sync ones take a PDF path as `Dexec.args`:
+Then run any example. The plain extractor / async / sync ones take a PDF path as `-Dexec.args`:
 
 ```bash
 mvn -pl flydocs-examples compile exec:java \
@@ -57,12 +57,12 @@ The webhook receiver is a Spring Boot app — run it with `spring-boot:run`:
 
 ```bash
 FLYDOCS_BASE_URL=http://localhost:8400 \
-FLYDOCS_WEBHOOK_HMAC_SECRET=super-secret \
+FLYDOCS_WEBHOOK_SECRET=super-secret \
   mvn -pl flydocs-examples spring-boot:run \
     -Dspring-boot.run.mainClass=com.firefly.flydocs.examples.WebhookReceiverApplication
 ```
 
-Then POST a flydocs-signed webhook body to `http://localhost:8080/flydocs/webhook` with the `X-Flydocs-Signature` header set to `sha256=<hex>`. The receiver returns `202` on a valid signature, `403` otherwise.
+Then POST a flydocs-signed envelope to `http://localhost:8080/flydocs/webhook` with the `X-Flydocs-Signature` header set to `sha256=<hex>`. The starter's `@FlydocsWebhook` resolver verifies and deserialises the payload into an `EventEnvelope` automatically.
 
 ## Configuration
 

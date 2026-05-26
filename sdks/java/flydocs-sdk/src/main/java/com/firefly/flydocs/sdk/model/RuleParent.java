@@ -25,51 +25,52 @@ import java.util.List;
 /**
  * Where a {@link RuleSpec} sources its input from.
  *
+ * <p>v1 reshapes the discriminator from {@code parentType} to {@code kind}
+ * to avoid collision with {@link Field#type()} and {@link RuleOutputSpec#type()}
+ * when JSON-Schema-walking tools key on the literal field name.</p>
+ *
  * <p>Sealed union with three variants:</p>
  *
  * <ul>
- *   <li>{@link FieldParent} — one or more fields on a known document type.</li>
- *   <li>{@link ValidatorParent} — the outcome of a named validator.</li>
- *   <li>{@link RuleParent.RuleRef} — the resolved output of an upstream rule.</li>
+ *   <li>{@link Field} — one or more fields on a known document type.</li>
+ *   <li>{@link Validator} — the outcome of a named validator on a document type.</li>
+ *   <li>{@link Rule} — the resolved output of another rule.</li>
  * </ul>
- *
- * <p>Jackson routes serialisation via the {@code parentType} discriminator
- * the service expects on the wire.</p>
  */
 @JsonTypeInfo(
         use = JsonTypeInfo.Id.NAME,
         include = JsonTypeInfo.As.PROPERTY,
-        property = "parentType")
+        property = "kind")
 @JsonSubTypes({
-        @JsonSubTypes.Type(value = RuleParent.FieldParent.class, name = "field"),
-        @JsonSubTypes.Type(value = RuleParent.ValidatorParent.class, name = "validator"),
-        @JsonSubTypes.Type(value = RuleParent.RuleRef.class, name = "rule"),
+        @JsonSubTypes.Type(value = RuleParent.Field.class, name = "field"),
+        @JsonSubTypes.Type(value = RuleParent.Validator.class, name = "validator"),
+        @JsonSubTypes.Type(value = RuleParent.Rule.class, name = "rule"),
 })
 public sealed interface RuleParent
-        permits RuleParent.FieldParent, RuleParent.ValidatorParent, RuleParent.RuleRef {
+        permits RuleParent.Field, RuleParent.Validator, RuleParent.Rule {
 
     /** Reference to one or more fields on a known document type. */
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    record FieldParent(
-            @JsonProperty("documentType") String documentType,
-            @JsonProperty("fieldNames") List<String> fieldNames)
+    record Field(
+            @JsonProperty("document_type") String documentType,
+            @JsonProperty("fields") List<String> fields)
             implements RuleParent {
 
-        public FieldParent {
-            fieldNames = List.copyOf(fieldNames);
+        public Field {
+            fields = List.copyOf(fields);
         }
     }
 
     /** Reference to a named validator's outcome on a known document type. */
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    record ValidatorParent(
-            @JsonProperty("documentType") String documentType,
-            @JsonProperty("validatorName") String validatorName)
+    record Validator(
+            @JsonProperty("document_type") String documentType,
+            @JsonProperty("validator") String validator)
             implements RuleParent {
     }
 
     /** Reference to another rule's resolved output. */
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    record RuleRef(@JsonProperty("ruleId") String ruleId) implements RuleParent {
+    record Rule(@JsonProperty("rule") String rule) implements RuleParent {
     }
 }

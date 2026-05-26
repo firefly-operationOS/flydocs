@@ -16,15 +16,18 @@
 
 package com.firefly.flydocs.sdk.model;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonValue;
 
 /** JSON-Schema-style format hints applied at field validation time. */
 public enum StandardFormat {
     DATE("date"),
     DATE_TIME("date-time"),
+    TIME("time"),
     EMAIL("email"),
     URI("uri"),
-    UUID("uuid");
+    UUID("uuid"),
+    CURRENCY("currency");
 
     private final String wire;
 
@@ -35,5 +38,18 @@ public enum StandardFormat {
     @JsonValue
     public String wire() {
         return wire;
+    }
+
+    @JsonCreator
+    public static StandardFormat fromWire(String value) {
+        if (value == null) {
+            throw new IllegalArgumentException("StandardFormat value is null");
+        }
+        for (StandardFormat f : values()) {
+            if (f.wire.equals(value)) {
+                return f;
+            }
+        }
+        throw new IllegalArgumentException("unknown StandardFormat: " + value);
     }
 }

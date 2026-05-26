@@ -17,33 +17,37 @@
 package com.firefly.flydocs.sdk.model;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.time.OffsetDateTime;
 import org.jspecify.annotations.Nullable;
 
-/** Response body for {@code GET /api/v1/jobs/{id}} and {@code DELETE /api/v1/jobs/{id}}. */
+/**
+ * Current state snapshot of an async extraction.
+ *
+ * <p>Response body for {@code POST /api/v1/extractions} (202),
+ * {@code GET  /api/v1/extractions/{id}}, and {@code DELETE  /api/v1/extractions/{id}}.</p>
+ *
+ * <p>v1 simplifies the state machine: {@code queued -> running -> succeeded
+ * | failed | cancelled}. The v0 {@code PARTIAL_SUCCEEDED} / {@code REFINING_BBOXES}
+ * intermediate states are gone; bbox refinement runs as additive
+ * post-processing under {@link #postProcessing()} on a fully-succeeded
+ * extraction.</p>
+ */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public record JobStatusResponse(
-        @JsonProperty("job_id") String jobId,
-        JobStatus status,
+@JsonInclude(JsonInclude.Include.NON_NULL)
+public record Extraction(
+        @JsonProperty("id") String id,
+        @JsonProperty("status") ExtractionStatus status,
         @JsonProperty("submitted_at") OffsetDateTime submittedAt,
         @JsonProperty("started_at") @Nullable OffsetDateTime startedAt,
         @JsonProperty("finished_at") @Nullable OffsetDateTime finishedAt,
-        int attempts,
-        @JsonProperty("error_code") @Nullable String errorCode,
-        @JsonProperty("error_message") @Nullable String errorMessage,
-        @JsonProperty("bbox_refine_status") @Nullable String bboxRefineStatus,
-        @JsonProperty("bbox_refine_attempts") int bboxRefineAttempts,
-        @JsonProperty("bbox_refine_started_at") @Nullable OffsetDateTime bboxRefineStartedAt,
-        @JsonProperty("bbox_refine_finished_at") @Nullable OffsetDateTime bboxRefineFinishedAt,
-        @JsonProperty("bbox_refine_error_code") @Nullable String bboxRefineErrorCode,
-        @JsonProperty("bbox_refine_error_message") @Nullable String bboxRefineErrorMessage) {
+        @JsonProperty("attempts") int attempts,
+        @JsonProperty("error") @Nullable ExtractionError error,
+        @JsonProperty("post_processing") @Nullable PostProcessing postProcessing) {
 
-    /** Terminal status (no more state transitions). */
+    /** True when no further main-status transition is expected. */
     public boolean isTerminal() {
-        return status == JobStatus.SUCCEEDED
-                || status == JobStatus.PARTIAL_SUCCEEDED
-                || status == JobStatus.FAILED
-                || status == JobStatus.CANCELLED;
+        return status != null && status.isTerminal();
     }
 }

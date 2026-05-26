@@ -48,19 +48,20 @@ class FlydocsAutoConfigurationTest {
                 .run(ctx -> {
                     assertThat(ctx).hasSingleBean(FlydocsClientAsync.class);
                     assertThat(ctx).hasSingleBean(FlydocsClient.class);
-                    // Webhook verifier stays absent without an HMAC secret.
+                    // Webhook verifier stays absent without a secret.
                     assertThat(ctx).doesNotHaveBean(WebhookVerifier.class);
                 });
     }
 
     @Test
-    void registersWebhookVerifierWhenHmacSecretSet() {
+    void registersWebhookVerifierWhenSecretSet() {
         runner
                 .withPropertyValues(
                         "flydocs.base-url=http://localhost:8400",
-                        "flydocs.webhook.hmac-secret=super-secret")
+                        "flydocs.webhook.secret=super-secret")
                 .run(ctx -> {
                     assertThat(ctx).hasSingleBean(WebhookVerifier.class);
+                    assertThat(ctx).hasSingleBean(FlydocsWebhookArgumentResolver.class);
                 });
     }
 
@@ -69,6 +70,7 @@ class FlydocsAutoConfigurationTest {
         runner
                 .withPropertyValues(
                         "flydocs.base-url=http://localhost:8400",
+                        "flydocs.api-key=my-key",
                         "flydocs.timeout=30s",
                         "flydocs.max-attempts=3",
                         "flydocs.retry-min-backoff=500ms",
@@ -77,6 +79,7 @@ class FlydocsAutoConfigurationTest {
                 .run(ctx -> {
                     assertThat(ctx).hasSingleBean(FlydocsClientAsync.class);
                     FlydocsProperties props = ctx.getBean(FlydocsProperties.class);
+                    assertThat(props.getApiKey()).isEqualTo("my-key");
                     assertThat(props.getMaxAttempts()).isEqualTo(3);
                     assertThat(props.getRetryMinBackoff().toMillis()).isEqualTo(500);
                     assertThat(props.getMaxConnections()).isEqualTo(20);

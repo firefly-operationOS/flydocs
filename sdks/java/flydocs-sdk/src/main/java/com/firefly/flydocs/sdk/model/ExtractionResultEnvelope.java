@@ -19,7 +19,9 @@ package com.firefly.flydocs.sdk.model;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
-/** Response body for {@code GET /api/v1/jobs/{id}/result}. */
+/** Response body for {@code GET /api/v1/extractions/{id}/result}. */
 @JsonIgnoreProperties(ignoreUnknown = true)
-public record JobResult(@JsonProperty("job_id") String jobId, ExtractionResult result) {
+public record ExtractionResultEnvelope(
+        @JsonProperty("id") String id,
+        @JsonProperty("result") ExtractionResult result) {
 }

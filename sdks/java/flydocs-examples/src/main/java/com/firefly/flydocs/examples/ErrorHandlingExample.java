@@ -19,8 +19,8 @@ package com.firefly.flydocs.examples;
 import com.firefly.flydocs.sdk.FlydocsClientAsync;
 import com.firefly.flydocs.sdk.error.FlydocsHttpException;
 import com.firefly.flydocs.sdk.error.FlydocsTimeoutException;
-import com.firefly.flydocs.sdk.model.DocumentInput;
 import com.firefly.flydocs.sdk.model.ExtractionRequest;
+import com.firefly.flydocs.sdk.model.FileInput;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -30,9 +30,8 @@ import java.time.Duration;
  *
  * <p>The SDK maps every service / transport failure onto a typed
  * exception so callers can branch deterministically. This example
- * deliberately fires a request with a tight timeout against a tiny
- * input -- the goal is to demonstrate the catch shape, not to assert a
- * particular failure. Mirrors
+ * fires a request with a tight timeout — the goal is to demonstrate
+ * the catch shape, not to assert a particular failure. Mirrors
  * {@code sdks/python/examples/05_error_handling.py}.</p>
  *
  * <pre>{@code
@@ -51,13 +50,12 @@ public final class ErrorHandlingExample {
         Path pdf = Path.of(args[0]);
 
         ExtractionRequest req = ExtractionRequest.builder()
-                .addDocument(DocumentInput.ofPath(pdf))
-                .addDocSpec(ExampleHelpers.invoiceDocSpec())
+                .addFile(FileInput.ofPath(pdf))
+                .addDocumentType(ExampleHelpers.invoiceDocumentType())
                 .build();
 
         try (FlydocsClientAsync flydocs = FlydocsClientAsync.builder()
                 .baseUrl(ExampleHelpers.defaultBaseUrl())
-                // Intentionally tight so a real extraction probably trips it.
                 .timeout(Duration.ofSeconds(2))
                 .build()) {
 
@@ -71,9 +69,9 @@ public final class ErrorHandlingExample {
                         e.statusCode(),
                         e.code() == null || e.code().isEmpty() ? "(no code)" : e.code(),
                         e.detail() == null || e.detail().isEmpty() ? e.title() : e.detail());
-                // Example branch: fall through to async on synchronous timeout.
-                if ("extraction_timeout".equals(e.code())) {
-                    System.out.println("would fall through to submitJob() in a real app");
+                // v1 error code: "timeout" (was "extraction_timeout" in v0)
+                if ("timeout".equals(e.code())) {
+                    System.out.println("would fall through to extractions().create() in a real app");
                 }
             } catch (RuntimeException e) {
                 System.out.println("transport / unexpected error: " + e);

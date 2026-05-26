@@ -23,80 +23,107 @@ import java.util.List;
 import org.jspecify.annotations.Nullable;
 
 /**
- * One field the caller wants extracted.
+ * One field in a schema. Recursive for arrays and objects.
  *
- * <p>Top-level fields use {@code name} / {@code description} / {@code type}
- * on the wire (not the {@code fieldName} form used by {@link FieldItem}).
- * Use {@link #builder() the builder} for anything beyond a one-line declaration.</p>
+ * <p>One unified recursive type covers primitives, arrays, and objects.
+ * Constraints:</p>
+ * <ul>
+ *   <li>{@code type=="array"} requires {@code items} (a single {@link Field}
+ *       describing the row shape) and forbids {@code fields}.</li>
+ *   <li>{@code type=="object"} requires a non-empty {@code fields} list and
+ *       forbids {@code items}.</li>
+ *   <li>Primitives forbid both.</li>
+ * </ul>
+ *
+ * <p>Validators are declared via {@link ValidatorSpec} on
+ * {@code validators[]}.</p>
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
-public record FieldSpec(
+public record Field(
         @JsonProperty("name") String name,
-        @JsonProperty("description") String description,
+        @JsonProperty("description") @Nullable String description,
         @JsonProperty("type") FieldType type,
-        boolean required,
-        @Nullable String pattern,
-        @Nullable StandardFormat format,
-        @Nullable List<Object> enumValues,
-        @Nullable Double minimum,
-        @Nullable Double maximum,
-        @Nullable List<FieldItem> items,
-        @JsonProperty("standard_validators") List<StandardValidatorSpec> standardValidators) {
+        @JsonProperty("required") @Nullable Boolean required,
+        @JsonProperty("pattern") @Nullable String pattern,
+        @JsonProperty("format") @Nullable StandardFormat format,
+        @JsonProperty("enum") @Nullable List<Object> enumValues,
+        @JsonProperty("minimum") @Nullable Double minimum,
+        @JsonProperty("maximum") @Nullable Double maximum,
+        @JsonProperty("items") @Nullable Field items,
+        @JsonProperty("fields") @Nullable List<Field> fields,
+        @JsonProperty("validators") List<ValidatorSpec> validators) {
 
-    public FieldSpec {
-        if (description == null) description = "";
-        if (type == null) type = FieldType.STRING;
-        if (standardValidators == null) standardValidators = List.of();
+    public Field {
+        if (type == null) {
+            type = FieldType.STRING;
+        }
+        if (validators == null) {
+            validators = List.of();
+        } else {
+            validators = List.copyOf(validators);
+        }
+        if (fields != null) {
+            fields = List.copyOf(fields);
+        }
     }
 
-    /** Concise factory: {@code FieldSpec.of("total", FieldType.NUMBER)}. */
-    public static FieldSpec of(String name, FieldType type) {
-        return new FieldSpec(name, "", type, false, null, null, null, null, null, null, List.of());
+    /** Concise factory: {@code Field.of("currency", FieldType.STRING)}. */
+    public static Field of(String name, FieldType type) {
+        return new Field(name, null, type, null, null, null, null, null, null, null, null, List.of());
     }
 
-    /** Concise factory: {@code FieldSpec.required("total", FieldType.NUMBER)}. */
-    public static FieldSpec required(String name, FieldType type) {
-        return new FieldSpec(name, "", type, true, null, null, null, null, null, null, List.of());
+    /** Concise factory: {@code Field.required("total", FieldType.NUMBER)}. */
+    public static Field required(String name, FieldType type) {
+        return new Field(name, null, type, Boolean.TRUE, null, null, null, null, null, null, null, List.of());
     }
 
     public static Builder builder(String name) {
         return new Builder(name);
     }
 
-    /** Fluent builder for a single {@link FieldSpec}. */
+    /** Fluent builder for a single {@link Field}. */
     public static final class Builder {
         private final String name;
-        private String description = "";
+        private @Nullable String description;
         private FieldType type = FieldType.STRING;
-        private boolean required = false;
+        private @Nullable Boolean required;
         private @Nullable String pattern;
         private @Nullable StandardFormat format;
         private @Nullable List<Object> enumValues;
         private @Nullable Double minimum;
         private @Nullable Double maximum;
-        private @Nullable List<FieldItem> items;
-        private final List<StandardValidatorSpec> standardValidators = new ArrayList<>();
+        private @Nullable Field items;
+        private @Nullable List<Field> fields;
+        private final List<ValidatorSpec> validators = new ArrayList<>();
 
         Builder(String name) {
             this.name = name;
         }
 
-        public Builder description(String v) { this.description = v; return this; }
+        public Builder description(@Nullable String v) { this.description = v; return this; }
         public Builder type(FieldType v) { this.type = v; return this; }
         public Builder required(boolean v) { this.required = v; return this; }
-        public Builder pattern(String v) { this.pattern = v; return this; }
-        public Builder format(StandardFormat v) { this.format = v; return this; }
-        public Builder enumValues(List<Object> v) { this.enumValues = v; return this; }
-        public Builder minimum(Double v) { this.minimum = v; return this; }
-        public Builder maximum(Double v) { this.maximum = v; return this; }
-        public Builder items(List<FieldItem> v) { this.items = v; return this; }
-        public Builder validator(StandardValidatorSpec v) { this.standardValidators.add(v); return this; }
+        public Builder pattern(@Nullable String v) { this.pattern = v; return this; }
+        public Builder format(@Nullable StandardFormat v) { this.format = v; return this; }
+        public Builder enumValues(@Nullable List<Object> v) { this.enumValues = v; return this; }
+        public Builder minimum(@Nullable Double v) { this.minimum = v; return this; }
+        public Builder maximum(@Nullable Double v) { this.maximum = v; return this; }
+        /** Set the row shape for arrays. {@code items} is a single recursive {@link Field}. */
+        public Builder items(@Nullable Field v) { this.items = v; return this; }
+        /** Set the members for objects. {@code fields} is a non-empty list of recursive {@link Field}s. */
+        public Builder fields(@Nullable List<Field> v) { this.fields = v; return this; }
+        public Builder validator(ValidatorSpec v) { this.validators.add(v); return this; }
+        public Builder validators(List<ValidatorSpec> v) {
+            this.validators.clear();
+            this.validators.addAll(v);
+            return this;
+        }
 
-        public FieldSpec build() {
-            return new FieldSpec(
-                    name, description, type, required,
-                    pattern, format, enumValues, minimum, maximum,
-                    items, List.copyOf(standardValidators));
+        public Field build() {
+            return new Field(
+                    name, description, type, required, pattern, format,
+                    enumValues, minimum, maximum, items, fields,
+                    List.copyOf(validators));
         }
     }
 }

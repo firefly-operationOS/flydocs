@@ -16,48 +16,66 @@
 
 package com.firefly.flydocs.sdk.model;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonValue;
+
 /**
- * Lifecycle state of an async extraction job.
+ * Lifecycle state of an async extraction.
  *
- * <p>Mirrors {@code flydocs.interfaces.enums.job_status.JobStatus} on the
- * service side. The wire form is the enum constant name, e.g. {@code "QUEUED"}.
- * Unknown future values are surfaced as {@link #UNKNOWN} so an older SDK
- * keeps working when the service ships a new status without a coordinated
- * client release.</p>
+ * <p>One linear state machine in v1: {@code queued -> running -> succeeded |
+ * failed | cancelled}. Post-processing (bbox refinement today, more later)
+ * lives on the separate {@link PostProcessingStatus} machine on
+ * {@link Extraction#postProcessing()} and never gates the main status.</p>
+ *
+ * <p>Wire form is lowercase ({@code "queued"}, {@code "running"}, …) to
+ * match the v1 contract.</p>
  */
-public enum JobStatus {
-    QUEUED,
-    RUNNING,
-    SUCCEEDED,
-    PARTIAL_SUCCEEDED,
-    REFINING_BBOXES,
-    FAILED,
-    CANCELLED,
+public enum ExtractionStatus {
+    QUEUED("queued"),
+    RUNNING("running"),
+    SUCCEEDED("succeeded"),
+    FAILED("failed"),
+    CANCELLED("cancelled");
+
+    private final String wire;
+
+    ExtractionStatus(String wire) {
+        this.wire = wire;
+    }
+
+    /** JSON wire value (lowercase). */
+    @JsonValue
+    public String wire() {
+        return wire;
+    }
 
     /**
-     * Sentinel for any value the SDK does not recognise.
-     *
-     * <p>Look at {@link JobStatusResponse#errorCode()} or the raw JSON node
-     * to discover what the service actually emitted; treating the job as
-     * non-terminal until you decide is the safest default.</p>
+     * Parse the wire-form string into an {@link ExtractionStatus}. Throws
+     * {@link IllegalArgumentException} for unknown values.
      */
-    UNKNOWN;
+    @JsonCreator
+    public static ExtractionStatus fromWire(String value) {
+        if (value == null) {
+            throw new IllegalArgumentException("ExtractionStatus value is null");
+        }
+        for (ExtractionStatus s : values()) {
+            if (s.wire.equals(value)) {
+                return s;
+            }
+        }
+        throw new IllegalArgumentException("unknown ExtractionStatus: " + value);
+    }
+
+    /** True when no further main-status transition is expected. */
+    public boolean isTerminal() {
+        return this == SUCCEEDED || this == FAILED || this == CANCELLED;
+    }
 
     /**
-     * Parse the wire-form string into a {@link JobStatus}.
-     *
-     * <p>Returns {@link #UNKNOWN} for any value the enum does not declare,
-     * never throws. Use when deserialising JSON or when reading the
-     * {@code status} field of a webhook payload.</p>
+     * True when an extraction in this status carries a readable
+     * {@code ExtractionResult}. Only {@code succeeded} does.
      */
-    public static JobStatus fromWire(String value) {
-        if (value == null || value.isEmpty()) {
-            return UNKNOWN;
-        }
-        try {
-            return JobStatus.valueOf(value);
-        } catch (IllegalArgumentException ignored) {
-            return UNKNOWN;
-        }
+    public boolean hasResult() {
+        return this == SUCCEEDED;
     }
 }

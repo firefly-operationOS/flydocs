@@ -17,8 +17,17 @@
 package com.firefly.flydocs.sdk.model;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonProperty;
 
-/** One visual check the service should run (e.g. signature presence, watermark). */
+/**
+ * One visual check the service should run against the document
+ * (signature presence, watermark, seal, …).
+ *
+ * <p>In v1, visual checks live on {@link DocumentTypeSpec#visualChecks()}
+ * directly — the v0 {@code validators.visual[]} envelope is gone.</p>
+ */
 @JsonInclude(JsonInclude.Include.NON_NULL)
-public record VisualValidatorSpec(String name, String description) {
+public record VisualCheck(
+        @JsonProperty("name") String name,
+        @JsonProperty("description") String description) {
 }
