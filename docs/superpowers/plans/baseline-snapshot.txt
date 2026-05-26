@@ -1,0 +1,13 @@
+Baseline test snapshot — captured before API v1 redesign
+Date: 2026-05-26
+Branch: feat/api-v1-redesign
+
+`uv run pytest tests/unit/` summary:
+- 303 passed
+- 1 skipped
+- 5 warnings (pre-existing SwigPy deprecation)
+- duration: 7.43s
+
+Acceptance gate for the redesign: post-server-snapshot.txt must show
+all previously-passing tests still passing (count >= 303), with any
+new v1-specific tests added on top.
