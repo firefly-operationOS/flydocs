@@ -1,44 +1,53 @@
-# Standard validators
+# Built-in validators
 
 The deterministic, pure-Python validators flydocs ships out of the
 box. They run **after** extraction (no LLM call) and let you catch
 syntactically invalid values — checksums, country-specific identifier
 shapes, ISO codes, … — without writing a single regex.
 
-Declare them per `FieldSpec`:
+> **What this doc covers:** every built-in validator, its algorithm,
+> its params, its severity semantics. **When to read it:** while
+> declaring `validators[]` on a `Field`. **Where else to look:**
+> - Field-level shape: [`payload-reference.md § 5`](payload-reference.md#5-field--field-level-shape-and-constraints).
+> - Endpoint catalogue: [`api-reference.md`](api-reference.md).
+> - Migrating from v0's `standard_validators[]`: [`migration-v0-to-v1.md`](migration-v0-to-v1.md).
+
+Declare them per `Field`:
 
 ```jsonc
 {
-  "fieldName": "tax_id",
-  "fieldType": "string",
-  "standard_validators": [
-    {"type": "nif"},                                  // hard error if invalid
-    {"type": "nie", "severity": "warning"},           // soft, value stays valid
-    {"type": "vat_id", "params": {"country": "ES"}}
+  "name": "tax_id",
+  "type": "string",
+  "validators": [
+    { "name": "nif" },                                   // hard error if invalid
+    { "name": "nie",    "severity": "warning" },          // soft, value stays valid
+    { "name": "vat_id", "params": { "country": "ES" } }
   ]
 }
 ```
 
 Every validator returns `None` on success or a human-readable message
 on failure. The message is recorded on the field's
-`field_validation.errors[].message`, prefixed by the validator type
-(e.g. `nif: '12345678X' is not a valid Spanish NIF`).
+`validation.errors[].message`, prefixed by the validator name (e.g.
+`nif: '12345678X' is not a valid Spanish NIF`).
 
 **Severity:**
 
-- `error` (default) — a failure flips `field_validation.valid` to
-  `false`.
+- `error` (default) — a failure flips `validation.valid` to `false`.
 - `warning` — the error is recorded but `valid` stays `true`. Use for
   suggestive checks ("this *might* be a NIE — flag but don't reject").
 
 The same field can declare multiple validators. They run independently
 and accumulate their findings.
 
+The dispatch key is **`name`** (not `type` — `type` is the v0 spelling
+and is rejected on the wire).
+
 ---
 
 ## 1. Network
 
-| Type        | Checks                                                                 |
+| `name`      | Checks                                                                 |
 | ----------- | ---------------------------------------------------------------------- |
 | `email`     | RFC-shaped regex (`local@domain.tld`).                                  |
 | `uri` / `url` | Has a `scheme://` and a host.                                         |
@@ -49,7 +58,7 @@ and accumulate their findings.
 
 ## 2. Temporal
 
-| Type        | Checks                                                          |
+| `name`      | Checks                                                          |
 | ----------- | --------------------------------------------------------------- |
 | `date`      | `YYYY-MM-DD` parses via `date.fromisoformat`.                   |
 | `datetime`  | ISO 8601 datetime parses via `datetime.fromisoformat`.          |
@@ -58,7 +67,7 @@ and accumulate their findings.
 
 ## 3. Identifiers
 
-| Type        | Checks                                  |
+| `name`      | Checks                                  |
 | ----------- | --------------------------------------- |
 | `uuid`      | Parses as `UUID`.                       |
 | `json`      | Parses as JSON (string or list/dict).   |
@@ -66,7 +75,7 @@ and accumulate their findings.
 
 ## 4. Finance
 
-| Type            | Checks                                                                            |
+| `name`          | Checks                                                                            |
 | --------------- | --------------------------------------------------------------------------------- |
 | `iban`          | ISO 13616 layout + mod-97 checksum.                                               |
 | `bic`           | 8 or 11 chars, ISO 9362 layout.                                                   |
@@ -76,13 +85,13 @@ and accumulate their findings.
 
 ## 5. Telephony
 
-| Type         | Checks                                                                |
+| `name`       | Checks                                                                |
 | ------------ | --------------------------------------------------------------------- |
 | `phone_e164` | `\+?[1-9]\d{6,14}` after stripping spaces / dashes / parentheses.      |
 
 ## 6. Geographic
 
-| Type            | Checks                                                                                                                |
+| `name`          | Checks                                                                                                                |
 | --------------- | --------------------------------------------------------------------------------------------------------------------- |
 | `country_code`  | ISO 3166-1 alpha-2.                                                                                                   |
 | `language_code` | ISO 639-1 alpha-2.                                                                                                    |
@@ -92,7 +101,7 @@ and accumulate their findings.
 
 ## 7. National identifiers
 
-| Type              | Checks                                                                                        |
+| `name`            | Checks                                                                                        |
 | ----------------- | --------------------------------------------------------------------------------------------- |
 | `nif`             | Spanish NIF: 8 digits + control letter, with the canonical mod-23 checksum.                   |
 | `nie`             | Spanish NIE: `[XYZ]` prefix + 7 digits + control letter.                                      |
@@ -103,15 +112,74 @@ and accumulate their findings.
 
 ---
 
-## 8. Adding a new validator
+## 8. Worked examples
+
+### Soft-match NIF or NIE
+
+A common pattern when a field carries either a Spanish DNI (NIF) or a
+NIE — declare both as warnings so neither failing flips the field
+invalid:
+
+```jsonc
+{
+  "name": "tax_id",
+  "type": "string",
+  "validators": [
+    { "name": "nif", "severity": "warning" },
+    { "name": "nie", "severity": "warning" }
+  ]
+}
+```
+
+At least one will accept the value when it's syntactically a NIF or
+NIE; the field stays `valid: true` because warnings don't flip the
+flag.
+
+### Country-aware VAT ID
+
+```jsonc
+{
+  "name": "supplier_vat",
+  "type": "string",
+  "required": true,
+  "validators": [
+    { "name": "vat_id", "params": { "country": "ES" } }
+  ]
+}
+```
+
+### Inside an array of objects
+
+Validators work at any depth — declare them on the inner `Field`:
+
+```jsonc
+{
+  "name": "line_items",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "name": "line_item",
+    "fields": [
+      { "name": "supplier_iban", "type": "string",
+        "validators": [{ "name": "iban" }] },
+      { "name": "amount",        "type": "number", "minimum": 0,
+        "validators": [{ "name": "amount", "params": { "allow_zero": false } }] }
+    ]
+  }
+}
+```
+
+---
+
+## 9. Adding a new validator
 
 The registry is open by design — drop in a new checker without
 touching anything else.
 
 1. **Append a member** to
-   `interfaces/enums/standard_validator.py::StandardValidatorType`.
+   `interfaces/enums/validator.py::ValidatorType`.
 2. **Implement the checker** in
-   `core/services/validation/standard_validator_registry.py`:
+   `core/services/validation/validator_registry.py`:
 
    ```python
    def _check_my_thing(value: Any, params: dict) -> str | None:
@@ -123,19 +191,19 @@ touching anything else.
 3. **Register** it in `CHECKERS`:
 
    ```python
-   CHECKERS[StandardValidatorType.MY_THING] = _check_my_thing
+   CHECKERS[ValidatorType.MY_THING] = _check_my_thing
    ```
 
-4. **Unit test** it under
-   `tests/unit/test_standard_validators.py`. Cover one positive case
-   and one or two negative cases that highlight the boundary.
+4. **Unit test** it under `tests/unit/test_validators.py`. Cover one
+   positive case and one or two negative cases that highlight the
+   boundary.
 
 That's it — the existing `FieldValidator` automatically picks it up
-because it dispatches by `StandardValidatorType`.
+because it dispatches by `ValidatorType`.
 
 ---
 
-## 9. Design notes
+## 10. Design notes
 
 - **Validators are pure functions**, not classes. The registry is just
   a dict keyed by enum. There is no inheritance hierarchy because
