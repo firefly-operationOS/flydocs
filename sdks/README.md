@@ -2,107 +2,33 @@
 
 Client libraries for [flydocs](https://github.com/firefly-operationOS/flydocs) — the pure-multimodal Intelligent Document Processing service from Firefly OperationOS. Each SDK wraps the same REST API with idiomatic, typed ergonomics for its language ecosystem.
 
-| Language        | Path                          | Coordinates                                                          | Distribution                                          |
-|-----------------|-------------------------------|----------------------------------------------------------------------|-------------------------------------------------------|
-| **Python**      | [`sdks/python/`](./python/)   | `flydocs-sdk`                                                        | `.whl` + `.tar.gz` attached to each GitHub Release    |
-| **Java / Spring Boot** | [`sdks/java/`](./java/) | `com.firefly.flydocs:flydocs-sdk`                                    | GitHub Packages (Maven)                               |
+| Language               | Path                          | Coordinates                                                          | Distribution                                          |
+|------------------------|-------------------------------|----------------------------------------------------------------------|-------------------------------------------------------|
+| **Python**             | [`sdks/python/`](./python/)   | `flydocs-sdk`                                                        | `.whl` + `.tar.gz` attached to each GitHub Release    |
+| **Java / Spring Boot** | [`sdks/java/`](./java/)       | `com.firefly.flydocs:flydocs-sdk`                                    | GitHub Packages (Maven)                               |
 
-Both SDKs are versioned together with the service (`26.05.01` on this commit — CalVer YY.MM.PP) and ship with the same surface:
+Both SDKs are versioned together with the service (`26.6.0` on this commit) and ship with the same v1 contract surface:
 
-- All eight REST endpoints (`/extract`, `/extract:validate`, `/jobs`, `/jobs/{id}`, `/jobs/{id}/result`, `/jobs/list`, `/version`, `/actuator/health/*`).
+- Every REST endpoint (`/extract`, `/extract:validate`, `/extractions`, `/extractions/{id}`, `/extractions/{id}/result`, `/extractions` (list), `/version`, `/actuator/health/*`).
 - Async-first design with a synchronous facade for non-async callers.
 - Typed, immutable DTOs (Pydantic v2 / Java records).
-- Typed exception hierarchy mapping the service's RFC 7807 problem-details.
-- Constant-time HMAC webhook verifier for `X-Flydocs-Signature`.
+- Typed exception hierarchy mapping the service's RFC 7807 problem-details (`not_found`, `not_ready`, `timeout`, `file_too_large`, `validation_failed`, …).
+- Constant-time HMAC `WebhookVerifier` for `X-Flydocs-Signature` — returns a typed `WebhookEnvelope` / `EventEnvelope`.
 
-## Install
+> **Coming from v0?** Both SDKs were rewritten in lockstep with the v1 contract. See [`docs/migration-v0-to-v1.md`](../docs/migration-v0-to-v1.md) for the full rename table and § 8 of that guide for side-by-side Python and Java upgrade snippets.
 
-### Python
+## Per-language quickstarts
 
-The wheel is published as a GitHub Release asset on every `vX.Y.Z` tag. Install directly from the release URL with [`uv`](https://docs.astral.sh/uv/):
-
-```bash
-uv add https://github.com/firefly-operationOS/flydocs/releases/download/v26.05.01/flydocs_sdk-26.5.1-py3-none-any.whl
-```
-
-…or pin it in your `pyproject.toml`:
-
-```toml
-[project]
-dependencies = ["flydocs-sdk"]
-
-[tool.uv.sources]
-flydocs-sdk = { url = "https://github.com/firefly-operationOS/flydocs/releases/download/v26.05.01/flydocs_sdk-26.5.1-py3-none-any.whl" }
-```
-
-```python
-from flydocs_sdk import FlydocsClient, DocumentInput, ExtractionRequest
-
-with FlydocsClient("http://localhost:8400") as flydocs:
-    result = flydocs.extract(
-        ExtractionRequest(
-            documents=[DocumentInput.from_path("invoice.pdf")],
-            docs=[{"docType": {"documentType": "invoice"}}],
-        )
-    )
-```
-
-Full quickstart → [sdks/python/README.md](./python/README.md) · Detailed walkthrough → [sdks/python/TUTORIAL.md](./python/TUTORIAL.md).
-
-### Java / Spring Boot
-
-Add the GitHub Packages registry to your `~/.m2/settings.xml`:
-
-```xml
-<servers>
-  <server>
-    <id>github</id>
-    <username>YOUR_GITHUB_USER</username>
-    <password>YOUR_GITHUB_PAT_WITH_READ_PACKAGES</password>
-  </server>
-</servers>
-```
-
-…and the repository to your `pom.xml`:
-
-```xml
-<repositories>
-  <repository>
-    <id>github</id>
-    <url>https://maven.pkg.github.com/firefly-operationOS/flydocs</url>
-    <snapshots><enabled>true</enabled></snapshots>
-  </repository>
-</repositories>
-
-<dependency>
-  <groupId>com.firefly.flydocs</groupId>
-  <artifactId>flydocs-sdk</artifactId>
-  <version>26.05.01</version>
-</dependency>
-```
-
-```java
-FlydocsClient flydocs = FlydocsClient.builder()
-        .baseUrl("http://localhost:8400")
-        .build();
-
-ExtractionResult result = flydocs.extract(
-        ExtractionRequest.of(
-                List.of(DocumentInput.ofPath(Path.of("invoice.pdf"))),
-                List.of(Map.of("docType", Map.of("documentType", "invoice")))));
-```
-
-Full quickstart → [sdks/java/README.md](./java/README.md) · Detailed walkthrough → [sdks/java/TUTORIAL.md](./java/TUTORIAL.md).
+- **Python** — [`sdks/python/README.md`](./python/README.md) · [`sdks/python/QUICKSTART.md`](./python/QUICKSTART.md) · [`sdks/python/TUTORIAL.md`](./python/TUTORIAL.md)
+- **Java / Spring Boot** — [`sdks/java/README.md`](./java/README.md) · [`sdks/java/QUICKSTART.md`](./java/QUICKSTART.md) · [`sdks/java/TUTORIAL.md`](./java/TUTORIAL.md)
 
 ## Release process
 
-Both SDKs use **CalVer `YY.MM.PP`** — e.g. `26.05.01` for the first patch in May 2026. The tag form is `v<version>`. Both SDKs publish from the same workflow: `.github/workflows/publish-sdks.yaml`. The trigger is a `v*.*.*` tag push on the main repo. The job:
+Both SDKs use **CalVer `YY.M.PP`** (PEP 440 normalises `26.06.00` → `26.6.0` for the Python wheel name). Both publish from the same workflow, `.github/workflows/publish-sdks.yaml`, on `v*.*.*` tag push.
 
-1. Reads the version from the tag (`v26.05.01` → `26.05.01`) and stamps it into `pom.xml` / `pyproject.toml` / `_version.py`.
+1. Reads the version from the tag and stamps it into `pom.xml` / `pyproject.toml` / `_version.py`.
 2. Builds the Java SDK (jar + sources + javadoc) and `mvn deploy`s to GitHub Packages.
 3. Builds the Python SDK with `uv build` (sdist + wheel) and attaches both to the GitHub Release. Consumers install the wheel directly from the release URL with `uv add` — no PyPI publish.
-
-> **PEP 440 note.** Python's PEP 440 normalises `26.05.01` to `26.5.1` for the wheel filename. The git tag and Java artifact keep the full zero-padded `26.05.01` form; the Python wheel ships as `flydocs_sdk-26.5.1-py3-none-any.whl`. The install snippets above use the actual on-disk URL.
 
 Every pull request runs the `SDK Python` and `SDK Java` jobs in `pr-gate.yaml` so SDK regressions block merges.
 
