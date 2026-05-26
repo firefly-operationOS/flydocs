@@ -8,6 +8,13 @@ classification, language translation and any other post-processing
 that operates on extracted data into the IDP itself — rather than
 re-implementing it in every consumer.
 
+> **What this doc covers:** the two transformation types
+> (`entity_resolution`, `llm`), how scope works, chaining, the
+> add-a-type recipe. **When to read it:** while declaring
+> `options.transformations[]`. **Where else to look:**
+> - HTTP request shape: [`payload-reference.md § 9`](payload-reference.md#9-optionstransformations--post-extraction-reshaping).
+> - Pipeline integration: [`pipeline.md`](pipeline.md) (`transform` stage).
+
 Two transformation types ship in-tree. Adding more types is a
 single-line union extension plus a new branch in
 `TransformationEngine`; the public API does not change.
@@ -67,8 +74,8 @@ first one — not the originals.
 
 Every transformation declares a `scope`:
 
-- `task` *(default)* — runs once per `(segment, DocSpec)` task and
-  mutates that task's groups in place. Right for single-document
+- `task` *(default)* — runs once per `(segment, document_type)` task
+  and mutates that task's groups in place. Right for single-document
   transformations.
 - `request` — concatenates the matching `target_group` across every
   task in the request, applies the transformation once over the
@@ -122,7 +129,7 @@ Given personas across multiple deeds:
 | Joaquín Sevilla                 | 07549861L    |
 | Joaquín Sevilla Rodríguez       | 07.549.861-L |
 
-→ `result.request_transformations[0].fieldGroupFields[0].fieldValueFound` will be:
+→ `result.request_transformations[0].fields[0].value` will be:
 
 | nombre                          | dni          |
 | ------------------------------- | ------------ |
@@ -133,7 +140,7 @@ Given personas across multiple deeds:
 
 | Field                | Type               | Notes                                                                                                                              |
 | -------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `target_group`       | `string`           | `fieldGroupName` the transformation operates on. No-op if no such group is found in the task.                                      |
+| `target_group`       | `string`           | `FieldGroup.name` the transformation operates on. No-op if no such group is found in the task.                                      |
 | `match_by`           | `list[string]`     | Field names to consider for matching, in priority order. The DNI-style field comes first; the name field is the fallback.          |
 | `min_shared_tokens`  | `int` (default 2)  | Minimum shared tokens for a name-variant match. `1` is rarely safe; `2` bridges accent + partial-name variants without false merges. |
 | `output_group`       | `string \| null`   | `null` = mutate the original group in place. Set a name to keep the original AND append the deduped view as a new group.           |
@@ -181,7 +188,7 @@ Use this for:
 
 | Field          | Type             | Notes                                                                                                                                         |
 | -------------- | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `target_group` | `string`         | Source `fieldGroupName`.                                                                                                                      |
+| `target_group` | `string`         | Source `FieldGroup.name`.                                                                                                                     |
 | `intention`    | `string`         | One-sentence goal in any language. The LLM is prompt-engineered to be conservative — when in doubt it preserves the input.                    |
 | `prompt_id`    | `string \| null` | Optional named prompt template id from the catalog. When omitted, the default `transform` prompt renders the intention into a generic shell.  |
 | `output_group` | `string \| null` | Same semantics as the declarative type.                                                                                                       |

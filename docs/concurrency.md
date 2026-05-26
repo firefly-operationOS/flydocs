@@ -4,6 +4,15 @@ How flydocs handles concurrent operations safely when you scale workers
 horizontally. Everything below is the *production* story — the docs
 that describe individual stages still hold.
 
+> **What this doc covers:** the four guarantees that make the async
+> pipeline multi-worker safe, the legal state-transition matrix, the
+> reaper sidecars that revive orphans. **When to read it:** before
+> scaling workers beyond a single replica, before adding a new state
+> transition, or while debugging a stuck extraction. **Where else to
+> look:**
+> - Stage internals: [`pipeline.md`](pipeline.md).
+> - Stuck-extraction recipes: [`troubleshooting.md`](troubleshooting.md).
+
 If you only run one `worker` and one `bbox-worker` container, you can
 skip this page. If you ever plan to run more than one of either, read
 it once.
@@ -16,9 +25,9 @@ The async path is split across three processes:
 
 | Process              | Owns                                                                                  |
 | -------------------- | ------------------------------------------------------------------------------------- |
-| `flydocs serve`      | HTTP API. Persists the job row + publishes `IDPJobSubmitted` on the EDA bus.          |
-| `flydocs worker`     | Main extraction. Subscribes to `IDPJobSubmitted`. Bundles a `JobReaper` sidecar.       |
-| `flydocs bbox-worker`| Out-of-band bbox grounding. Subscribes to `IDPBboxRefineRequested`. Bundles a `BboxReaper` sidecar. |
+| `flydocs serve`      | HTTP API. Persists the `extractions` row + publishes `extraction.submitted` on the EDA bus. |
+| `flydocs worker`     | Main extraction. Subscribes to `extraction.submitted`. Bundles an `ExtractionReaper` sidecar. |
+| `flydocs bbox-worker`| Out-of-band bbox grounding. Subscribes to `extraction.post_processing.requested`. Bundles a `BboxReaper` sidecar. |
 
 Each worker container runs **two cooperating async tasks**: the
 consumer loop and the reaper. If either crashes, the container exits
@@ -31,7 +40,7 @@ and the orchestrator restarts it — both are reset together.
 The whole concurrency story rests on four guarantees, in order from
 inside-out:
 
-### 1. Atomic state transitions (`extraction_jobs`)
+### 1. Atomic state transitions (`extractions`)
 
 Every state-changing repository method is a single conditional
 `UPDATE ... WHERE id=? AND status IN (legal_predecessors) RETURNING *`.
@@ -44,21 +53,22 @@ The legal-predecessor matrix:
 
 | Method                        | Predecessors                                                            |
 | ----------------------------- | ----------------------------------------------------------------------- |
-| `mark_running`                | `QUEUED` OR (`RUNNING` with stale `started_at` past `job_run_lease_s`)  |
-| `mark_succeeded`              | `RUNNING` OR `REFINING_BBOXES`                                           |
-| `mark_failed`                 | `RUNNING`                                                                |
-| `mark_partial_succeeded`      | `RUNNING`                                                                |
-| `mark_bbox_refining`          | `PARTIAL_SUCCEEDED` OR (`REFINING_BBOXES` with stale `bbox_refine_started_at`) |
-| `mark_bbox_refined`           | `REFINING_BBOXES`                                                        |
-| `mark_bbox_refine_failed`     | `REFINING_BBOXES`                                                        |
-| `mark_cancelled`              | `QUEUED`                                                                 |
-| `requeue_for_retry`           | `RUNNING`                                                                |
-| `requeue_bbox_refine`         | `REFINING_BBOXES`                                                        |
+| `mark_running`                | `queued` OR (`running` with stale `started_at` past `run_lease_s`)      |
+| `mark_succeeded`              | `running`                                                                |
+| `mark_failed`                 | `running`                                                                |
+| `start_bbox_refinement`       | `succeeded` with `post_processing.bbox_refinement.status = pending`     |
+| `mark_bbox_refinement_running`| `pending` OR (`running` with stale `post_processing.bbox_refinement.started_at`) |
+| `mark_bbox_refinement_succeeded` | `running` (on the bbox_refinement sub-state)                          |
+| `mark_bbox_refinement_failed` | `running` (on the bbox_refinement sub-state)                            |
+| `mark_cancelled`              | `queued`                                                                 |
+| `requeue_for_retry`           | `running`                                                                |
+| `requeue_bbox_refinement`     | `pending` OR `running` (on the bbox_refinement sub-state)               |
 
-A worker that receives the same `IDPJobSubmitted` event twice — for
-example because the bus redelivered while a peer was still claiming —
-calls `mark_running` and gets `None` on the second call. It logs and
-bails. No duplicate orchestrator invocation, no duplicate webhook.
+A worker that receives the same `extraction.submitted` event twice —
+for example because the bus redelivered while a peer was still
+claiming — calls `mark_running` and gets `None` on the second call. It
+logs and bails. No duplicate orchestrator invocation, no duplicate
+webhook.
 
 ### 2. Per-group advisory lock on the EDA drain (`PostgresEventBus`)
 
@@ -76,31 +86,31 @@ makes the system correct even if a future bus adapter drops it.
 Session-level lock → auto-releases on connection death. A worker that
 crashes mid-drain never zombies the group.
 
-### 3. Idempotency-key collision recovery (`SubmitJobHandler`)
+### 3. Idempotency-key collision recovery (`SubmitExtractionHandler`)
 
 The submit path is `SELECT-by-key` then `INSERT`. Two concurrent
 requests with the same `Idempotency-Key` can both miss the SELECT and
 both attempt the INSERT. One wins; the other hits the partial unique
-index `uq_extraction_jobs_idempotency_key` and the SDK / handler
-catches `IntegrityError`, re-resolves the winning row, and returns the
-idempotent `SubmitJobResponse` shape. The caller sees no difference
-between winning and losing.
+index `uq_extractions_idempotency_key` and the handler catches
+`IntegrityError`, re-resolves the winning row, and returns the
+idempotent `Extraction` shape. The caller sees no difference between
+winning and losing.
 
-### 4. Periodic reaper revives orphans (`JobReaper` + `BboxReaper`)
+### 4. Periodic reaper revives orphans (`ExtractionReaper` + `BboxReaper`)
 
 Atomic claim solves *duplicate processing*. The reaper solves the
-opposite failure mode: when the event chain breaks and a job is stuck
-because **nothing** is going to deliver to it.
+opposite failure mode: when the event chain breaks and an extraction
+is stuck because **nothing** is going to deliver to it.
 
 The five orphan classes the reaper handles:
 
-| #  | Status                 | Cause                                                                    | Reaper       |
-| -- | ---------------------- | ------------------------------------------------------------------------ | ------------ |
-| 1  | `QUEUED`               | Submit handler crashed between row INSERT and outbox PUBLISH             | `JobReaper`  |
-| 2  | `RUNNING`              | Worker crashed mid-extraction past its lease                              | `JobReaper`  |
-| 3  | `QUEUED` (post-retry)  | Worker's `_delayed_publish` task died before its `asyncio.sleep` completed | `JobReaper`  |
-| 4  | `PARTIAL_SUCCEEDED`    | Main worker crashed between `mark_partial_succeeded` and publish-bbox    | `BboxReaper` |
-| 5  | `REFINING_BBOXES`      | Bbox worker crashed mid-grounding                                         | `BboxReaper` |
+| #  | Status                                                  | Cause                                                                    | Reaper             |
+| -- | ------------------------------------------------------- | ------------------------------------------------------------------------ | ------------------ |
+| 1  | `queued`                                                | Submit handler crashed between row INSERT and outbox PUBLISH             | `ExtractionReaper` |
+| 2  | `running`                                               | Worker crashed mid-extraction past its lease                              | `ExtractionReaper` |
+| 3  | `queued` (post-retry)                                   | Worker's `_delayed_publish` task died before its `asyncio.sleep` completed | `ExtractionReaper` |
+| 4  | `succeeded` + `bbox_refinement.status=pending`          | Main worker crashed between `mark_succeeded` and the bbox-refine publish | `BboxReaper`       |
+| 5  | `succeeded` + `bbox_refinement.status=running`          | Bbox worker crashed mid-grounding                                         | `BboxReaper`       |
 
 Every `reaper_sweep_interval_s` (default 60 s) each reaper:
 
@@ -116,19 +126,19 @@ safe.
 
 ## Lease windows
 
-A "lease" is the wall-clock window during which a `RUNNING` (or
-`REFINING_BBOXES`) row is considered legitimately owned by its
-claimant. Past the lease, the reaper assumes the claimant is dead and
-republishes. The next claim succeeds because `mark_running` matches
-`RUNNING WITH stale started_at`.
+A "lease" is the wall-clock window during which a `running` (or
+running-on-the-bbox-refinement sub-state) row is considered
+legitimately owned by its claimant. Past the lease, the reaper
+assumes the claimant is dead and republishes. The next claim succeeds
+because `mark_running` matches `running WITH stale started_at`.
 
-| Setting                          | Default | What it means                                                          |
-| -------------------------------- | ------- | ---------------------------------------------------------------------- |
-| `FLYDOCS_JOB_RUN_LEASE_S`        | 1260    | `async_timeout_s + 60s`. The worker's own `asyncio.wait_for` caps any legitimate run at `async_timeout_s`, so a lease past that means crash. |
-| `FLYDOCS_BBOX_REFINE_LEASE_S`    | 660     | `bbox_refine_timeout_s + 60s`. Same idea for the bbox leg.             |
-| `FLYDOCS_REAPER_SWEEP_INTERVAL_S` | 60     | How often each reaper polls for stuck rows.                            |
-| `FLYDOCS_QUEUED_ORPHAN_THRESHOLD_S` | 600  | `2 * retry_max_delay_s`. How long a `QUEUED` row waits before the reaper considers its triggering event lost. |
-| `FLYDOCS_PARTIAL_SUCCEEDED_ORPHAN_THRESHOLD_S` | 1320 | `async_timeout_s + 120s`. How long after the main extraction's `started_at` we conclude the bbox-refine event was lost. |
+| Setting                                              | Default | What it means                                                          |
+| ---------------------------------------------------- | ------- | ---------------------------------------------------------------------- |
+| `FLYDOCS_EXTRACTION_RUN_LEASE_S`                     | 1260    | `async_timeout_s + 60s`. The worker's own `asyncio.wait_for` caps any legitimate run at `async_timeout_s`, so a lease past that means crash. |
+| `FLYDOCS_BBOX_REFINEMENT_LEASE_S`                    | 660     | `bbox_refine_timeout_s + 60s`. Same idea for the bbox leg.             |
+| `FLYDOCS_REAPER_SWEEP_INTERVAL_S`                    | 60      | How often each reaper polls for stuck rows.                            |
+| `FLYDOCS_QUEUED_ORPHAN_THRESHOLD_S`                  | 600     | `2 * retry_max_delay_s`. How long a `queued` row waits before the reaper considers its triggering event lost. |
+| `FLYDOCS_POST_PROCESSING_PENDING_ORPHAN_THRESHOLD_S` | 1320    | `async_timeout_s + 120s`. How long after the main extraction's `started_at` we conclude the bbox-refine event was lost. |
 
 Recovery time after a crash is bounded by `lease + reaper_sweep_interval_s`
 ≈ 22 min with the shipped defaults and `async_timeout_s=1200`. Lower
@@ -140,7 +150,7 @@ should be quick.
 ## What the reaper does NOT do
 
 - **It doesn't dedupe republishes within a single sweep window.**
-  A backlog of 50 jobs that are legitimately QUEUED for >
+  A backlog of 50 extractions that are legitimately queued for >
   `queued_orphan_threshold_s` will get republished on every 60 s
   sweep until they're picked up. That's bounded outbox bloat under
   heavy load, not unbounded. If this matters in your deployment,
@@ -149,10 +159,11 @@ should be quick.
   containers both find the same stale rows; both republish; the
   atomic claim dedupes the work. Cost is the extra outbox INSERTs
   and `NOTIFY` traffic.
-- **It doesn't cancel a stuck `RUNNING` job.** Mid-flight cancel is
-  intentionally not supported (the orchestrator has no cancellation
-  hook). To kill a stuck job today, wait for the lease + reaper to
-  revive it, then issue cancel against the redelivered QUEUED entry.
+- **It doesn't cancel a stuck `running` extraction.** Mid-flight
+  cancel is intentionally not supported (the orchestrator has no
+  cancellation hook). To kill a stuck extraction today, wait for the
+  lease + reaper to revive it, then issue cancel against the
+  redelivered queued entry.
 
 ---
 
@@ -167,23 +178,23 @@ config to set.
 ### Detect orphans manually
 
 ```sql
--- Stuck RUNNING (lease expired)
-SELECT id, started_at, attempts FROM extraction_jobs
-WHERE status='RUNNING'
+-- Stuck running (lease expired)
+SELECT id, started_at, attempts FROM extractions
+WHERE status='running'
   AND started_at < now() - INTERVAL '21 minutes'
 ORDER BY started_at;
 
--- QUEUED with no event in outbox (submit/retry-publish lost)
-SELECT id, created_at FROM extraction_jobs
-WHERE status='QUEUED'
-  AND COALESCE(started_at, created_at) < now() - INTERVAL '10 minutes'
-ORDER BY created_at;
+-- Queued with no event in outbox (submit/retry-publish lost)
+SELECT id, submitted_at FROM extractions
+WHERE status='queued'
+  AND COALESCE(started_at, submitted_at) < now() - INTERVAL '10 minutes'
+ORDER BY submitted_at;
 
--- PARTIAL_SUCCEEDED waiting on a bbox event that may have been lost
-SELECT id, started_at FROM extraction_jobs
-WHERE status='PARTIAL_SUCCEEDED'
-  AND bbox_refine_status='pending'
-  AND bbox_refine_started_at IS NULL
+-- Succeeded but waiting on a bbox event that may have been lost
+SELECT id, started_at FROM extractions
+WHERE status='succeeded'
+  AND post_processing->'bbox_refinement'->>'status' = 'pending'
+  AND post_processing->'bbox_refinement'->>'started_at' IS NULL
   AND started_at < now() - INTERVAL '22 minutes';
 ```
 
@@ -196,9 +207,9 @@ Trim `started_at` to a past instant; the reaper's next sweep picks
 the row up:
 
 ```sql
-UPDATE extraction_jobs
+UPDATE extractions
 SET started_at = now() - INTERVAL '24 hours'
-WHERE id = '<job-id>' AND status='RUNNING';
+WHERE id = '<extraction-id>' AND status='running';
 ```
 
 ---
@@ -207,10 +218,10 @@ WHERE id = '<job-id>' AND status='RUNNING';
 
 | EDA adapter (`FLYDOCS_EDA_ADAPTER`) | Multi-worker safe? | Notes |
 | ----------------------------------- | ------------------ | ----- |
-| `postgres` (default)                | ✅ Yes              | Via per-group `pg_try_advisory_lock` in pyfly's adapter. |
-| `redis`                             | ✅ Yes              | Redis Streams `XREADGROUP` is a competitive consumer by design. |
-| `kafka`                             | ✅ Yes              | Kafka consumer groups partition delivery across replicas. |
-| `memory`                            | ❌ Single-process only | Process-local queue; not for multi-replica deployments. |
+| `postgres` (default)                | Yes              | Via per-group `pg_try_advisory_lock` in pyfly's adapter. |
+| `redis`                             | Yes              | Redis Streams `XREADGROUP` is a competitive consumer by design. |
+| `kafka`                             | Yes              | Kafka consumer groups partition delivery across replicas. |
+| `memory`                            | Single-process only | Process-local queue; not for multi-replica deployments. |
 
 The repository-level atomic claim is adapter-agnostic — even with the
 `memory` adapter in tests, the same `mark_running` precondition wins.

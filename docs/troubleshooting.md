@@ -1,8 +1,14 @@
 # Troubleshooting
 
 Common failure modes and how to recover. If you hit something not
-listed here, file an issue with the `request_id` and the response
+listed here, file an issue with the response `id` and the response
 body (redacting any sensitive content).
+
+> **What this doc covers:** the boot, request, async, validation,
+> LLM, and stuck-extraction failure modes most teams hit early.
+> **When to read it:** while debugging. **Where else to look:**
+> - Stage internals: [`pipeline.md`](pipeline.md).
+> - Concurrency model + lease windows: [`concurrency.md`](concurrency.md).
 
 ---
 
@@ -52,21 +58,21 @@ versa).
 
 ## Requests / pipeline
 
-### `408 extraction_timeout`
+### `408 timeout`
 
 The sync pipeline didn't finish within `FLYDOCS_SYNC_TIMEOUT_S`
 (default 60 s).
 
 - Bump the timeout via the env var if 60 s is genuinely too short.
-- Or switch the caller to the async API (`POST /api/v1/jobs`), which
-  has a much longer ceiling (`FLYDOCS_ASYNC_TIMEOUT_S`, default
+- Or switch the caller to the async API (`POST /api/v1/extractions`),
+  which has a much longer ceiling (`FLYDOCS_ASYNC_TIMEOUT_S`, default
   300 s).
 - Disable expensive stages (judge / content_authenticity / rules) if
   they aren't needed for this caller.
 
-### `413 document_too_large`
+### `413 file_too_large`
 
-Decoded document is over `FLYDOCS_MAX_BYTES` (default 32 MiB).
+Decoded file is over `FLYDOCS_MAX_BYTES` (default 32 MiB).
 
 - Increase the limit if you trust the source.
 - Or pre-resize / split the document client-side.
@@ -82,26 +88,27 @@ Decoded document is over `FLYDOCS_MAX_BYTES` (default 32 MiB).
 - Trailing whitespace / newlines — usually fine, but obviously corrupt
   payloads aren't.
 
-### `pipeline_errors` populated but result returned
+### `pipeline.errors` populated but result returned
 
-A stage failed but the pipeline kept going. The response carries:
+A stage failed but the pipeline kept going. The response carries
+`status: "partial"` and:
 
 ```json
-{"pipeline_errors": [{"node": "rule_engine",
-                       "code": "RULE_ENGINE_ERROR",
-                       "message": "openai timed out after 30s"}]}
+{"pipeline": {"errors": [{"node": "rule_engine",
+                          "code": "stage_timeout",
+                          "message": "openai timed out after 30s"}]}}
 ```
 
 - Check the upstream provider's status page.
-- Inspect the API logs for the matching `request_id` to see the
+- Inspect the API logs for the matching `correlation_id` to see the
   exception trace.
 - Re-submit with the failed stage disabled if you need a clean result
   quickly.
 
-### Empty `fields` for one document
+### Empty `field_groups` for one document
 
 The `extract` stage failed for that specific doc. The response has
-`pipeline_errors[].node == "extractor"` with the doc type in the
+`pipeline.errors[].node == "extractor"` with the document type in the
 message.
 
 - Often a model-side issue (timeout, content policy). Try a fallback
@@ -111,13 +118,13 @@ message.
 
 ## Async / queue
 
-### Job stuck in `QUEUED`
+### Extraction stuck in `queued`
 
 The worker process isn't running, or it isn't reading the right
 queue.
 
 - `docker compose ps` — is the `worker` container up?
-- Check the worker logs for `JobWorker … started (adapter=redis)`.
+- Check the worker logs for `ExtractionWorker … started (adapter=redis)`.
 - Verify both API and worker see the same `FLYDOCS_EDA_ADAPTER`
   and `FLYDOCS_REDIS_URL`.
 
@@ -131,24 +138,24 @@ queue.
   Docker compose, `http://host.docker.internal:...` is the canonical
   way to reach the host.
 
-### `409 job_not_cancellable`
+### `409 not_cancellable`
 
-The job has already started. Cancellation is only allowed while
-`status == QUEUED`. To interrupt a running job, send `SIGTERM` to the
-worker process; the orchestrator does not yet support mid-flight
-cancellation.
+The extraction has already started. Cancellation is only allowed
+while `status == "queued"`. To interrupt a running extraction, send
+`SIGTERM` to the worker process; the orchestrator does not yet
+support mid-flight cancellation.
 
-### Job fails immediately with `PERMANENT_ERROR` instead of retrying
+### Extraction fails immediately with `permanent_error` instead of retrying
 
 The worker classifies the exception as permanent (content-policy,
 invalid API key, unsupported model, validator error from the request
 body). Permanent errors skip the retry budget on purpose -- retrying
-won't help. Inspect `error_message` for the provider's reason and fix
+won't help. Inspect `error.message` for the provider's reason and fix
 the input. Override by widening `_PERMANENT_ERROR_HINTS` only if you
 have evidence the LLM provider's transient errors are landing in this
 bucket by accident.
 
-### Job retries too quickly / too slowly
+### Extraction retries too quickly / too slowly
 
 The backoff is `min(retry_max_delay_s, retry_base_delay_s * 2^(attempt-1))`
 plus 20% jitter. Tune via `FLYDOCS_RETRY_BASE_DELAY_S` and
@@ -159,7 +166,7 @@ retryable errors -- permanent ones never re-queue.
 
 `FLYDOCS_ESCALATION_THRESHOLD` is set too low (or 0.0 means
 disabled, but anything > 0 starts evaluating it). Raise the threshold
-or unset both threshold and `options.escalation_threshold` to disable.
+or unset both threshold and `options.escalation.threshold` to disable.
 Look for `judge_escalation triggered` log lines to see the failure
 rate the orchestrator measured.
 
@@ -167,16 +174,16 @@ rate the orchestrator measured.
 
 ## Validation
 
-### `StandardValidator says <value> is not a Spanish NIE but it's a DNI`
+### `Validator says <value> is not a Spanish NIE but it's a DNI`
 
 Expected behaviour. The `nie` validator only accepts NIE-shaped
 strings (`[XYZ]<7 digits><letter>`). DNIs are validated separately by
 the `nif` validator. To accept either:
 
 ```jsonc
-"standard_validators": [
-  {"type": "nif", "severity": "warning"},
-  {"type": "nie", "severity": "warning"}
+"validators": [
+  {"name": "nif", "severity": "warning"},
+  {"name": "nie", "severity": "warning"}
 ]
 ```
 
@@ -212,13 +219,14 @@ DAG nodes were changed back to `RuleSpec` objects. Nodes are strings
 
 ---
 
-## Stuck jobs (concurrency / orphan recovery)
+## Stuck extractions (concurrency / orphan recovery)
 
-The reaper sidecar in each worker container revives jobs whose
-triggering event was lost. If a job appears stuck, walk this short
-checklist first. See [concurrency.md](concurrency.md) for the model.
+The reaper sidecar in each worker container revives extractions whose
+triggering event was lost. If an extraction appears stuck, walk this
+short checklist first. See [concurrency.md](concurrency.md) for the
+model.
 
-### Job stuck in `RUNNING` for > 22 minutes
+### Extraction stuck in `running` for > 22 minutes
 
 `async_timeout_s` (default 1200 s) caps any legitimate run; the lease
 (default 1260 s = `async_timeout_s + 60`) adds a small grace period.
@@ -226,58 +234,59 @@ Past the lease, the reaper's next sweep republishes the event:
 
 ```sql
 SELECT id, started_at, attempts, finished_at
-FROM extraction_jobs
-WHERE status='RUNNING'
+FROM extractions
+WHERE status='running'
   AND started_at < now() - INTERVAL '21 minutes';
 ```
 
-If the reaper is running but the row stays `RUNNING`, check the worker
-container logs for `JobReaper republished job <id>` lines. No
-republish over multiple sweep intervals means the reaper isn't seeing
-the row -- usually `started_at` was bumped by a heartbeat we don't yet
-implement, or the worker isn't actually crashed. Operator override:
+If the reaper is running but the row stays `running`, check the worker
+container logs for `ExtractionReaper republished extraction <id>`
+lines. No republish over multiple sweep intervals means the reaper
+isn't seeing the row -- usually `started_at` was bumped by a
+heartbeat we don't yet implement, or the worker isn't actually
+crashed. Operator override:
 
 ```sql
-UPDATE extraction_jobs
+UPDATE extractions
 SET started_at = now() - INTERVAL '24 hours'
-WHERE id = '<job-id>' AND status='RUNNING';
+WHERE id = '<extraction-id>' AND status='running';
 ```
 
 The next reaper sweep will pick it up.
 
-### Job stuck in `QUEUED` for > 10 minutes
+### Extraction stuck in `queued` for > 10 minutes
 
 Either the submit handler crashed between row INSERT and outbox
 PUBLISH, or a worker's retry-path `_delayed_publish` task died before
 its `asyncio.sleep` fired. The reaper republishes after
 `FLYDOCS_QUEUED_ORPHAN_THRESHOLD_S` (default 600 s).
 
-Backlog vs. orphan: if many `QUEUED` rows are old, your workers are
+Backlog vs. orphan: if many `queued` rows are old, your workers are
 saturated, not crashed -- check throughput, not lifecycle. Add worker
 replicas (`docker compose --scale worker=N` or the K8s equivalent;
 multi-worker safe by design).
 
-### Job stuck in `PARTIAL_SUCCEEDED` with `bbox_refine_status='pending'`
+### Extraction stuck in `succeeded` with `post_processing.bbox_refinement.status='pending'`
 
 Main extraction finished but the bbox-refine event wasn't published
-(main worker crashed between `mark_partial_succeeded` and the publish
-call). `BboxReaper` revives it after
-`FLYDOCS_PARTIAL_SUCCEEDED_ORPHAN_THRESHOLD_S` (default 1320 s, sized
-to `async_timeout_s + 120`). Until then the LLM-bbox result is
-already readable via `GET /api/v1/jobs/{id}/result`.
+(main worker crashed between `mark_succeeded` and the publish call).
+`BboxReaper` revives it after
+`FLYDOCS_POST_PROCESSING_PENDING_ORPHAN_THRESHOLD_S` (default 1320 s,
+sized to `async_timeout_s + 120`). Until then the LLM-bbox result is
+already readable via `GET /api/v1/extractions/{id}/result`.
 
-### "Cannot cancel a RUNNING job"
+### "Cannot cancel a running extraction"
 
 Mid-flight cancellation is intentionally not supported. To stop a
 runaway extraction:
 
 1. Wait for the lease to expire (or trim `started_at` per the override
    above).
-2. The reaper republishes; the row briefly transitions to `QUEUED`
+2. The reaper republishes; the row briefly transitions to `queued`
    when a worker requeues itself on the next failure, OR stays
-   `RUNNING` if the redelivery wins again.
-3. Issue `DELETE /api/v1/jobs/{id}` while it's `QUEUED` to land in
-   `CANCELLED`.
+   `running` if the redelivery wins again.
+3. Issue `DELETE /api/v1/extractions/{id}` while it's `queued` to
+   land in `cancelled`.
 
 ---
 
@@ -289,8 +298,9 @@ Make sure `pyfly.metrics.enabled: true` is in `fireflyframework-pyfly`'s
 app config (it is by default via `@enable_core_stack`). Then scrape the
 endpoint — output is Prometheus format.
 
-### Logs lack request ids
+### Logs lack correlation ids
 
-The pipeline emits `request_id` automatically; the HTTP layer adds an
-`X-Transaction-Id` header. If you're missing them in upstream
-services (e.g. webhook receivers), pass them through explicitly.
+The pipeline emits `correlation_id` automatically; the HTTP layer
+adds `X-Correlation-Id` / `X-Request-Id` headers. If you're missing
+them in upstream services (e.g. webhook receivers), pass them through
+explicitly.
