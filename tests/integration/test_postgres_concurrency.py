@@ -2,7 +2,7 @@
 """Real-Postgres integration tests for the concurrency fixes.
 
 These tests exercise the same contracts as
-``tests/unit/test_extraction_job_repository.py`` and
+``tests/unit/test_extraction_repository.py`` and
 ``tests/unit/test_worker_concurrency.py``, but against a live Postgres
 server -- the production substrate. SQLite serialises writers at the
 file level so it can hide cases where Postgres' row-level locking +
@@ -21,8 +21,8 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from flydocs.models.entities.extraction_job import Base, ExtractionJob
-from flydocs.models.repositories import ExtractionJobRepository
+from flydocs.models.entities.extraction import Base, Extraction
+from flydocs.models.repositories import ExtractionRepository
 
 _PG_URL = os.environ.get("FLYDOCS_TEST_PG_URL")
 
@@ -32,22 +32,22 @@ pytestmark = pytest.mark.skipif(
 
 
 @pytest.fixture
-async def pg_repo() -> ExtractionJobRepository:
-    """Fresh Postgres engine with a clean ``extraction_jobs`` table per test."""
+async def pg_repo() -> ExtractionRepository:
+    """Fresh Postgres engine with a clean ``extractions`` table per test."""
     engine = create_async_engine(_PG_URL, future=True)  # type: ignore[arg-type]
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
     factory = async_sessionmaker(engine, expire_on_commit=False)
-    repo = ExtractionJobRepository(factory, engine=engine)
+    repo = ExtractionRepository(factory, engine=engine)
     yield repo
     await engine.dispose()
 
 
-async def _seed(repo: ExtractionJobRepository, **overrides) -> ExtractionJob:
-    job = ExtractionJob(
+async def _seed(repo: ExtractionRepository, **overrides) -> Extraction:
+    ext = Extraction(
         idempotency_key=overrides.get("idempotency_key"),
-        status=overrides.get("status", "QUEUED"),
+        status=overrides.get("status", "queued"),
         filename=overrides.get("filename", "test.pdf"),
         content_sha256=overrides.get("content_sha256", "0" * 64),
         content_bytes=overrides.get("content_bytes", 1),
@@ -56,27 +56,29 @@ async def _seed(repo: ExtractionJobRepository, **overrides) -> ExtractionJob:
         metadata_json=overrides.get("metadata_json", {}),
         attempts=overrides.get("attempts", 0),
         started_at=overrides.get("started_at"),
-        bbox_refine_status=overrides.get("bbox_refine_status"),
-        bbox_refine_started_at=overrides.get("bbox_refine_started_at"),
+        post_processing_bbox_status=overrides.get("post_processing_bbox_status"),
+        post_processing_bbox_started_at=overrides.get("post_processing_bbox_started_at"),
     )
-    return await repo.add(job)
+    return await repo.add(ext)
 
 
 @pytest.mark.asyncio
-async def test_postgres_atomic_claim_single_winner(pg_repo: ExtractionJobRepository) -> None:
+async def test_postgres_atomic_claim_single_winner(pg_repo: ExtractionRepository) -> None:
     """Under real Postgres row-level locking: exactly one of N concurrent
     ``mark_running`` calls wins, ``attempts`` increments exactly once."""
     seeded = await _seed(pg_repo)
 
     n = 8
-    results = await asyncio.gather(*(pg_repo.mark_running(seeded.id, lease_seconds=300) for _ in range(n)))
+    results = await asyncio.gather(
+        *(pg_repo.mark_running(seeded.id, lease_seconds=300) for _ in range(n))
+    )
     winners = [r for r in results if r is not None]
     assert len(winners) == 1, f"expected 1 winner, got {len(winners)} (lost-update?!)"
     assert winners[0].attempts == 1
 
 
 @pytest.mark.asyncio
-async def test_postgres_concurrent_cancel_vs_claim(pg_repo: ExtractionJobRepository) -> None:
+async def test_postgres_concurrent_cancel_vs_claim(pg_repo: ExtractionRepository) -> None:
     """Cancel + worker-claim race: exactly one wins, the other gets None."""
     seeded = await _seed(pg_repo)
 
@@ -94,8 +96,8 @@ async def test_postgres_concurrent_cancel_vs_claim(pg_repo: ExtractionJobReposit
 
 
 @pytest.mark.asyncio
-async def test_postgres_stale_lease_reclaim(pg_repo: ExtractionJobRepository) -> None:
-    """A RUNNING job past its lease window is reclaimable; a fresh one isn't."""
+async def test_postgres_stale_lease_reclaim(pg_repo: ExtractionRepository) -> None:
+    """A running extraction past its lease window is reclaimable; a fresh one isn't."""
     seeded = await _seed(pg_repo)
     first = await pg_repo.mark_running(seeded.id, lease_seconds=300)
     assert first is not None
@@ -111,8 +113,8 @@ async def test_postgres_stale_lease_reclaim(pg_repo: ExtractionJobRepository) ->
 
     async with pg_repo._session_factory() as session:  # type: ignore[attr-defined]
         await session.execute(
-            update(ExtractionJob)
-            .where(ExtractionJob.id == seeded.id)
+            update(Extraction)
+            .where(Extraction.id == seeded.id)
             .values(started_at=datetime.now(UTC) - timedelta(seconds=600))
         )
         await session.commit()
@@ -124,9 +126,9 @@ async def test_postgres_stale_lease_reclaim(pg_repo: ExtractionJobRepository) ->
 
 
 @pytest.mark.asyncio
-async def test_postgres_finalisation_idempotent(pg_repo: ExtractionJobRepository) -> None:
+async def test_postgres_finalisation_idempotent(pg_repo: ExtractionRepository) -> None:
     """Two concurrent ``mark_succeeded`` calls: one wins, one returns None."""
-    seeded = await _seed(pg_repo, status="RUNNING", started_at=datetime.now(UTC))
+    seeded = await _seed(pg_repo, status="running", started_at=datetime.now(UTC))
 
     results = await asyncio.gather(
         pg_repo.mark_succeeded(seeded.id, result={"first": True}),

@@ -42,8 +42,8 @@ class _FakeLlmTransformer:
     async def apply(self, t, groups):
         self.calls.append((t, groups))
         produced = ExtractedFieldGroup(
-            fieldGroupName=t.output_group or t.target_group,
-            fieldGroupFields=[ExtractedField(fieldName="rows", fieldValueFound=[])],
+            name=t.output_group or t.target_group,
+            fields=[ExtractedField(name="rows", value=[])],
         )
         groups.append(produced)
         return produced
@@ -51,15 +51,15 @@ class _FakeLlmTransformer:
 
 def _row(values: dict[str, str]) -> ExtractedField:
     return ExtractedField(
-        fieldName="row",
-        fieldValueFound=[ExtractedField(fieldName=k, fieldValueFound=v) for k, v in values.items()],
+        name="row",
+        value=[ExtractedField(name=k, value=v) for k, v in values.items()],
     )
 
 
 def _personas_group(rows: list[ExtractedField]) -> ExtractedFieldGroup:
     return ExtractedFieldGroup(
-        fieldGroupName="personas",
-        fieldGroupFields=[ExtractedField(fieldName="personas", fieldValueFound=rows)],
+        name="personas",
+        fields=[ExtractedField(name="personas", value=rows)],
     )
 
 
@@ -90,7 +90,7 @@ async def test_dispatch_entity_resolution() -> None:
     assert result is not None
     assert fake_llm.calls == []
     # Dedup happened.
-    inner = result.fieldGroupFields[0].fieldValueFound  # type: ignore[index]
+    inner = result.fields[0].value  # type: ignore[index]
     assert isinstance(inner, list) and len(inner) == 1
 
 
@@ -130,9 +130,9 @@ async def test_request_scope_consolidates_across_tasks() -> None:
     task_b = [_personas_group([_row({"nombre": "Andres Contreras Guillen", "dni": ""})])]
     produced = await engine.apply_request_scope(t, [task_a, task_b])
     assert produced is not None
-    # The synth consolidated group reduces 2 → 1.
-    inner = produced.fieldGroupFields[0].fieldValueFound
+    # The synth consolidated group reduces 2 -> 1.
+    inner = produced.fields[0].value
     assert isinstance(inner, list) and len(inner) == 1
     # Task-scope groups stay untouched.
-    assert len(task_a[0].fieldGroupFields[0].fieldValueFound) == 1  # type: ignore[arg-type]
-    assert len(task_b[0].fieldGroupFields[0].fieldValueFound) == 1  # type: ignore[arg-type]
+    assert len(task_a[0].fields[0].value) == 1  # type: ignore[arg-type]
+    assert len(task_b[0].fields[0].value) == 1  # type: ignore[arg-type]

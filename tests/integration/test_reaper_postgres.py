@@ -4,16 +4,16 @@
 Demonstrates that the five orphan classes identified in the second
 audit are actually revived by the reaper + worker claim cycle:
 
-1. ``QUEUED`` orphan (submit-publish crashed) -> JobReaper revives.
-2. ``RUNNING`` orphan (worker crashed past its lease) -> JobReaper.
-3. ``QUEUED`` orphan (retry-publish crashed) -> JobReaper.
-4. ``PARTIAL_SUCCEEDED`` orphan (bbox-publish crashed) -> BboxReaper.
-5. ``REFINING_BBOXES`` orphan (bbox worker crashed) -> BboxReaper.
+1. ``queued`` orphan (submit-publish crashed) -> ExtractionReaper revives.
+2. ``running`` orphan (worker crashed past its lease) -> ExtractionReaper.
+3. ``queued`` orphan (retry-publish crashed) -> ExtractionReaper.
+4. ``succeeded`` orphan with bbox sub-status ``pending`` -> BboxReaper.
+5. ``succeeded`` orphan with stale bbox sub-status ``running`` -> BboxReaper.
 
 In each case we seed the row directly in the stuck state, run a single
 reaper sweep, and assert that a fresh event was published with the
-right job id. The actual claim-then-process is covered by the
-``test_extraction_job_repository.py`` atomic-transition tests, so we
+right extraction id. The actual claim-then-process is covered by the
+``test_extraction_repository.py`` atomic-transition tests, so we
 stop at "event published" here -- the rest of the chain is
 identical to the happy path.
 """
@@ -30,9 +30,9 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from flydocs.config import IDPSettings
 from flydocs.core.services.workers.bbox_reaper import BboxReaper
-from flydocs.core.services.workers.job_reaper import JobReaper
-from flydocs.models.entities.extraction_job import Base, ExtractionJob
-from flydocs.models.repositories import ExtractionJobRepository
+from flydocs.core.services.workers.job_reaper import ExtractionReaper
+from flydocs.models.entities.extraction import Base, Extraction
+from flydocs.models.repositories import ExtractionRepository
 
 _PG_URL = os.environ.get("FLYDOCS_TEST_PG_URL")
 
@@ -42,20 +42,20 @@ pytestmark = pytest.mark.skipif(
 
 
 @pytest.fixture
-async def pg_repo() -> ExtractionJobRepository:
+async def pg_repo() -> ExtractionRepository:
     engine = create_async_engine(_PG_URL, future=True)  # type: ignore[arg-type]
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
     factory = async_sessionmaker(engine, expire_on_commit=False)
-    repo = ExtractionJobRepository(factory, engine=engine)
+    repo = ExtractionRepository(factory, engine=engine)
     yield repo
     await engine.dispose()
 
 
-async def _seed(repo: ExtractionJobRepository, **overrides) -> ExtractionJob:
-    job = ExtractionJob(
-        status=overrides.get("status", "QUEUED"),
+async def _seed(repo: ExtractionRepository, **overrides) -> Extraction:
+    ext = Extraction(
+        status=overrides.get("status", "queued"),
         filename=overrides.get("filename", "test.pdf"),
         content_sha256=overrides.get("content_sha256", "0" * 64),
         content_bytes=overrides.get("content_bytes", 1),
@@ -64,20 +64,21 @@ async def _seed(repo: ExtractionJobRepository, **overrides) -> ExtractionJob:
         metadata_json=overrides.get("metadata_json", {}),
         attempts=overrides.get("attempts", 0),
         started_at=overrides.get("started_at"),
-        bbox_refine_status=overrides.get("bbox_refine_status"),
-        bbox_refine_started_at=overrides.get("bbox_refine_started_at"),
+        finished_at=overrides.get("finished_at"),
+        post_processing_bbox_status=overrides.get("post_processing_bbox_status"),
+        post_processing_bbox_started_at=overrides.get("post_processing_bbox_started_at"),
     )
-    job = await repo.add(job)
-    if "created_at" in overrides:
+    ext = await repo.add(ext)
+    if "submitted_at" in overrides:
         async with repo._session_factory() as session:  # type: ignore[attr-defined]
             await session.execute(
-                update(ExtractionJob)
-                .where(ExtractionJob.id == job.id)
-                .values(created_at=overrides["created_at"])
+                update(Extraction)
+                .where(Extraction.id == ext.id)
+                .values(submitted_at=overrides["submitted_at"])
             )
             await session.commit()
-        job = await repo.get(job.id)  # type: ignore[assignment]
-    return job
+        ext = await repo.get(ext.id)  # type: ignore[assignment]
+    return ext
 
 
 def _publisher() -> MagicMock:
@@ -87,36 +88,36 @@ def _publisher() -> MagicMock:
 
 
 @pytest.mark.asyncio
-async def test_job_reaper_revives_all_three_job_orphan_classes(
-    pg_repo: ExtractionJobRepository,
+async def test_extraction_reaper_revives_all_three_orphan_classes(
+    pg_repo: ExtractionRepository,
 ) -> None:
     """End-to-end: seed stuck rows, sweep, verify republish for each."""
     now = datetime.now(UTC)
-    # Orphan 1: QUEUED, submit-publish crashed.
+    # Orphan 1: queued, submit-publish crashed.
     submit_orphan = await _seed(
         pg_repo,
-        status="QUEUED",
-        created_at=now - timedelta(seconds=1200),
+        status="queued",
+        submitted_at=now - timedelta(seconds=1200),
     )
-    # Orphan 2: RUNNING, worker crashed past lease.
+    # Orphan 2: running, worker crashed past lease.
     crashed_runner = await _seed(
         pg_repo,
-        status="RUNNING",
+        status="running",
         started_at=now - timedelta(seconds=2000),
         attempts=1,
     )
-    # Orphan 3: QUEUED after requeue, delayed-publish task killed.
+    # Orphan 3: queued after requeue, delayed-publish task killed.
     retry_orphan = await _seed(
         pg_repo,
-        status="QUEUED",
+        status="queued",
         started_at=now - timedelta(seconds=1200),
         attempts=1,
     )
-    # Negative control: a fresh QUEUED row should NOT be reaped.
-    fresh = await _seed(pg_repo, status="QUEUED")
+    # Negative control: a fresh queued row should NOT be reaped.
+    fresh = await _seed(pg_repo, status="queued")
 
     publisher = _publisher()
-    reaper = JobReaper(
+    reaper = ExtractionReaper(
         repository=pg_repo,
         event_publisher=publisher,
         settings=IDPSettings(
@@ -127,7 +128,10 @@ async def test_job_reaper_revives_all_three_job_orphan_classes(
 
     await reaper._sweep()
 
-    published_ids = [c.kwargs["payload"]["job_id"] for c in publisher.publish.await_args_list]
+    published_ids = [
+        c.kwargs["payload"]["extraction"]["id"]
+        for c in publisher.publish.await_args_list
+    ]
     assert submit_orphan.id in published_ids
     assert crashed_runner.id in published_ids
     assert retry_orphan.id in published_ids
@@ -136,29 +140,29 @@ async def test_job_reaper_revives_all_three_job_orphan_classes(
 
 @pytest.mark.asyncio
 async def test_bbox_reaper_revives_both_bbox_orphan_classes(
-    pg_repo: ExtractionJobRepository,
+    pg_repo: ExtractionRepository,
 ) -> None:
     now = datetime.now(UTC)
-    # Orphan A: PARTIAL_SUCCEEDED, main-worker bbox-publish crashed.
+    # Orphan A: succeeded, main-worker bbox-publish crashed.
     publish_orphan = await _seed(
         pg_repo,
-        status="PARTIAL_SUCCEEDED",
-        bbox_refine_status="pending",
-        started_at=now - timedelta(seconds=2000),
+        status="succeeded",
+        post_processing_bbox_status="pending",
+        finished_at=now - timedelta(seconds=2000),
     )
-    # Orphan B: REFINING_BBOXES, bbox-worker crashed past lease.
+    # Orphan B: succeeded, bbox-worker crashed past lease.
     crashed_bbox = await _seed(
         pg_repo,
-        status="REFINING_BBOXES",
-        bbox_refine_status="running",
-        bbox_refine_started_at=now - timedelta(seconds=2000),
+        status="succeeded",
+        post_processing_bbox_status="running",
+        post_processing_bbox_started_at=now - timedelta(seconds=2000),
     )
-    # Negative control: a fresh REFINING_BBOXES claim.
+    # Negative control: a fresh bbox-leg claim.
     fresh = await _seed(
         pg_repo,
-        status="REFINING_BBOXES",
-        bbox_refine_status="running",
-        bbox_refine_started_at=now,
+        status="succeeded",
+        post_processing_bbox_status="running",
+        post_processing_bbox_started_at=now,
     )
 
     publisher = _publisher()
@@ -173,7 +177,10 @@ async def test_bbox_reaper_revives_both_bbox_orphan_classes(
 
     await reaper._sweep()
 
-    published_ids = [c.kwargs["payload"]["job_id"] for c in publisher.publish.await_args_list]
+    published_ids = [
+        c.kwargs["payload"]["extraction"]["id"]
+        for c in publisher.publish.await_args_list
+    ]
     assert publish_orphan.id in published_ids
     assert crashed_bbox.id in published_ids
     assert fresh.id not in published_ids
@@ -181,13 +188,13 @@ async def test_bbox_reaper_revives_both_bbox_orphan_classes(
 
 @pytest.mark.asyncio
 async def test_reaper_republish_revives_through_full_claim_cycle(
-    pg_repo: ExtractionJobRepository,
+    pg_repo: ExtractionRepository,
 ) -> None:
-    """Crash-recovery proof: stale RUNNING is reclaimable after the lease.
+    """Crash-recovery proof: stale running is reclaimable after the lease.
 
     Sequence:
-      1. Worker A claims a QUEUED job (status=RUNNING, fresh lease).
-      2. Worker A "crashes" -- we leave the row in RUNNING.
+      1. Worker A claims a queued extraction (status=running, fresh lease).
+      2. Worker A "crashes" -- we leave the row in running.
       3. Reaper sees the row is past its lease (we backdate started_at).
       4. Reaper publishes a fresh event (verified via publisher mock).
       5. A "fresh" worker calls mark_running with the same lease and wins
@@ -195,19 +202,19 @@ async def test_reaper_republish_revives_through_full_claim_cycle(
     """
     seeded = await _seed(pg_repo)
     first_claim = await pg_repo.mark_running(seeded.id, lease_seconds=1260)
-    assert first_claim is not None and first_claim.status == "RUNNING"
+    assert first_claim is not None and first_claim.status == "running"
 
     # Backdate started_at to past the lease window.
     async with pg_repo._session_factory() as session:  # type: ignore[attr-defined]
         await session.execute(
-            update(ExtractionJob)
-            .where(ExtractionJob.id == seeded.id)
+            update(Extraction)
+            .where(Extraction.id == seeded.id)
             .values(started_at=datetime.now(UTC) - timedelta(seconds=2000))
         )
         await session.commit()
 
     publisher = _publisher()
-    reaper = JobReaper(
+    reaper = ExtractionReaper(
         repository=pg_repo,
         event_publisher=publisher,
         settings=IDPSettings(job_run_lease_s=1260, queued_orphan_threshold_s=600),

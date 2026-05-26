@@ -12,18 +12,19 @@ import pytest
 from flydocs.core.services.escalation import JudgeEscalator
 from flydocs.core.services.splitting import DiscoveredSegment
 from flydocs.interfaces.dtos.bbox import BoundingBox
-from flydocs.interfaces.dtos.doc import DocSpec, DocType, ValidatorsSpec
+from flydocs.interfaces.dtos.document_type import DocumentTypeSpec
 from flydocs.interfaces.dtos.extract import (
-    DocumentInput,
+    EscalationConfig,
     ExtractionOptions,
     ExtractionRequest,
+    FileInput,
     StageToggles,
 )
 from flydocs.interfaces.dtos.field import (
     ExtractedField,
     ExtractedFieldGroup,
+    Field,
     FieldGroup,
-    FieldSpec,
     FieldValidation,
     JudgeOutcome,
 )
@@ -33,51 +34,68 @@ from flydocs.interfaces.enums.status import JudgeStatus
 _DUMMY = base64.b64encode(b"%PDF-1.4").decode("ascii")
 
 
-def _doc_spec() -> DocSpec:
-    return DocSpec(
-        docType=DocType(documentType="passport", description="x", country="ES"),
-        fieldGroups=[
+def _doc_spec() -> DocumentTypeSpec:
+    return DocumentTypeSpec(
+        id="passport",
+        description="x",
+        country="ES",
+        field_groups=[
             FieldGroup(
-                fieldGroupName="g",
-                fieldGroupFields=[
-                    FieldSpec(fieldName="a", fieldDescription="x", fieldType=FieldType.STRING),
-                    FieldSpec(fieldName="b", fieldDescription="x", fieldType=FieldType.STRING),
+                name="g",
+                fields=[
+                    Field(name="a", description="x", type=FieldType.STRING),
+                    Field(name="b", description="x", type=FieldType.STRING),
                 ],
             )
         ],
-        validators=ValidatorsSpec(),
     )
 
 
-def _request(*, escalation_threshold=None, escalation_model=None) -> ExtractionRequest:
-    opts = ExtractionOptions(stages=StageToggles(judge=True, judge_escalation=True))
-    if escalation_threshold is not None:
-        opts.escalation_threshold = escalation_threshold
-    if escalation_model is not None:
-        opts.escalation_model = escalation_model
+def _request(
+    *,
+    escalation_threshold: float | None = None,
+    escalation_model: str | None = None,
+) -> ExtractionRequest:
+    stages = StageToggles(judge=True, judge_escalation=True)
+    escalation = None
+    if escalation_threshold is not None or escalation_model is not None:
+        escalation = EscalationConfig(
+            threshold=escalation_threshold if escalation_threshold is not None else 0.5,
+            model=escalation_model or "anthropic:claude-opus-4-7",
+        )
+    opts = ExtractionOptions(stages=stages, escalation=escalation)
     return ExtractionRequest(
-        documents=[DocumentInput(filename="x.pdf", content_base64=_DUMMY, content_type="application/pdf")],
-        docs=[_doc_spec()],
+        files=[FileInput(filename="x.pdf", content_base64=_DUMMY, content_type="application/pdf")],
+        document_types=[_doc_spec()],
         rules=[],
         options=opts,
     )
 
 
-def _field(name: str, value: str | None, judge_status: JudgeStatus, flag: bool = False) -> ExtractedField:
+def _field(
+    name: str,
+    value: str | None,
+    judge_status: JudgeStatus,
+    flag: bool = False,
+) -> ExtractedField:
     return ExtractedField(
-        fieldName=name,
-        fieldValueFound=value,
+        name=name,
+        value=value,
         confidence=0.9,
-        pagesFound=[1],
+        pages=[1],
         bbox=BoundingBox(xmin=0.0, ymin=0.0, xmax=1.0, ymax=1.0),
-        field_validation=FieldValidation(valid=True),
-        judge=JudgeOutcome(status=judge_status, confidence=0.9, evidence="e", notes="", flag_for_review=flag),
+        validation=FieldValidation(valid=True),
+        judge=JudgeOutcome(
+            status=judge_status,
+            confidence=0.9,
+            evidence="e",
+            notes=None,
+            flag_for_review=flag,
+        ),
     )
 
 
 def _ctx(
-    extractor_mock: AsyncMock,
-    judge_mock: AsyncMock,
     *,
     per_doc_extracted: dict[str, list[ExtractedFieldGroup]],
     primary_model: str = "anthropic:claude-haiku-4-5",
@@ -117,15 +135,15 @@ async def test_no_escalation_when_threshold_zero() -> None:
     per_doc = {
         "passport": [
             ExtractedFieldGroup(
-                fieldGroupName="g",
-                fieldGroupFields=[
+                name="g",
+                fields=[
                     _field("a", "x", JudgeStatus.FAIL),
                     _field("b", "y", JudgeStatus.FAIL),
                 ],
             )
         ]
     }
-    ctx = _ctx(extractor, judge, per_doc_extracted=per_doc)
+    ctx = _ctx(per_doc_extracted=per_doc)
     info = await escalator.maybe_escalate(ctx, _request(escalation_threshold=0.0))
     assert info is None
     extractor.extract.assert_not_called()
@@ -144,12 +162,15 @@ async def test_no_escalation_when_model_not_set() -> None:
     per_doc = {
         "passport": [
             ExtractedFieldGroup(
-                fieldGroupName="g",
-                fieldGroupFields=[_field("a", "x", JudgeStatus.FAIL), _field("b", "y", JudgeStatus.FAIL)],
+                name="g",
+                fields=[
+                    _field("a", "x", JudgeStatus.FAIL),
+                    _field("b", "y", JudgeStatus.FAIL),
+                ],
             )
         ]
     }
-    ctx = _ctx(extractor, judge, per_doc_extracted=per_doc)
+    ctx = _ctx(per_doc_extracted=per_doc)
     info = await escalator.maybe_escalate(ctx, _request())
     assert info is None
 
@@ -167,15 +188,15 @@ async def test_no_escalation_when_failure_rate_below_threshold() -> None:
     per_doc = {
         "passport": [
             ExtractedFieldGroup(
-                fieldGroupName="g",
-                fieldGroupFields=[
+                name="g",
+                fields=[
                     _field("a", "x", JudgeStatus.PASS),
                     _field("b", "y", JudgeStatus.FAIL),  # 1/2 = 0.5 < 0.6
                 ],
             )
         ]
     }
-    ctx = _ctx(extractor, judge, per_doc_extracted=per_doc)
+    ctx = _ctx(per_doc_extracted=per_doc)
     info = await escalator.maybe_escalate(ctx, _request())
     assert info is None
 
@@ -188,8 +209,8 @@ async def test_escalation_triggered_and_accepted() -> None:
     """Threshold crossed AND escalation improves the result -> accepted=True."""
     new_groups = [
         ExtractedFieldGroup(
-            fieldGroupName="g",
-            fieldGroupFields=[
+            name="g",
+            fields=[
                 _field("a", "x", JudgeStatus.PASS),
                 _field("b", "y", JudgeStatus.PASS),
             ],
@@ -209,15 +230,15 @@ async def test_escalation_triggered_and_accepted() -> None:
     per_doc = {
         "passport": [
             ExtractedFieldGroup(
-                fieldGroupName="g",
-                fieldGroupFields=[
+                name="g",
+                fields=[
                     _field("a", "x", JudgeStatus.FAIL),
                     _field("b", "y", JudgeStatus.FAIL),  # 2/2 = 1.0 >= 0.5
                 ],
             )
         ]
     }
-    ctx = _ctx(extractor, judge, per_doc_extracted=per_doc)
+    ctx = _ctx(per_doc_extracted=per_doc)
 
     info = await escalator.maybe_escalate(ctx, _request())
 
@@ -242,8 +263,8 @@ async def test_escalation_triggered_but_rejected() -> None:
     """Threshold crossed but escalation result is no better -> accepted=False."""
     new_groups = [
         ExtractedFieldGroup(
-            fieldGroupName="g",
-            fieldGroupFields=[
+            name="g",
+            fields=[
                 _field("a", "x", JudgeStatus.FAIL),
                 _field("b", "y", JudgeStatus.FAIL),
             ],
@@ -263,15 +284,15 @@ async def test_escalation_triggered_but_rejected() -> None:
     per_doc = {
         "passport": [
             ExtractedFieldGroup(
-                fieldGroupName="g",
-                fieldGroupFields=[
+                name="g",
+                fields=[
                     _field("a", "x", JudgeStatus.FAIL),
                     _field("b", "y", JudgeStatus.FAIL),
                 ],
             )
         ]
     }
-    ctx = _ctx(extractor, judge, per_doc_extracted=per_doc)
+    ctx = _ctx(per_doc_extracted=per_doc)
 
     info = await escalator.maybe_escalate(ctx, _request())
 
@@ -298,11 +319,14 @@ async def test_no_escalation_when_same_model_as_primary() -> None:
     per_doc = {
         "passport": [
             ExtractedFieldGroup(
-                fieldGroupName="g",
-                fieldGroupFields=[_field("a", "x", JudgeStatus.FAIL), _field("b", "y", JudgeStatus.FAIL)],
+                name="g",
+                fields=[
+                    _field("a", "x", JudgeStatus.FAIL),
+                    _field("b", "y", JudgeStatus.FAIL),
+                ],
             )
         ]
     }
-    ctx = _ctx(extractor, judge, per_doc_extracted=per_doc, primary_model="anthropic:claude-opus-4-7")
+    ctx = _ctx(per_doc_extracted=per_doc, primary_model="anthropic:claude-opus-4-7")
     info = await escalator.maybe_escalate(ctx, _request())
     assert info is None

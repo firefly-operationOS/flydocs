@@ -194,6 +194,6 @@ def _count_failures(per_doc_extracted: dict[str, list[ExtractedFieldGroup]]) -> 
                 # JudgeStatus may be Enum or str depending on rebuild.
                 status_value = getattr(judge.status, "value", judge.status)
                 total += 1
-                if status_value == "FAIL" or judge.flag_for_review:
+                if status_value == "fail" or judge.flag_for_review:
                     fail += 1
     return fail, total
