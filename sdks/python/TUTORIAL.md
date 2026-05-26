@@ -1,6 +1,6 @@
-# flydocs Python SDK — Tutorial
+# flydocs Python SDK — Tutorial (v1 contract)
 
-A complete, payload-composition-focused reference for the flydocs Python SDK. Every typed model is documented: **what it carries**, **what variants exist**, **what values are accepted**, **what the defaults are**, and **what the wire shape looks like**.
+A complete, payload-composition-focused reference for the flydocs Python SDK. Every typed model is documented: **what it carries**, **what variants exist**, **what values are accepted**, **what the defaults are**, and **what the wire shape looks like**. Targets SDK `26.6.0` and the v1 server contract.
 
 > **Audience.** Engineers integrating flydocs into a Python codebase who want to know exactly which knobs exist and how to compose them. For a 5-minute zero-to-first-extraction, see [QUICKSTART.md](./QUICKSTART.md).
 >
@@ -12,14 +12,14 @@ A complete, payload-composition-focused reference for the flydocs Python SDK. Ev
 
 1. [The mental model](#1-the-mental-model)
 2. [`ExtractionRequest` — the top-level envelope](#2-extractionrequest--the-top-level-envelope)
-3. [`DocumentInput` — input files](#3-documentinput--input-files)
-4. [`DocSpec` — what to extract](#4-docspec--what-to-extract)
-5. [`FieldSpec` & `FieldItem` — field-level shape and constraints](#5-fieldspec--fielditem--field-level-shape-and-constraints)
-6. [`StandardValidatorSpec` — built-in validators (full catalogue)](#6-standardvalidatorspec--built-in-validators-full-catalogue)
+3. [`FileInput` — input files](#3-fileinput--input-files)
+4. [`DocumentTypeSpec` — what to extract](#4-documenttypespec--what-to-extract)
+5. [`Field` & `FieldGroup` — recursive field schema](#5-field--fieldgroup--recursive-field-schema)
+6. [`ValidatorSpec` — built-in validators (full catalogue)](#6-validatorspec--built-in-validators-full-catalogue)
 7. [`ExtractionOptions` & `StageToggles` — pipeline configuration](#7-extractionoptions--stagetoggles--pipeline-configuration)
 8. [`RuleSpec` — business rules over extracted fields](#8-rulespec--business-rules-over-extracted-fields)
 9. [Transformations — post-extraction reshaping](#9-transformations--post-extraction-reshaping)
-10. [Async jobs — `SubmitJobRequest`, callbacks, idempotency](#10-async-jobs--submitjobrequest-callbacks-idempotency)
+10. [Async extractions — `SubmitExtractionRequest`, callbacks, idempotency](#10-async-extractions--submitextractionrequest-callbacks-idempotency)
 11. [Webhooks — receiving and verifying delivery](#11-webhooks--receiving-and-verifying-delivery)
 12. [Errors — RFC 7807 problem-details](#12-errors--rfc-7807-problem-details)
 13. [Production patterns](#13-production-patterns)
@@ -33,12 +33,12 @@ A complete, payload-composition-focused reference for the flydocs Python SDK. Ev
 A flydocs request carries three things:
 
 ```
-  ┌─────────────────── ExtractionRequest ─────────────────┐
+  ┌────────────────── ExtractionRequest ──────────────────┐
   │                                                       │
-  │   documents:  [DocumentInput, ...]   ← the bytes      │
-  │   docs:       [DocSpec, ...]         ← the schema     │
-  │   rules:      [RuleSpec, ...]        ← the predicates │
-  │   options:    ExtractionOptions      ← the knobs      │
+  │   files:           [FileInput, ...]   ← the bytes     │
+  │   document_types:  [DocumentTypeSpec] ← the schema    │
+  │   rules:           [RuleSpec, ...]    ← the predicates│
+  │   options:         ExtractionOptions  ← the knobs     │
   │                                                       │
   └───────────────────────────────────────────────────────┘
 ```
@@ -46,282 +46,272 @@ A flydocs request carries three things:
 The service runs a configurable pipeline:
 
 ```
-  documents → splitter? → classifier? → extract (always) → field_validation? →
-            → visual_authenticity? → content_authenticity? → judge? →
-            → judge_escalation? → bbox_refine? → transform? → rule_engine? → assemble
+  files → splitter? → classifier? → extract (always) → field_validation? →
+        → visual_authenticity? → content_authenticity? → judge? →
+        → judge_escalation? → bbox_refine? → transform? → rule_engine? → assemble
 ```
 
-`extract` is mandatory; every other stage is opt-in via `StageToggles`. The response (`ExtractionResult`) carries one entry per resolved `DocSpec` under `documents`, plus per-stage trace and (when enabled) rule results, transformation outputs, judge verdicts, etc.
+`extract` is mandatory; every other stage is opt-in via `StageToggles`. The response (`ExtractionResult`) carries one entry per resolved `DocumentTypeSpec` under `documents`, plus per-stage trace and (when enabled) rule results, transformation outputs, judge verdicts, etc.
 
 Two integration modes share the same request shape:
 
-| Mode            | Method                            | When to use                                                 |
-|-----------------|-----------------------------------|-------------------------------------------------------------|
-| **Sync extract**  | `await flydocs.extract(req)`     | Single document, sub-minute. Caller waits on the HTTP call. |
-| **Async jobs**    | `await flydocs.submit_job(req)` + `await flydocs.wait_for_completion(job_id)` | Long-running, batches, webhook-delivered results. |
+| Mode               | Method                                                   | When to use                                                 |
+|--------------------|----------------------------------------------------------|-------------------------------------------------------------|
+| **Sync extract**   | `await flydocs.extract(req)`                              | Single document, sub-minute. Caller waits on the HTTP call. |
+| **Async**          | `await flydocs.extractions.create(req)` + `wait_for_completion` | Long-running, batches, webhook-delivered results. |
 
 ---
 
 ## 2. `ExtractionRequest` — the top-level envelope
 
-| Field           | Type                                    | Default                  | Required | Notes                                                              |
-|-----------------|-----------------------------------------|--------------------------|----------|--------------------------------------------------------------------|
-| `request_id`    | `UUID`                                  | random UUIDv4            | no       | Use it to correlate logs / re-fetch by id later.                   |
-| `intention`     | `str`                                   | `"Extract structured data from the document."` | no | Free-form guidance for every LLM node (extract, judge, rules, …). |
-| `documents`     | `list[DocumentInput]`                   | —                        | **yes**, min length 1 | Input files. A single file is a one-element list.    |
-| `docs`          | `list[DocSpec \| dict]`                  | —                        | **yes**, min length 1 | One entry per **expected document type**.            |
-| `rules`         | `list[RuleSpec \| dict]`                 | `[]`                     | no       | Business-rule DAG. See §8.                                         |
-| `options`       | `ExtractionOptions \| dict`             | `ExtractionOptions()`    | no       | Per-request knobs. See §7.                                         |
+| Field             | Type                                            | Default                  | Required | Notes                                                              |
+|-------------------|-------------------------------------------------|--------------------------|----------|--------------------------------------------------------------------|
+| `intention`       | `str`                                           | `"Extract structured data from the document."` | no | Free-form guidance for every LLM node (extract, judge, rules, …). |
+| `files`           | `list[FileInput]`                               | —                        | **yes**, min length 1 | Input files. A single file is a one-element list.    |
+| `document_types`  | `list[DocumentTypeSpec \| dict]`                 | —                        | **yes**, min length 1 | One entry per **expected document type**.            |
+| `rules`           | `list[RuleSpec \| dict]`                         | `[]`                     | no       | Business-rule DAG. See §8.                                         |
+| `options`         | `ExtractionOptions \| dict`                     | `ExtractionOptions()`    | no       | Per-request knobs. See §7.                                         |
 
 Every field that takes a typed model also accepts a plain `dict` — useful for forward-compatibility with server-side fields the SDK hasn't surfaced yet.
 
 ```python
 from flydocs_sdk import (
-    DocSpec, DocumentInput, ExtractionRequest,
-    FieldGroup, FieldSpec, FieldType,
+    DocumentTypeSpec, ExtractionRequest, Field, FieldGroup, FieldType, FileInput,
 )
 
-invoice = DocSpec(
-    doc_type={"documentType": "invoice"},
+invoice = DocumentTypeSpec(
+    id="invoice",
     field_groups=[
-        FieldGroup.of("totals",
-            FieldSpec(field_name="total", field_type=FieldType.NUMBER, required=True)),
+        FieldGroup(name="totals", fields=[
+            Field(name="total", type=FieldType.NUMBER, required=True),
+        ]),
     ],
 )
 
 req = ExtractionRequest(
-    documents=[DocumentInput.from_path("invoice.pdf")],
-    docs=[invoice],
+    files=[FileInput.from_path("invoice.pdf")],
+    document_types=[invoice],
 )
 ```
 
 ---
 
-## 3. `DocumentInput` — input files
+## 3. `FileInput` — input files
 
-One entry per input file. Each file is processed independently by the pipeline.
+One entry per input file. Each file is processed independently by the pipeline. Replaces v0 `DocumentInput`.
 
 | Field             | Type            | Default | Required | Notes                                                           |
 |-------------------|-----------------|---------|----------|-----------------------------------------------------------------|
 | `filename`        | `str`           | —       | **yes**, non-empty | Surfaced on the response so you know which file produced what. |
-| `content_base64`  | `str`           | —       | **yes**  | Base64 of the raw bytes. `data:<media-type>;base64,...` URLs are accepted; the SDK strips the prefix client-side. |
+| `content_base64`  | `str \| None`   | `None`  | yes for JSON | Base64 of the raw bytes. `data:<media-type>;base64,...` URLs accepted; SDK strips the prefix client-side. Omit when posting multipart. |
 | `content_type`    | `str \| None`   | `None`  | no       | MIME hint. Omit to let the service sniff magic bytes.           |
-| `document_type`   | `str \| None`   | `None`  | no       | When set, pins this file to one of the declared `DocSpec.doc_type.documentType` values; the classifier is skipped for this file. |
+| `expected_type`   | `str \| None`   | `None`  | no       | When set, pins this file to one of the declared `DocumentTypeSpec.id` values; the classifier is skipped for this file. (Replaces v0 `document_type`.) |
 
 ### Three ways to build one
 
 ```python
 # 1. From bytes you already have in memory
-doc = DocumentInput.from_bytes(b"%PDF-1.4...", filename="invoice.pdf",
-                                content_type="application/pdf")
+f = FileInput.from_bytes(b"%PDF-1.4...", filename="invoice.pdf",
+                          content_type="application/pdf")
 
 # 2. From a path on disk
-doc = DocumentInput.from_path("invoice.pdf")
-doc = DocumentInput.from_path("invoice.pdf", document_type="invoice")  # caller-pinned
+f = FileInput.from_path("invoice.pdf")
+f = FileInput.from_path("invoice.pdf", expected_type="invoice")  # caller-pinned
 
 # 3. Hand-build (e.g. when you already have the base64)
-doc = DocumentInput(
+f = FileInput(
     filename="invoice.pdf",
     content_base64="JVBERi0xLjQK...",
     content_type="application/pdf",
 )
 ```
 
-### Accepted formats
+### Multipart upload
 
-flydocs runs binary normalisation upstream of the extractor, so any of these reach the LLM cleanly:
+For very large files (or when you'd rather not encode to base64 first), pass `files=[...]` to the client method:
 
-| Family           | Examples                                              | Native to provider? |
-|------------------|-------------------------------------------------------|---------------------|
-| PDF              | `application/pdf`                                     | yes (pass-through)  |
-| Raster image     | PNG, JPEG, WebP, GIF                                  | yes (pass-through)  |
-| Other image      | HEIC/HEIF, AVIF, multi-frame TIFF, SVG, BMP           | no — converted via Pillow / pillow-heif / cairosvg |
-| Office docs      | DOCX, XLSX, PPTX, RTF, ODT, HTML                      | no — converted via the configured `OfficeConverter` (default Gotenberg HTTP sidecar) |
-| Archive / email  | ZIP, 7z, TAR, GZIP, EML, MSG                          | no — fanned out into multiple internal rows by the normalizer |
+```python
+with open("big.pdf", "rb") as buf:
+    result = client.extract(req, files=[buf])
+```
 
-Encrypted or corrupt PDFs raise a typed `FlydocsHTTPError(422, code="invalid_request")` with the underlying reason in `detail`.
+The SDK posts a multipart body with the binaries riding as `files` parts and the JSON envelope (minus `files`) under a `request` part. The `FileInput` entries you put in the JSON still carry `filename` / `content_type` / `expected_type` for the matching parts.
 
 ### Sizing
 
-The service enforces `FLYDOCS_MAX_BYTES` per file. Going over yields `FlydocsHTTPError(413, code="document_too_large")`. Defaults vary by deployment — call `flydocs.version()` for instance identity, or split the file before submitting.
+The service enforces `FLYDOCS_MAX_BYTES` per file. Going over yields `FlydocsHttpError(413, code="file_too_large")`.
 
 ---
 
-## 4. `DocSpec` — what to extract
+## 4. `DocumentTypeSpec` — what to extract
 
-One `DocSpec` per **expected document type**. When you submit multiple files, the classifier matches each file to one of the declared specs unless the caller pins `DocumentInput.document_type`.
+One `DocumentTypeSpec` per **expected document type**. When you submit multiple files, the classifier matches each file to one of the declared types unless the caller pins `FileInput.expected_type`.
+
+Replaces v0 `DocSpec` and the nested `DocType` envelope — the v0 `docs[i].docType.documentType` is now `document_types[i].id`.
 
 ```python
 from flydocs_sdk import (
-    DocSpec, DocType, FieldGroup, FieldSpec, FieldType,
-    ValidatorsSpec, VisualValidatorSpec,
+    DocumentTypeSpec, Field, FieldGroup, FieldType, VisualCheck,
 )
 
-invoice = DocSpec(
-    doc_type=DocType(
-        document_type="invoice",
-        description="Vendor invoice (paper or PDF)",
-        country="ES",
-    ),
+invoice = DocumentTypeSpec(
+    id="invoice",
+    description="Vendor invoice (paper or PDF)",
+    country="ES",
     field_groups=[ ... ],
-    validators=ValidatorsSpec(visual=[
-        VisualValidatorSpec(name="signature_present",
-                            description="A handwritten or e-signature is visible"),
-    ]),
+    visual_checks=[
+        VisualCheck(name="signature_present",
+                    description="A handwritten or e-signature is visible"),
+    ],
 )
 ```
 
-### `DocType`
+### Fields
 
-| Field             | Type    | Default | Required | Notes                                                              |
-|-------------------|---------|---------|----------|--------------------------------------------------------------------|
-| `document_type`   | `str`   | —       | **yes**, non-empty | Stable id. Used by `RuleParent.document_type`, by `DocumentInput.document_type`, and surfaced verbatim on the response under `ExtractedDocument.document_type`. Snake_case lower-kebab works well: `invoice`, `purchase_order`, `id_card_es`, `passport_int`. |
-| `description`     | `str`   | `""`    | no       | Hints the classifier when multi-doc requests need disambiguation.  |
-| `country`         | `str`   | `""`    | no       | ISO 3166-1 alpha-2. Hint for region-aware validators / formats.    |
+| Field            | Type                       | Default       | Required | Notes                                                              |
+|------------------|----------------------------|---------------|----------|--------------------------------------------------------------------|
+| `id`             | `str`                      | —             | **yes**, non-empty | Stable identifier. Referenced by `RuleFieldParent.document_type`, `FileInput.expected_type`, and surfaced on the response as `Document.type`. |
+| `description`    | `str \| None`              | `None`        | no       | Hints the classifier when multi-doc requests need disambiguation. |
+| `country`        | `str \| None`              | `None`        | no       | ISO 3166-1 alpha-2. Hint for region-aware validators / formats.   |
+| `field_groups`   | `list[FieldGroup]`         | —             | **yes**, min 1 | One or more named groups of fields the extractor should produce. |
+| `visual_checks`  | `list[VisualCheck]`        | `[]`          | no       | Visual checks the service should run when `visual_authenticity` is on. (Replaces v0 `ValidatorsSpec.visual`.) |
 
 ### `FieldGroup`
 
-A named bundle of `FieldSpec`s that the service should extract together. Groups are how you partition the schema visually and logically — `header`, `totals`, `line_items_block`, …
+A named bundle of `Field`s that the service should extract together.
 
-| Field                | Type                 | Default | Required | Notes                                                   |
-|----------------------|----------------------|---------|----------|---------------------------------------------------------|
-| `field_group_name`   | `str`                | —       | **yes**, non-empty | JSON alias `fieldGroupName`. Use snake_case.            |
-| `field_group_desc`   | `str`                | `""`    | no       | Free-form description shown to the LLM.                  |
-| `field_group_fields` | `list[FieldSpec]`    | —       | **yes**, min length 1 | JSON alias `fieldGroupFields`.                    |
+| Field        | Type             | Default | Required | Notes                                                   |
+|--------------|------------------|---------|----------|---------------------------------------------------------|
+| `name`       | `str`            | —       | **yes**, non-empty | Group identifier (snake_case). Surfaced as `ExtractedFieldGroup.name`. |
+| `description`| `str \| None`    | `None`  | no       | Free-form description shown to the LLM.                  |
+| `fields`     | `list[Field]`    | —       | **yes**, min 1 | The fields the group carries.                            |
 
 ```python
-totals = FieldGroup.of(
-    "totals",                                                  # name
-    FieldSpec(field_name="subtotal",     field_type=FieldType.NUMBER, required=True),
-    FieldSpec(field_name="tax_amount",   field_type=FieldType.NUMBER, required=True),
-    FieldSpec(field_name="total_amount", field_type=FieldType.NUMBER, required=True),
-    FieldSpec(field_name="currency",     field_type=FieldType.STRING, required=True),
+totals = FieldGroup(
+    name="totals",
+    fields=[
+        Field(name="subtotal",     type=FieldType.NUMBER, required=True),
+        Field(name="tax_amount",   type=FieldType.NUMBER, required=True),
+        Field(name="total_amount", type=FieldType.NUMBER, required=True),
+        Field(name="currency",     type=FieldType.STRING, required=True),
+    ],
     description="Top-of-invoice money block",
 )
 ```
 
-`FieldGroup.of(name, *fields, description="")` is the recommended factory — it folds the variadic fields into the list. Use the explicit constructor when you need to programmatically build the list.
+### `VisualCheck`
 
-### `ValidatorsSpec` + `VisualValidatorSpec`
-
-Per-`DocSpec` validator definitions. Currently only `visual` is exposed publicly; future additions (`audio`, `structural`) plug in here.
-
-| Field                    | Type                          | Notes                                                |
-|--------------------------|-------------------------------|------------------------------------------------------|
-| `ValidatorsSpec.visual`  | `list[VisualValidatorSpec]`   | One entry per visual check the LLM should run.       |
-| `VisualValidatorSpec.name`        | `str`                | Short identifier the response carries back.           |
-| `VisualValidatorSpec.description` | `str`                | What the LLM should look for (`"a handwritten or e-signature is visible"`). |
+| Field         | Type    | Notes                                                       |
+|---------------|---------|-------------------------------------------------------------|
+| `name`        | `str`   | Short identifier the response carries back.                 |
+| `description` | `str`   | What the LLM should look for.                                |
 
 `visual_authenticity` must be enabled on `StageToggles` for these to fire.
 
 ---
 
-## 5. `FieldSpec` & `FieldItem` — field-level shape and constraints
+## 5. `Field` & `FieldGroup` — recursive field schema
 
-### `FieldSpec`
+v1 collapses v0's `FieldSpec` + `FieldItem` into a **single recursive `Field`** type. Primitives, arrays, and objects all use the same model.
 
-The unit of "one thing the caller wants extracted".
+### `Field`
 
-| Field                  | Type                          | Default     | Notes                                                              |
-|------------------------|-------------------------------|-------------|--------------------------------------------------------------------|
-| `field_name`           | `str` (alias `name`)          | —, **required** | The key under which the extracted value appears in the response. Snake_case lower-case is conventional. |
-| `field_description`    | `str` (alias `description`)   | `""`        | Free-form hint for the LLM. The more specific, the better the recall on lookalikes. |
-| `field_type`           | `FieldType` (alias `type`)    | `STRING`    | See enum below.                                                    |
-| `required`             | `bool`                        | `False`     | When `True`, a missing field surfaces as a `field_validation` error. |
-| `pattern`              | `str \| None`                 | `None`      | RFC-flavour regex applied by the field validator.                  |
-| `format`               | `StandardFormat \| None`      | `None`      | One of `DATE` / `DATE_TIME` / `EMAIL` / `URI` / `UUID`.            |
-| `enum`                 | `list \| None`                | `None`      | Closed set of acceptable values.                                   |
-| `minimum`              | `float \| None`               | `None`      | Numeric lower bound (inclusive).                                   |
-| `maximum`              | `float \| None`               | `None`      | Numeric upper bound (inclusive).                                   |
-| `items`                | `list[FieldItem] \| None`     | `None`      | **Only valid when `field_type == FieldType.ARRAY`**; describes the columns of each repeating row. |
-| `standard_validators`  | `list[StandardValidatorSpec]` | `[]`        | See §6.                                                            |
+| Field         | Type                          | Default     | Notes                                                              |
+|---------------|-------------------------------|-------------|--------------------------------------------------------------------|
+| `name`        | `str`                         | —, required | The key under which the extracted value appears in the response.   |
+| `description` | `str \| None`                 | `None`      | Free-form hint for the LLM.                                        |
+| `type`        | `FieldType`                   | `STRING`    | One of `STRING` / `NUMBER` / `INTEGER` / `BOOLEAN` / `ARRAY` / `OBJECT`. |
+| `required`    | `bool`                        | `False`     | When `True`, a missing field surfaces as a `field_validation` error. |
+| `pattern`     | `str \| None`                 | `None`      | RFC-flavour regex applied by the field validator.                  |
+| `format`      | `StandardFormat \| None`      | `None`      | One of `DATE`, `DATE_TIME`, `TIME`, `EMAIL`, `URI`, `UUID`, `CURRENCY`. |
+| `enum`        | `list \| None`                | `None`      | Closed set of acceptable values.                                   |
+| `minimum`     | `float \| None`               | `None`      | Numeric lower bound (inclusive).                                   |
+| `maximum`     | `float \| None`               | `None`      | Numeric upper bound (inclusive).                                   |
+| `items`       | `Field \| None`               | `None`      | **Only valid when `type == ARRAY`**; describes a single row shape. |
+| `fields`      | `list[Field] \| None`         | `None`      | **Only valid when `type == OBJECT`**; describes the object's members. |
+| `validators`  | `list[ValidatorSpec]`         | `[]`        | See §6.                                                            |
 
-### `FieldType` — the five primitives
+### `FieldType`
 
-| Member                   | Wire form  | Use for                                                          |
-|--------------------------|------------|------------------------------------------------------------------|
-| `FieldType.STRING`       | `"string"` | Any free-form text, identifier, format-validated string.         |
-| `FieldType.NUMBER`       | `"number"` | Floats / decimals. Pair with `minimum` / `maximum` / `format=AMOUNT`. |
-| `FieldType.INTEGER`      | `"integer"`| Integral quantities (counts, page numbers, quantities).          |
-| `FieldType.BOOLEAN`      | `"boolean"`| Yes/no / present/absent / signed/unsigned.                       |
-| `FieldType.ARRAY`        | `"array"`  | Repeating rows. **Requires** a non-empty `items` list.            |
+| Member               | Wire form  | Use for                                                          |
+|----------------------|------------|------------------------------------------------------------------|
+| `FieldType.STRING`   | `"string"` | Any free-form text, identifier, format-validated string.         |
+| `FieldType.NUMBER`   | `"number"` | Floats / decimals.                                               |
+| `FieldType.INTEGER`  | `"integer"`| Integral quantities.                                              |
+| `FieldType.BOOLEAN`  | `"boolean"`| Yes/no / present/absent.                                          |
+| `FieldType.ARRAY`    | `"array"`  | Repeating rows. **Requires** an `items` Field describing the row. |
+| `FieldType.OBJECT`   | `"object"` | Nested object. **Requires** a non-empty `fields` list.            |
 
-### `StandardFormat` — JSON-Schema-style format hints
-
-| Member                   | Wire form    | Validation                  |
-|--------------------------|--------------|-----------------------------|
-| `StandardFormat.DATE`        | `"date"`        | `YYYY-MM-DD`                |
-| `StandardFormat.DATE_TIME`   | `"date-time"`   | RFC 3339 / ISO 8601 with time |
-| `StandardFormat.EMAIL`       | `"email"`       | RFC 5322                    |
-| `StandardFormat.URI`         | `"uri"`         | Generic URI                 |
-| `StandardFormat.UUID`        | `"uuid"`        | RFC 4122                    |
-
-> **`format` vs `standard_validators`.** `format` is a single-shot JSON-Schema-style check baked into `FieldSpec`; `standard_validators` is the extensible catalogue (IBAN, NIE, VAT_ID, …). For format checks that have an equivalent validator, prefer `format` (cheaper, doesn't show up as a validator hit). For domain checks, use validators.
-
-### `FieldItem` — sub-fields inside an array
-
-`field_type == FieldType.ARRAY` makes a field a repeating row; `items` declares the columns:
-
-| Field                | Type                          | Notes                                                              |
-|----------------------|-------------------------------|--------------------------------------------------------------------|
-| `field_name`         | `str` (alias `fieldName`)     | Column name (camelCase on the wire).                               |
-| `field_description`  | `str` (alias `fieldDescription`) | Free-form hint per column.                                       |
-| `field_type`         | `FieldType` (alias `fieldType`) | One of the primitives. `FieldItem` does NOT support nested arrays — flatten or split into two field groups. |
-| `pattern`, `format`, `enum`, `minimum`, `maximum`, `standard_validators` | (same as `FieldSpec`) | All the field-level constraints apply per row. |
+### Arrays + objects
 
 ```python
-line_items = FieldSpec(
-    field_name="line_items",
-    field_type=FieldType.ARRAY,
-    field_description="One row per line item on the invoice",
-    items=[
-        FieldItem(field_name="description", field_type=FieldType.STRING),
-        FieldItem(field_name="quantity",    field_type=FieldType.NUMBER, minimum=0),
-        FieldItem(field_name="unit_price",  field_type=FieldType.NUMBER, minimum=0),
-        FieldItem(field_name="line_total",  field_type=FieldType.NUMBER, minimum=0),
-    ],
+line_items = Field(
+    name="line_items",
+    type=FieldType.ARRAY,
+    items=Field(
+        name="row",
+        type=FieldType.OBJECT,
+        fields=[
+            Field(name="description", type=FieldType.STRING),
+            Field(name="quantity",    type=FieldType.NUMBER, minimum=0),
+            Field(name="unit_price",  type=FieldType.NUMBER, minimum=0),
+            Field(name="line_total",  type=FieldType.NUMBER, minimum=0),
+        ],
+    ),
 )
 ```
+
+### `StandardFormat`
+
+| Member                          | Wire form    | Validation                  |
+|---------------------------------|--------------|-----------------------------|
+| `StandardFormat.DATE`            | `"date"`     | `YYYY-MM-DD`                |
+| `StandardFormat.DATE_TIME`       | `"date-time"`| RFC 3339 / ISO 8601 with time |
+| `StandardFormat.TIME`            | `"time"`     | `HH:MM:SS`                  |
+| `StandardFormat.EMAIL`           | `"email"`    | RFC 5322                    |
+| `StandardFormat.URI`             | `"uri"`      | Generic URI                 |
+| `StandardFormat.UUID`            | `"uuid"`     | RFC 4122                    |
+| `StandardFormat.CURRENCY`        | `"currency"` | ISO 4217 currency code      |
 
 ### Variant cheat sheet
 
 | Goal                                | Recipe                                                                          |
 |-------------------------------------|---------------------------------------------------------------------------------|
-| Required scalar                     | `FieldSpec(field_name="x", field_type=FieldType.STRING, required=True)`         |
-| Optional with range                 | `FieldSpec(field_name="age", field_type=FieldType.INTEGER, minimum=0, maximum=120)` |
-| Closed enum                         | `FieldSpec(field_name="status", field_type=FieldType.STRING, enum=["active", "inactive"])` |
-| Date                                | `FieldSpec(field_name="dob", field_type=FieldType.STRING, format=StandardFormat.DATE)` |
-| Regex                               | `FieldSpec(field_name="ref", pattern=r"^[A-Z]{2}-\d{6}$")`                       |
-| IBAN                                | `FieldSpec(field_name="iban", standard_validators=[StandardValidatorSpec(type=StandardValidatorType.IBAN)])` |
-| Repeating rows                      | `FieldSpec(field_name="rows", field_type=FieldType.ARRAY, items=[FieldItem(...)])` |
-| Soft-warning validator              | `StandardValidatorSpec(type=..., severity="warning")` — recorded, but `valid` stays `True`. |
+| Required scalar                     | `Field(name="x", type=FieldType.STRING, required=True)`                          |
+| Optional with range                 | `Field(name="age", type=FieldType.INTEGER, minimum=0, maximum=120)`              |
+| Closed enum                         | `Field(name="status", type=FieldType.STRING, enum=["active", "inactive"])`       |
+| Date                                | `Field(name="dob", type=FieldType.STRING, format=StandardFormat.DATE)`           |
+| Regex                               | `Field(name="ref", pattern=r"^[A-Z]{2}-\d{6}$")`                                |
+| IBAN                                | `Field(name="iban", validators=[ValidatorSpec(name=ValidatorType.IBAN)])`        |
+| Repeating rows                      | `Field(name="rows", type=FieldType.ARRAY, items=Field(...))`                     |
+| Object value                        | `Field(name="address", type=FieldType.OBJECT, fields=[Field(...)])`              |
+| Soft-warning validator              | `ValidatorSpec(name=..., severity="warning")`                                    |
 
 ---
 
-## 6. `StandardValidatorSpec` — built-in validators (full catalogue)
+## 6. `ValidatorSpec` — built-in validators (full catalogue)
 
-Attach validators to a `FieldSpec` (or a `FieldItem` for array columns). The field validator stage runs them after extraction and folds the result into `ExtractedField.field_validation`.
+Attach validators to a `Field`. The field validator stage runs them after extraction and folds the result into `ExtractedField.validation`. Replaces v0 `StandardValidatorSpec`; dispatch key is `name` (not `type`).
 
 ```python
-from flydocs_sdk import StandardValidatorSpec, StandardValidatorType
+from flydocs_sdk import ValidatorSpec, ValidatorType
 
-iban_field = FieldSpec(
-    field_name="iban",
-    field_type=FieldType.STRING,
+iban_field = Field(
+    name="iban",
+    type=FieldType.STRING,
     required=True,
-    standard_validators=[StandardValidatorSpec(type=StandardValidatorType.IBAN)],
+    validators=[ValidatorSpec(name=ValidatorType.IBAN)],
 )
 
-vat_es = FieldSpec(
-    field_name="vat_id",
-    standard_validators=[
-        StandardValidatorSpec(type=StandardValidatorType.VAT_ID,
-                              params={"country": "ES"}),
+vat_es = Field(
+    name="vat_id",
+    validators=[
+        ValidatorSpec(name=ValidatorType.VAT_ID, params={"country": "ES"}),
     ],
 )
 
-soft_warning = StandardValidatorSpec(
-    type=StandardValidatorType.PHONE_E164,
+soft_warning = ValidatorSpec(
+    name=ValidatorType.PHONE_E164,
     params={"country": "ES"},
     severity="warning",   # records the error but doesn't set valid=False
 )
@@ -331,7 +321,7 @@ soft_warning = StandardValidatorSpec(
 
 | Field      | Type                                          | Default     | Notes                                              |
 |------------|-----------------------------------------------|-------------|----------------------------------------------------|
-| `type`     | `StandardValidatorType`                       | —, required | Use the enum; raw strings work too for forward compat. |
+| `name`     | `ValidatorType`                               | —, required | Use the enum; raw strings work too for forward compat. |
 | `params`   | `dict[str, Any]`                              | `{}`        | Per-validator parameters (e.g. `{"country": "ES"}`). |
 | `severity` | `Literal["error", "warning"]`                 | `"error"`   | `"warning"` records the issue but keeps `valid=True`. |
 
@@ -353,7 +343,7 @@ soft_warning = StandardValidatorSpec(
 | **Identifiers**    | `UUID`                               | `uuid`           | none                              |
 |                    | `JSON`                               | `json`           | none                              |
 |                    | `HEX_COLOR`                          | `hex_color`      | none                              |
-| **Finance**        | `IBAN`                               | `iban`           | none (country derived from prefix) |
+| **Finance**        | `IBAN`                               | `iban`           | none                              |
 |                    | `BIC`                                | `bic`            | none                              |
 |                    | `CREDIT_CARD`                        | `credit_card`    | none (Luhn-checked)               |
 |                    | `CURRENCY_CODE`                      | `currency_code`  | none (ISO 4217)                   |
@@ -364,21 +354,21 @@ soft_warning = StandardValidatorSpec(
 |                    | `POSTAL_CODE`                        | `postal_code`    | `{"country": "ES"}` (optional)    |
 |                    | `LATITUDE`                           | `latitude`       | none                              |
 |                    | `LONGITUDE`                          | `longitude`      | none                              |
-| **National IDs**   | `NIF`                                | `nif`            | `{"country": "ES"}` implied       |
+| **National IDs**   | `NIF`                                | `nif`            | none                              |
 |                    | `NIE`                                | `nie`            | ES — foreign person tax id        |
 |                    | `CIF`                                | `cif`            | ES — legacy company tax id        |
 |                    | `VAT_ID`                             | `vat_id`         | `{"country": "ES"}` (EU VAT)      |
 |                    | `SSN`                                | `ssn`            | US                                |
 |                    | `PASSPORT_NUMBER`                    | `passport_number`| ICAO 9303 (length / charset only) |
 
-> **Soft vs hard.** Use `severity="warning"` for "extra signal" checks where you want the issue logged but still want the row to be `valid=True` (e.g. a non-canonical date format). Use the default `"error"` for "this is a contract violation" checks (e.g. malformed IBAN).
-
 ---
 
 ## 7. `ExtractionOptions` & `StageToggles` — pipeline configuration
 
 ```python
-from flydocs_sdk import ExtractionOptions, StageToggles
+from flydocs_sdk import (
+    EscalationConfig, ExtractionOptions, StageToggles,
+)
 
 options = ExtractionOptions(
     return_bboxes=True,
@@ -392,47 +382,50 @@ options = ExtractionOptions(
         bbox_refine=True,
         rule_engine=True,
     ),
-    escalation_threshold=0.25,
-    escalation_model="anthropic:claude-opus-4-7",
+    escalation=EscalationConfig(threshold=0.25, model="anthropic:claude-opus-4-7"),
     transformations=[],
 )
 ```
 
 ### `ExtractionOptions`
 
-| Field                    | Type                       | Default                | Notes                                                              |
-|--------------------------|----------------------------|------------------------|--------------------------------------------------------------------|
-| `return_bboxes`          | `bool`                     | `True`                 | When `False`, the response strips bounding boxes (cheaper to ship). |
-| `language_hint`          | `str \| None`              | `None`                 | ISO 639-1 (`"en"`, `"es"`, `"zh"`, …) — guides multilingual OCR / extraction. ≤ 16 chars. |
-| `model`                  | `str \| None`              | `None` (uses env default) | Per-request primary model id (`"anthropic:claude-sonnet-4-6"`, `"openai:gpt-4o"`, …). |
-| `declared_media_type`    | `str \| None`              | `None`                 | Override sniffing; rare. Useful when callers know better than `magic`. |
-| `stages`                 | `StageToggles`             | `StageToggles()`       | See below.                                                         |
-| `escalation_threshold`   | `float \| None`            | `None` (env default)   | `0.0–1.0`. When `stages.judge_escalation=True`, re-runs the request with `escalation_model` once the judge's fail-rate crosses this. |
-| `escalation_model`       | `str \| None`              | `None` (env default)   | Model id used by the escalation re-run.                            |
-| `transformations`        | `list[dict]`               | `[]`                   | Post-extraction transformations. See §9.                            |
+| Field                  | Type                       | Default                | Notes                                                              |
+|------------------------|----------------------------|------------------------|--------------------------------------------------------------------|
+| `model`                | `str \| None`              | `None` (env default)   | Per-request primary model id (`"anthropic:claude-sonnet-4-6"`, `"openai:gpt-4o"`, …). |
+| `language_hint`        | `str \| None`              | `None`                 | ISO 639-1; guides multilingual OCR / extraction. ≤ 16 chars.       |
+| `return_bboxes`        | `bool`                     | `True`                 | When `False`, the response strips bounding boxes (cheaper to ship). |
+| `declared_media_type`  | `str \| None`              | `None`                 | Override sniffing. Rare; useful when the caller knows better than `magic`. |
+| `stages`               | `StageToggles`             | `StageToggles()`       | See below.                                                         |
+| `escalation`           | `EscalationConfig \| None` | `None`                 | Replaces v0 `escalation_threshold` + `escalation_model` (now nested). |
+| `transformations`      | `list[Transformation \| dict]` | `[]`                | Post-extraction transformations. See §9.                            |
+
+### `EscalationConfig`
+
+| Field        | Type      | Default | Notes                                                                |
+|--------------|-----------|---------|----------------------------------------------------------------------|
+| `threshold`  | `float`   | —       | `0.0–1.0`. The judge fail-rate trigger for the escalation re-run.    |
+| `model`      | `str`     | —       | Model id used by the escalation re-run.                              |
 
 ### `StageToggles` — all ten stages
 
 | Stage                  | Default | What it does                                                                                                  |
 |------------------------|---------|---------------------------------------------------------------------------------------------------------------|
-| `splitter`             | `False` | LLM document splitter. Required when one upload mixes several document types and you need page ranges per type. |
-| `classifier`           | **`True`** | LLM classifier that maps each input file to one of the declared `DocSpec.doc_type.documentType` values. No-op when every file already carries `document_type`. |
-| `field_validation`     | **`True`** | Pure-Python validation pass — runs `pattern`, `format`, `enum`, `min`/`max`, every `StandardValidatorSpec`.   |
-| `visual_authenticity`  | `False` | LLM visual check using the `ValidatorsSpec.visual` declarations (signature, watermark, …).                    |
-| `content_authenticity` | `False` | LLM cross-document content checks (consistency across pages / files).                                          |
+| `splitter`             | `False` | LLM document splitter. Required when one upload mixes several document types.                                  |
+| `classifier`           | **`True`** | LLM classifier mapping each input file to one of the declared document types. No-op when every file carries `expected_type`. |
+| `field_validation`     | **`True`** | Pure-Python validation pass.                                                                                  |
+| `visual_authenticity`  | `False` | LLM visual check using the `DocumentTypeSpec.visual_checks` declarations.                                      |
+| `content_authenticity` | `False` | LLM cross-document content checks.                                                                              |
 | `judge`                | `False` | Per-field LLM re-evaluation. Annotates every extracted field with `confidence`, `evidence`, `flag_for_review`. |
-| `judge_escalation`     | `False` | When the judge's fail-rate exceeds `escalation_threshold`, re-runs extract + judge with `escalation_model`; the lower-fail-rate run wins. Requires `judge`. |
-| `bbox_refine`          | `False` | Replaces LLM-estimated bboxes with grounded coordinates from the document's real text layer (PyMuPDF for born-digital PDFs, OCR for rasters). Multilingual-aware. |
-| `rule_engine`          | `False` | Evaluates the business-rule DAG against extracted fields + validator outcomes. See §8.                         |
+| `judge_escalation`     | `False` | When the judge's fail-rate exceeds `escalation.threshold`, re-runs extract + judge with `escalation.model`.    |
+| `bbox_refine`          | `False` | Replaces LLM-estimated bboxes with grounded coordinates from the document's text layer (PyMuPDF) or OCR.       |
+| `rule_engine`          | `False` | Evaluates the business-rule DAG. See §8.                                                                        |
 | `transform`            | `False` | Runs the `transformations` list. See §9.                                                                       |
-
-> **Cost & latency.** `extract` is mandatory. `classifier` and `field_validation` are cheap (cheap LLM call + pure Python). `judge` doubles your LLM spend per field. `judge_escalation` adds a third pass when triggered. `bbox_refine` adds ~50–200 ms per 30-page PDF (text-layer) or seconds-per-page for image-only PDFs (OCR). `visual_authenticity`, `content_authenticity` each add one LLM call.
 
 ---
 
 ## 8. `RuleSpec` — business rules over extracted fields
 
-Rules are **natural-language predicates** the LLM evaluates against extracted fields, validator outcomes, or other rules' outputs. They form a DAG; the engine sorts topologically and runs in dependency order. Cycles are rejected at request-validation time.
+Rules are **natural-language predicates** the LLM evaluates against extracted fields, validator outcomes, or other rules' outputs. They form a DAG; the engine sorts topologically. Cycles are rejected at request-validation time.
 
 ```python
 from flydocs_sdk import (
@@ -444,22 +437,22 @@ totals_consistent = RuleSpec(
     predicate="subtotal + tax_amount equals total_amount within 0.01",
     parents=[RuleFieldParent(
         document_type="invoice",
-        field_names=["subtotal", "tax_amount", "total_amount"],
+        fields=["subtotal", "tax_amount", "total_amount"],
     )],
 )
 
 vat_id_valid = RuleSpec(
     id="vat_id_valid",
-    predicate="The supplier_vat field passes the VAT_ID validator",
-    parents=[RuleValidatorParent(document_type="invoice", validator_name="vat_id")],
+    predicate="The supplier_vat field passes the vat_id validator",
+    parents=[RuleValidatorParent(document_type="invoice", validator="vat_id")],
 )
 
 acceptable = RuleSpec(
     id="invoice_acceptable",
     predicate="totals_consistent AND vat_id_valid",
     parents=[
-        RuleRuleParent(rule_id="totals_consistent"),
-        RuleRuleParent(rule_id="vat_id_valid"),
+        RuleRuleParent(rule="totals_consistent"),
+        RuleRuleParent(rule="vat_id_valid"),
     ],
     output=RuleOutputSpec(type="boolean"),
 )
@@ -469,25 +462,20 @@ acceptable = RuleSpec(
 
 | Field        | Type                                       | Default               | Notes                                                              |
 |--------------|--------------------------------------------|-----------------------|--------------------------------------------------------------------|
-| `id`         | `str`                                      | —, required           | Unique within the request. Referenced by `RuleRuleParent.rule_id`. |
+| `id`         | `str`                                      | —, required           | Unique within the request. Referenced by `RuleRuleParent.rule`.    |
 | `predicate`  | `str`                                      | —, required           | Natural-language statement evaluated by the LLM.                   |
 | `parents`    | `list[RuleParent]`                         | `[]`                  | Discriminated union — see below.                                   |
-| `output`     | `RuleOutputSpec`                           | `RuleOutputSpec()` (`type="boolean"`) | Shape the response should carry.                  |
+| `output`     | `RuleOutputSpec`                           | `RuleOutputSpec()`    | Shape the response should carry.                                   |
 
-### `RuleParent` — three variants
+### `RuleParent` — three variants (discriminator `kind`)
 
-| Variant                  | Discriminator   | Fields                                              | Use for                                          |
-|--------------------------|-----------------|-----------------------------------------------------|--------------------------------------------------|
-| `RuleFieldParent`        | `"field"`       | `document_type` (str), `field_names` (list[str], min 1) | "This rule operates on these fields of this document type." |
-| `RuleValidatorParent`    | `"validator"`   | `document_type` (str), `validator_name` (str)        | "This rule operates on the outcome of this validator." |
-| `RuleRuleParent`         | `"rule"`        | `rule_id` (str)                                      | "This rule depends on another rule's output."     |
+| Variant                  | `kind`           | Fields                                              | Use for                                          |
+|--------------------------|------------------|-----------------------------------------------------|--------------------------------------------------|
+| `RuleFieldParent`        | `"field"`        | `document_type` (str), `fields` (list[str], min 1)   | "This rule operates on these fields of this document type." |
+| `RuleValidatorParent`    | `"validator"`    | `document_type` (str), `validator` (str)             | "This rule operates on the outcome of this validator." |
+| `RuleRuleParent`         | `"rule"`         | `rule` (str)                                         | "This rule depends on another rule's output."     |
 
-### `RuleOutputSpec`
-
-| Field             | Type                       | Default       | Notes                                                                                |
-|-------------------|----------------------------|---------------|--------------------------------------------------------------------------------------|
-| `type`            | `str`                      | `"boolean"`   | Other supported types: `"string"`, `"number"`. The rule engine coerces accordingly.   |
-| `valid_outputs`   | `list[str] \| None`        | `None`        | Closed set of acceptable string outputs. Anything else is treated as `flag_for_review`. |
+The v0 keys (`parentType`, `fieldNames`, `validatorName`, `ruleId`) are gone in v1.
 
 ### Response shape
 
@@ -495,10 +483,10 @@ The response carries `result.rule_results: list[RuleResult]` with one entry per 
 
 ```python
 for rr in result.rule_results:
-    print(rr["rule_id"], rr["output"], rr.get("summary"), rr.get("human_revision"))
+    print(rr.rule_id, rr.output, rr.summary, rr.human_revision)
 ```
 
-`output` is the resolved value (string form: `"true"` / `"false"` / your custom strings). `human_revision` carries instructions for a human reviewer when the rule's output didn't fit `valid_outputs`.
+`summary` and `human_revision` are both `str | None` in v1.
 
 ---
 
@@ -506,38 +494,34 @@ for rr in result.rule_results:
 
 Two transformation types ship in-tree. Both are passed through `ExtractionOptions.transformations`; the `transform` stage must be enabled in `StageToggles`.
 
-### `entity_resolution` — declarative, fast, free
+### `EntityResolutionTransformation` — declarative, fast, free
 
-Deduplicates rows of an array field group using accent-fold + token-subset matching. Typical use: collapse `"Andrés Contreras"` and `"Andres Contreras Guillen"` into a single row across N documents.
+Deduplicates rows of an array field group using accent-fold + token-subset matching.
 
 ```python
 from flydocs_sdk import (
-    ExtractionOptions, StageToggles, TransformationScope,
-    entity_resolution,
+    EntityResolutionTransformation, ExtractionOptions, StageToggles, TransformationScope,
 )
 
 opts = ExtractionOptions(
     stages=StageToggles(transform=True),
     transformations=[
-        entity_resolution(
-            target_group="personas",        # array field group to dedupe
-            match_by=["dni", "nombre"],     # priority: DNI first, then name
-            min_shared_tokens=2,            # default; lower = more aggressive merging
-            scope=TransformationScope.REQUEST,  # dedupe ACROSS documents
-            # output_group="personas_canonical",  # keep both views (omit to replace)
+        EntityResolutionTransformation(
+            target_group="personas",
+            match_by=["dni", "nombre"],
+            min_shared_tokens=2,
+            scope=TransformationScope.REQUEST,
         ),
     ],
 )
 ```
 
-### `llm_transformation` — free-form
-
-A focused LLM call against a target group, driven by a one-sentence `intention`:
+### `LlmTransformation` — free-form
 
 ```python
-from flydocs_sdk import llm_transformation
+from flydocs_sdk import LlmTransformation, TransformationScope
 
-llm_transformation(
+LlmTransformation(
     target_group="cargos",
     intention=(
         "Normaliza cada cargo a una taxonomía cerrada: "
@@ -551,155 +535,173 @@ llm_transformation(
 
 | Field            | Type                       | Default                  | Notes                                                              |
 |------------------|----------------------------|--------------------------|--------------------------------------------------------------------|
-| `target_group`   | `str`                      | —, required              | Must match a `FieldGroup.field_group_name` the extractor produces. |
-| `output_group`   | `str \| None`              | `None`                   | When set, the transformation output is appended as a NEW group; the original stays. When `None`, replaces in place. |
-| `scope`          | `TransformationScope`      | `TASK`                   | `TASK`: one pass per document. `REQUEST`: concatenates across documents, runs once, emits under `result.request_transformations`. |
+| `target_group`   | `str`                      | —, required              | Must match a `FieldGroup.name` the extractor produces.             |
+| `output_group`   | `str \| None`              | `None`                   | When set, append the transformation output as a NEW group; the original stays. When `None`, replaces in place. |
+| `scope`          | `TransformationScope`      | `TASK`                   | `TASK`: one pass per document. `REQUEST`: across documents.        |
 | `id`             | `str`                      | random UUIDv4            | Used in logs and the trace.                                        |
 
-### `entity_resolution`-only
+### `EntityResolutionTransformation`-only
 
 | Field               | Type        | Default | Notes                                                       |
 |---------------------|-------------|---------|-------------------------------------------------------------|
-| `match_by`          | `list[str]` | required, min length 1 | Priority-ordered field names. First non-empty wins as the matching key. |
+| `match_by`          | `list[str]` | required, min length 1 | Priority-ordered field names.               |
 | `min_shared_tokens` | `int`       | `2`     | Minimum shared name tokens for a name-variant match.        |
 
-### `llm_transformation`-only
+### `LlmTransformation`-only
 
 | Field        | Type           | Default | Notes                                                |
 |--------------|----------------|---------|------------------------------------------------------|
 | `intention`  | `str`          | required, min length 10 | One-sentence goal in any language.  |
-| `prompt_id`  | `str \| None`  | `None`  | Named template id from the server-side catalog. Omit to use the default transform prompt with `intention` interpolated. |
+| `prompt_id`  | `str \| None`  | `None`  | Named template id from the server-side catalog.       |
 
 ---
 
-## 10. Async jobs — `SubmitJobRequest`, callbacks, idempotency
+## 10. Async extractions — `SubmitExtractionRequest`, callbacks, idempotency
 
-For long documents, batches, or fire-and-forget workloads, use `submit_job` and either poll with `wait_for_completion` or receive a webhook.
+For long documents, batches, or fire-and-forget workloads, use `extractions.create` and either poll with `wait_for_completion` or receive a webhook. Replaces v0 `submit_job` / `/api/v1/jobs`.
 
 ```python
 from flydocs_sdk import (
-    AsyncFlydocsClient, DocumentInput, JobStatus, SubmitJobRequest,
+    AsyncClient, ExtractionStatus, FileInput, SubmitExtractionRequest,
 )
 
-async with AsyncFlydocsClient("http://localhost:8400") as flydocs:
-    submit = await flydocs.submit_job(
-        SubmitJobRequest(
-            documents=[DocumentInput.from_path("big-batch.pdf")],
-            docs=[invoice],
+async with AsyncClient("http://localhost:8400") as flydocs:
+    ext = await flydocs.extractions.create(
+        SubmitExtractionRequest(
+            files=[FileInput.from_path("big-batch.pdf")],
+            document_types=[invoice],
             callback_url="https://your-app.example.com/flydocs/webhook",
             metadata={"caller": "ingest-pipeline", "batch_id": "b-42"},
         ),
-        idempotency_key="ingest-pipeline:b-42",   # safe to retry
+        idempotency_key="ingest-pipeline:b-42",
         correlation_id="req-12345",
     )
-    print(f"queued {submit.job_id} ({submit.status})")
+    print(f"queued {ext.id} ({ext.status.value})")
 
     final = await flydocs.wait_for_completion(
-        submit.job_id,
-        poll_interval=2.0,
-        timeout=900.0,
+        ext.id, poll_interval=2.0, timeout=900.0,
     )
-    if final.status == JobStatus.SUCCEEDED:
-        result = (await flydocs.get_job_result(submit.job_id)).result
+    if final.status == ExtractionStatus.SUCCEEDED:
+        envelope = await flydocs.extractions.get_result(ext.id)
+        result = envelope.result
         ...
 ```
 
-### `SubmitJobRequest`
+### `SubmitExtractionRequest`
 
 A superset of `ExtractionRequest`:
 
 | Field            | Type                            | Default                  | Notes                                                              |
 |------------------|---------------------------------|--------------------------|--------------------------------------------------------------------|
-| (all fields from `ExtractionRequest` minus `request_id`) | — | —                | The job's `job_id` plays the role of `request_id`.                 |
-| `callback_url`   | `str \| None`                   | `None`                   | When set, the service POSTs a `JobWebhookPayload` here on terminal status (see §11). |
-| `metadata`       | `dict[str, Any]`                | `{}`                     | Echoed back on the webhook payload — use for caller-side correlation. |
+| (all fields from `ExtractionRequest`) | — | — | The extraction's `id` plays the role of v0's `request_id`. |
+| `callback_url`   | `str \| None`                   | `None`                   | When set, the service POSTs an `EventEnvelope` here on terminal status. |
+| `metadata`       | `dict[str, Any]`                | `{}`                     | Echoed back on the envelope — use for caller-side correlation.    |
+
+### Lifecycle states
+
+v1 simplifies the state machine to a linear `queued → running → succeeded | failed | cancelled`. The intermediate `PARTIAL_SUCCEEDED` / `REFINING_BBOXES` states from v0 are gone — bbox refinement runs as additive post-processing under `Extraction.post_processing.bbox_refinement` without gating the main lifecycle.
+
+| Status              | Wire form        | When                                                            |
+|---------------------|------------------|------------------------------------------------------------------|
+| `ExtractionStatus.QUEUED`     | `"queued"`     | Persisted, waiting for the worker.                              |
+| `ExtractionStatus.RUNNING`    | `"running"`    | Worker claimed it.                                              |
+| `ExtractionStatus.SUCCEEDED`  | `"succeeded"`  | Terminal: the main pipeline finished cleanly.                   |
+| `ExtractionStatus.FAILED`     | `"failed"`     | Terminal: the worker hit an unrecoverable error.                |
+| `ExtractionStatus.CANCELLED`  | `"cancelled"`  | Terminal: caller cancelled while queued.                        |
+
+Post-processing has its own lifecycle (`PostProcessingStatus.PENDING/RUNNING/SUCCEEDED/FAILED`).
 
 ### Headers per call
 
 | Header            | SDK kwarg          | Notes                                                              |
 |-------------------|--------------------|--------------------------------------------------------------------|
-| `Idempotency-Key` | `idempotency_key=` | Send the same key to replay an existing submission instead of creating a duplicate. The service indexes by key. |
-| `X-Correlation-Id`| `correlation_id=`  | Stamped on every internal log line and on the webhook payload (`correlation_id` field). |
+| `Idempotency-Key` | `idempotency_key=` | Send the same key to replay an existing submission.                |
+| `X-Correlation-Id`| `correlation_id=`  | Stamped on every internal log line and on the webhook envelope.    |
 
 ### Polling helper
 
 ```python
 final = await flydocs.wait_for_completion(
-    submit.job_id,
-    poll_interval=2.0,   # seconds between GET /api/v1/jobs/{id}
+    ext.id,
+    poll_interval=2.0,   # seconds between GET /api/v1/extractions/{id}
     timeout=900.0,       # raises TimeoutError after this many seconds
 )
 ```
 
-Terminal statuses are `SUCCEEDED`, `PARTIAL_SUCCEEDED`, `FAILED`, `CANCELLED`. `wait_for_completion` returns the final `JobStatusResponse` in all four cases — it only raises `TimeoutError` when the deadline elapses while the worker is still in flight.
+Terminal statuses are `SUCCEEDED`, `FAILED`, `CANCELLED`. `wait_for_completion` returns the final `Extraction` in all three cases.
 
 ### Listing / cancelling
 
 ```python
-listing = await flydocs.list_jobs(
-    status=["SUCCEEDED", "PARTIAL_SUCCEEDED"],   # CSV filter
-    bbox_refine_status=["pending", "running"],   # CSV filter
-    idempotency_key="ingest-pipeline:b-42",      # exact match
+listing = await flydocs.extractions.list(
+    status=[ExtractionStatus.SUCCEEDED, ExtractionStatus.FAILED],
+    post_processing_status=[PostProcessingStatus.PENDING, PostProcessingStatus.RUNNING],
+    idempotency_key="ingest-pipeline:b-42",
     created_after=datetime(2026, 5, 1),
     created_before=datetime(2026, 5, 31, 23, 59),
     limit=25,
     offset=0,
 )
-for job in listing.items:
-    print(job.job_id, job.status, job.submitted_at)
+for ext in listing.items:
+    print(ext.id, ext.status, ext.submitted_at)
 
-await flydocs.cancel_job("job-abc")              # only valid while QUEUED
+await flydocs.extractions.cancel("ext_abc")   # only valid while QUEUED
 ```
 
 ---
 
 ## 11. Webhooks — receiving and verifying delivery
 
-When `callback_url` is set, the service POSTs a `JobWebhookPayload` on terminal status. It signs the body with HMAC-SHA256 in `X-Flydocs-Signature` when `FLYDOCS_WEBHOOK_HMAC_SECRET` is configured on the service.
+When `callback_url` is set, the service POSTs an `EventEnvelope` on every lifecycle event. It signs the body with HMAC-SHA256 in `X-Flydocs-Signature` when `FLYDOCS_WEBHOOK_HMAC_SECRET` is configured on the service.
 
-### Payload shape — `JobWebhookPayload`
+### Event types (string literals)
+
+| Constant                                                | String value                                  |
+|---------------------------------------------------------|-----------------------------------------------|
+| `EVENT_TYPE_EXTRACTION_SUBMITTED`                       | `"extraction.submitted"`                      |
+| `EVENT_TYPE_EXTRACTION_COMPLETED`                       | `"extraction.completed"`                      |
+| `EVENT_TYPE_EXTRACTION_POST_PROCESSING_REQUESTED`       | `"extraction.post_processing.requested"`      |
+| `EVENT_TYPE_EXTRACTION_POST_PROCESSING_COMPLETED`       | `"extraction.post_processing.completed"`      |
+
+### `EventEnvelope` shape
 
 | Field             | Type                       | Notes                                                                          |
 |-------------------|----------------------------|--------------------------------------------------------------------------------|
 | `event_id`        | `str`                      | Unique per delivery. Dedupe on this — the publisher retries on transient errors. |
-| `event_type`      | `str`                      | `"IDPJobCompleted"`.                                                            |
-| `version`         | `str`                      | Semver of the payload schema (`"1.0.0"`).                                       |
-| `job_id`          | `str`                      | The submitted job.                                                              |
-| `status`          | `JobStatus`                | Terminal: `SUCCEEDED` / `PARTIAL_SUCCEEDED` / `FAILED` / `CANCELLED`.            |
-| `occurred_at` / `started_at` / `finished_at` | `datetime`  | Lifecycle timestamps.                                          |
-| `attempts`        | `int`                      | Worker attempts consumed.                                                       |
+| `event_type`      | `str`                      | One of the four constants above.                                                |
+| `version`         | `str`                      | Semver of the envelope schema (`"1.0.0"`).                                      |
+| `occurred_at`     | `datetime`                 | When the event happened.                                                        |
 | `correlation_id`  | `str \| None`              | The `X-Correlation-Id` you passed at submit time, if any.                       |
 | `tenant_id`       | `str \| None`              | When the service runs multi-tenant.                                              |
-| `metadata`        | `dict[str, Any]`           | The dict you passed in `SubmitJobRequest.metadata`.                              |
-| `result`          | `ExtractionResult \| None` | Present on `SUCCEEDED` / `PARTIAL_SUCCEEDED`; `None` on `FAILED` / `CANCELLED`.  |
-| `error_code` / `error_message` | `str \| None`  | Populated when the job failed.                                                  |
+| `extraction`      | `Extraction`               | Current-state snapshot of the resource.                                          |
+| `result`          | `ExtractionResult \| None` | Present on `extraction.completed` when terminal status is `succeeded`; `None` otherwise. |
+| `metadata`        | `dict[str, Any]`           | The dict you passed in `SubmitExtractionRequest.metadata`.                       |
 
 ### Verifying — FastAPI example
 
 ```python
 import os
 from flydocs_sdk import (
-    JobStatus, JobWebhookPayload,
+    EVENT_TYPE_EXTRACTION_COMPLETED, ExtractionStatus,
     WebhookVerificationError, WebhookVerifier,
 )
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request
 
 verifier = WebhookVerifier(secret=os.environ["FLYDOCS_WEBHOOK_HMAC_SECRET"])
 app = FastAPI()
 
 @app.post("/flydocs/webhook")
-async def on_webhook(
-    request: Request,
-    x_flydocs_signature: str = Header(...),
-) -> dict:
+async def on_webhook(request: Request) -> dict:
     body = await request.body()                                   # raw bytes
+    signature = request.headers.get("X-Flydocs-Signature", "")
     try:
-        verifier.verify(body, x_flydocs_signature)
+        envelope = verifier.verify(body, signature)               # typed EventEnvelope
     except WebhookVerificationError:
         raise HTTPException(status_code=403, detail="bad signature")
-    payload = JobWebhookPayload.model_validate_json(body)
-    if payload.status == JobStatus.SUCCEEDED and payload.result is not None:
-        ...   # persist, fan out downstream work
+    if envelope.event_type == EVENT_TYPE_EXTRACTION_COMPLETED:
+        ext = envelope.extraction
+        if ext.status == ExtractionStatus.SUCCEEDED and envelope.result is not None:
+            ...   # persist, fan out downstream work
     return {"ok": True}
 ```
 
@@ -709,29 +711,37 @@ async def on_webhook(
 
 ## 12. Errors — RFC 7807 problem-details
 
-Every non-2xx response decodes into a typed `FlydocsHTTPError` with `status_code`, `code`, `title`, `detail`, and the raw `payload` dict:
+Every non-2xx response decodes into a typed `FlydocsHttpError` with `status_code`, `code`, `title`, `detail`, `type`, `instance`, `extensions`, and the raw `payload` dict:
 
-| `code`                  | Status | Meaning                                                                                                   |
-|-------------------------|--------|-----------------------------------------------------------------------------------------------------------|
-| `extraction_timeout`    | 408    | Pipeline exceeded the sync ceiling (`FLYDOCS_SYNC_TIMEOUT_S`). Retry via `submit_job`.                    |
-| `document_too_large`    | 413    | Document over `FLYDOCS_MAX_BYTES`.                                                                         |
-| `invalid_base64`        | 422    | `content_base64` failed strict parsing.                                                                    |
-| `invalid_request`       | 422    | Semantic validation found issues (rule references unknown field, duplicate ids, cycles, …). `payload` carries every issue. |
-| `job_not_ready`         | 409    | `GET /jobs/{id}/result` called before the worker finished.                                                  |
-| `job_not_cancellable`   | 409    | Worker already started; mid-flight cancellation isn't supported.                                            |
-| `JOB_NOT_FOUND`         | 404    | Unknown `job_id`.                                                                                          |
+| `code`                       | Status | Meaning                                                                                                   |
+|------------------------------|--------|-----------------------------------------------------------------------------------------------------------|
+| `timeout`                    | 408    | Sync pipeline exceeded `FLYDOCS_SYNC_TIMEOUT_S`. Retry via `extractions.create`.                          |
+| `file_too_large`             | 413    | File over `FLYDOCS_MAX_BYTES`.                                                                            |
+| `unsupported_file`           | 415    | The file's media type is unsupported.                                                                     |
+| `invalid_base64`             | 422    | `content_base64` failed strict parsing.                                                                   |
+| `validation_failed`          | 422    | Semantic validation found issues. `payload` carries every issue.                                          |
+| `invalid_request`            | 422    | Generic request-shape problem.                                                                            |
+| `encrypted_pdf`              | 422    | PDF carries an encryption header the service can't open.                                                  |
+| `office_conversion_failed`   | 422    | Gotenberg/LibreOffice could not convert the Office document.                                              |
+| `archive_extraction_failed`  | 422    | ZIP / 7z / TAR could not be unpacked.                                                                     |
+| `image_conversion_failed`    | 422    | Pillow / cairosvg could not convert the image.                                                            |
+| `not_ready`                  | 409    | `GET /extractions/{id}/result` called before the extraction succeeded.                                    |
+| `not_cancellable`            | 409    | Worker already started; mid-flight cancellation isn't supported.                                          |
+| `not_found`                  | 404    | Unknown extraction id.                                                                                    |
+| `unauthorized`               | 401    | API key missing or invalid.                                                                                |
 
 ```python
 from flydocs_sdk import (
-    FlydocsClientError, FlydocsHTTPError, FlydocsTimeoutError,
+    FlydocsClientError, FlydocsHttpError, FlydocsTimeoutError,
+    SubmitExtractionRequest,
 )
 
 try:
     result = await flydocs.extract(req)
-except FlydocsHTTPError as exc:
-    if exc.code == "extraction_timeout":
-        submit = await flydocs.submit_job(SubmitJobRequest(**req.model_dump()))
-    elif exc.code == "invalid_request":
+except FlydocsHttpError as exc:
+    if exc.code == "timeout":
+        await flydocs.extractions.create(SubmitExtractionRequest(**req.model_dump()))
+    elif exc.code in ("validation_failed", "invalid_request"):
         for issue in exc.payload.get("errors", []):
             print(issue)
         raise
@@ -743,23 +753,27 @@ except FlydocsClientError:
     raise   # transport failure (DNS, connect, TLS, …)
 ```
 
+The error also carries the full RFC 7807 view via `exc.as_problem_details()` returning a typed `ProblemDetails`.
+
 ---
 
 ## 13. Production patterns
 
-**Reuse a client.** Construct `AsyncFlydocsClient` once per application and share it. The underlying httpx connection pool is the most expensive part to set up.
+**Reuse a client.** Construct `AsyncClient` once per application and share it. The underlying httpx connection pool is the most expensive part to set up.
 
-**Correlation ids.** Pass `correlation_id="..."` on `extract` / `submit_job`. The service stamps it on every internal log line and on the webhook payload.
+**API keys.** Pass `api_key="..."` to the constructor and the SDK adds the `Authorization: Bearer ...` header on every call.
 
-**Custom timeouts.** Default is 60 s. `AsyncFlydocsClient("http://...", timeout=120.0)`.
+**Correlation ids.** Pass `correlation_id="..."` on `extract` / `extractions.create`. The service stamps it on every internal log line and on the webhook envelope.
 
-**Default headers.** `AsyncFlydocsClient(..., default_headers={"X-Tenant-Id": "tenant-42"})` adds the header to every outbound request.
+**Custom timeouts.** Default is 60 s. `AsyncClient("http://...", timeout=120.0)`.
 
-**Bring your own httpx client.** `AsyncFlydocsClient(..., http_client=existing)` shares your app's connection pool. The SDK never closes transports it didn't create.
+**Default headers.** `AsyncClient(..., default_headers={"X-Tenant-Id": "tenant-42"})` adds the header to every outbound request.
 
-**Health checks.** `await flydocs.health("readiness")` returns the actuator JSON — wire it into your deploy verification.
+**Bring your own httpx client.** `AsyncClient(..., http_client=existing)` shares your app's connection pool. The SDK never closes transports it didn't create.
 
-**Cost tracking.** When the service has cost tracking enabled, `result.usage` carries per-agent and per-model token + USD breakdowns; webhook payloads carry the same.
+**Health checks.** `await flydocs.health("readiness")` returns the actuator JSON.
+
+**Cost tracking.** When the service has cost tracking enabled, `result.pipeline.usage` carries per-agent and per-model token + USD breakdowns; webhook envelopes carry the same.
 
 ---
 
@@ -770,63 +784,80 @@ A realistic invoice extraction touching every feature: typed schema with array r
 ```python
 import asyncio
 from flydocs_sdk import (
-    AsyncFlydocsClient,
-    DocSpec, DocType, DocumentInput,
-    ExtractionOptions, ExtractionRequest,
-    FieldGroup, FieldItem, FieldSpec, FieldType,
-    JobStatus,
-    RuleFieldParent, RuleRuleParent, RuleSpec, RuleValidatorParent,
-    StageToggles, StandardFormat,
-    StandardValidatorSpec, StandardValidatorType,
-    SubmitJobRequest,
-    TransformationScope, entity_resolution,
+    AsyncClient,
+    DocumentTypeSpec,
+    EntityResolutionTransformation,
+    EscalationConfig,
+    ExtractionOptions,
+    ExtractionStatus,
+    Field,
+    FieldGroup,
+    FieldType,
+    FileInput,
+    RuleFieldParent,
+    RuleRuleParent,
+    RuleSpec,
+    RuleValidatorParent,
+    StageToggles,
+    StandardFormat,
+    SubmitExtractionRequest,
+    TransformationScope,
+    ValidatorSpec,
+    ValidatorType,
 )
 
 
-invoice = DocSpec(
-    doc_type=DocType(document_type="invoice", description="Vendor invoice", country="ES"),
+invoice = DocumentTypeSpec(
+    id="invoice",
+    description="Vendor invoice",
+    country="ES",
     field_groups=[
-        FieldGroup.of("header",
-            FieldSpec(field_name="invoice_number", field_type=FieldType.STRING, required=True),
-            FieldSpec(field_name="invoice_date",   field_type=FieldType.STRING,
-                      format=StandardFormat.DATE, required=True),
-            FieldSpec(field_name="supplier_name",  field_type=FieldType.STRING, required=True),
-            FieldSpec(
-                field_name="supplier_vat",
-                field_type=FieldType.STRING,
+        FieldGroup(name="header", fields=[
+            Field(name="invoice_number", type=FieldType.STRING, required=True),
+            Field(name="invoice_date",   type=FieldType.STRING,
+                  format=StandardFormat.DATE, required=True),
+            Field(name="supplier_name",  type=FieldType.STRING, required=True),
+            Field(
+                name="supplier_vat",
+                type=FieldType.STRING,
                 required=True,
-                standard_validators=[
-                    StandardValidatorSpec(
-                        type=StandardValidatorType.VAT_ID, params={"country": "ES"},
-                    ),
-                ],
+                validators=[ValidatorSpec(
+                    name=ValidatorType.VAT_ID, params={"country": "ES"}
+                )],
             ),
-            FieldSpec(field_name="supplier_iban", field_type=FieldType.STRING,
-                      standard_validators=[
-                          StandardValidatorSpec(type=StandardValidatorType.IBAN),
-                      ]),
-        ),
-        FieldGroup.of("totals",
-            FieldSpec(field_name="subtotal",     field_type=FieldType.NUMBER, required=True, minimum=0.0),
-            FieldSpec(field_name="tax_amount",   field_type=FieldType.NUMBER, required=True, minimum=0.0),
-            FieldSpec(field_name="total_amount", field_type=FieldType.NUMBER, required=True, minimum=0.0),
-            FieldSpec(field_name="currency",     field_type=FieldType.STRING, required=True,
-                      standard_validators=[
-                          StandardValidatorSpec(type=StandardValidatorType.CURRENCY_CODE),
-                      ]),
-        ),
-        FieldGroup.of("line_items_block",
-            FieldSpec(
-                field_name="line_items",
-                field_type=FieldType.ARRAY,
-                items=[
-                    FieldItem(field_name="description", field_type=FieldType.STRING),
-                    FieldItem(field_name="quantity",    field_type=FieldType.NUMBER, minimum=0),
-                    FieldItem(field_name="unit_price",  field_type=FieldType.NUMBER, minimum=0),
-                    FieldItem(field_name="line_total",  field_type=FieldType.NUMBER, minimum=0),
-                ],
+            Field(
+                name="supplier_iban",
+                type=FieldType.STRING,
+                validators=[ValidatorSpec(name=ValidatorType.IBAN)],
             ),
-        ),
+        ]),
+        FieldGroup(name="totals", fields=[
+            Field(name="subtotal",     type=FieldType.NUMBER, required=True, minimum=0.0),
+            Field(name="tax_amount",   type=FieldType.NUMBER, required=True, minimum=0.0),
+            Field(name="total_amount", type=FieldType.NUMBER, required=True, minimum=0.0),
+            Field(
+                name="currency",
+                type=FieldType.STRING,
+                required=True,
+                validators=[ValidatorSpec(name=ValidatorType.CURRENCY_CODE)],
+            ),
+        ]),
+        FieldGroup(name="line_items_block", fields=[
+            Field(
+                name="line_items",
+                type=FieldType.ARRAY,
+                items=Field(
+                    name="row",
+                    type=FieldType.OBJECT,
+                    fields=[
+                        Field(name="description", type=FieldType.STRING),
+                        Field(name="quantity",    type=FieldType.NUMBER, minimum=0),
+                        Field(name="unit_price",  type=FieldType.NUMBER, minimum=0),
+                        Field(name="line_total",  type=FieldType.NUMBER, minimum=0),
+                    ],
+                ),
+            ),
+        ]),
     ],
 )
 
@@ -834,31 +865,33 @@ rules = [
     RuleSpec(
         id="totals_consistent",
         predicate="subtotal + tax_amount equals total_amount within 0.01",
-        parents=[RuleFieldParent(document_type="invoice",
-                                 field_names=["subtotal", "tax_amount", "total_amount"])],
+        parents=[RuleFieldParent(
+            document_type="invoice",
+            fields=["subtotal", "tax_amount", "total_amount"],
+        )],
     ),
     RuleSpec(
         id="vat_id_valid",
-        predicate="The supplier_vat field passes the VAT_ID validator",
-        parents=[RuleValidatorParent(document_type="invoice", validator_name="vat_id")],
+        predicate="The supplier_vat field passes the vat_id validator",
+        parents=[RuleValidatorParent(document_type="invoice", validator="vat_id")],
     ),
     RuleSpec(
         id="invoice_acceptable",
         predicate="totals_consistent AND vat_id_valid",
         parents=[
-            RuleRuleParent(rule_id="totals_consistent"),
-            RuleRuleParent(rule_id="vat_id_valid"),
+            RuleRuleParent(rule="totals_consistent"),
+            RuleRuleParent(rule="vat_id_valid"),
         ],
     ),
 ]
 
 
 async def main(invoice_path: str) -> None:
-    async with AsyncFlydocsClient("http://localhost:8400") as flydocs:
-        submit = await flydocs.submit_job(
-            SubmitJobRequest(
-                documents=[DocumentInput.from_path(invoice_path)],
-                docs=[invoice],
+    async with AsyncClient("http://localhost:8400") as flydocs:
+        ext = await flydocs.extractions.create(
+            SubmitExtractionRequest(
+                files=[FileInput.from_path(invoice_path)],
+                document_types=[invoice],
                 rules=rules,
                 options=ExtractionOptions(
                     language_hint="es",
@@ -872,10 +905,12 @@ async def main(invoice_path: str) -> None:
                         rule_engine=True,
                         transform=True,
                     ),
-                    escalation_threshold=0.25,
-                    escalation_model="anthropic:claude-opus-4-7",
+                    escalation=EscalationConfig(
+                        threshold=0.25,
+                        model="anthropic:claude-opus-4-7",
+                    ),
                     transformations=[
-                        entity_resolution(
+                        EntityResolutionTransformation(
                             target_group="line_items",
                             match_by=["description"],
                             scope=TransformationScope.TASK,
@@ -890,15 +925,17 @@ async def main(invoice_path: str) -> None:
             correlation_id="req-12345",
         )
 
-        final = await flydocs.wait_for_completion(submit.job_id, poll_interval=2.0, timeout=900.0)
-        if final.status != JobStatus.SUCCEEDED:
-            raise SystemExit(f"job did not succeed: {final.status} {final.error_message}")
+        final = await flydocs.wait_for_completion(ext.id, poll_interval=2.0, timeout=900.0)
+        if final.status != ExtractionStatus.SUCCEEDED:
+            err_msg = final.error.message if final.error else ""
+            raise SystemExit(f"extraction did not succeed: {final.status.value} {err_msg}")
 
-        result = (await flydocs.get_job_result(submit.job_id)).result
+        envelope = await flydocs.extractions.get_result(ext.id)
+        result = envelope.result
         for rr in result.rule_results:
-            print(f"  rule {rr['rule_id']}: {rr['output']}")
-        for line in result.documents[0]["fields"]:
-            print(line["fieldGroupName"], "→", len(line["fieldGroupFields"]), "fields")
+            print(f"  rule {rr.rule_id}: {rr.output}")
+        for group in result.documents[0].field_groups:
+            print(group.name, "→", len(group.fields), "fields")
 
 
 asyncio.run(main("invoice.pdf"))
@@ -908,25 +945,25 @@ asyncio.run(main("invoice.pdf"))
 
 ## 15. Synchronous facade (when async isn't an option)
 
-For scripts, batch tools, and callers that can't run an event loop, `FlydocsClient` wraps `AsyncFlydocsClient` on a dedicated background loop:
+For scripts, batch tools, and callers that can't run an event loop, `Client` wraps `AsyncClient` on a dedicated background loop:
 
 ```python
-from flydocs_sdk import FlydocsClient
+from flydocs_sdk import Client
 
-with FlydocsClient("http://localhost:8400") as flydocs:
+with Client("http://localhost:8400") as flydocs:
     result = flydocs.extract(req)
 ```
 
-Method-for-method identical to `AsyncFlydocsClient`, just without `await`. Prefer the async client whenever you can — the sync wrapper costs you one extra event loop per instance.
+Method-for-method identical to `AsyncClient`, just without `await`. Prefer the async client whenever you can — the sync wrapper costs you one extra event loop per instance.
 
 ---
 
 ## Further reading
 
 - [`QUICKSTART.md`](./QUICKSTART.md) — 5-minute zero-to-first-extraction.
-- [`examples/`](./examples/) — six runnable scripts mirroring each section above.
+- [`examples/`](./examples/) — six runnable scripts.
+- [`docs/migration-v0-to-v1.md`](../../docs/migration-v0-to-v1.md) — complete rename / reshape table for v0 callers.
 - [`docs/api-reference.md`](../../docs/api-reference.md) — full HTTP wire contract.
 - [`docs/pipeline.md`](../../docs/pipeline.md) — stage DAG internals.
 - [`docs/rule-engine.md`](../../docs/rule-engine.md) — rule engine semantics + DAG resolution.
-- [`docs/standard-validators.md`](../../docs/standard-validators.md) — per-validator algorithm references.
 - [`docs/transformations.md`](../../docs/transformations.md) — the `transform` stage internals.
