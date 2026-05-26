@@ -3,7 +3,7 @@ name = "flydocs-sdk"
 # CalVer YY.MM.PP — bumped to match the service's release tag. Note that
 # PEP 440 normalises ``26.05.01`` -> ``26.5.1`` in the built wheel
 # filename; the git tag and Java artifact stay in the full zero-padded form.
-version = "26.5.2"
+version = "26.6.0"
 description = "Official Python SDK for flydocs — pure-multimodal Intelligent Document Processing. Sync + async clients, typed RFC 7807 errors, and an HMAC webhook verifier."
 readme = "README.md"
 requires-python = ">=3.11"

@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Official Python SDK for flydocs.
+"""Official Python SDK for flydocs (v1 contract).
 
 flydocs is a pure-multimodal Intelligent Document Processing service:
 structured field extraction with bounding boxes, validation,
@@ -22,115 +22,217 @@ This package gives Python callers a typed, async-first client over the
 service's REST API, plus a synchronous wrapper for non-async code and a
 helper for verifying outbound webhook signatures.
 
-    from flydocs_sdk import FlydocsClient, DocumentInput, ExtractionRequest
-
-    client = FlydocsClient("http://localhost:8400")
-    result = client.extract(
-        ExtractionRequest(
-            documents=[DocumentInput.from_path("invoice.pdf")],
-            docs=[{"docType": {"documentType": "invoice"}, "groups": [...]}],
-        )
+    from flydocs_sdk import (
+        Client, DocumentTypeSpec, ExtractionRequest, Field, FieldGroup,
+        FieldType, FileInput,
     )
-    for doc in result.documents:
-        for group in doc.fields:
-            for field in group.field_group_fields:
-                print(field.name, "=", field.value)
+
+    invoice = DocumentTypeSpec(
+        id="invoice",
+        field_groups=[
+            FieldGroup(name="totals", fields=[
+                Field(name="total_amount", type=FieldType.NUMBER, required=True),
+                Field(name="currency",     type=FieldType.STRING, required=True),
+            ]),
+        ],
+    )
+
+    with Client("http://localhost:8400") as flydocs:
+        result = flydocs.extract(
+            ExtractionRequest(
+                files=[FileInput.from_path("invoice.pdf")],
+                document_types=[invoice],
+            )
+        )
 """
 
 from flydocs_sdk._version import __version__
-from flydocs_sdk.async_client import AsyncFlydocsClient
-from flydocs_sdk.client import FlydocsClient
+from flydocs_sdk.async_client import AsyncClient, AsyncExtractionsResource
+from flydocs_sdk.client import Client, ExtractionsResource
 from flydocs_sdk.errors import (
     FlydocsAPIError,
     FlydocsClientError,
     FlydocsError,
     FlydocsHTTPError,
+    FlydocsHttpError,
     FlydocsTimeoutError,
+    ProblemDetails,
 )
 from flydocs_sdk.models import (
-    DocumentInput,
+    ALL_EVENT_TYPES,
+    EVENT_TYPE_EXTRACTION_COMPLETED,
+    EVENT_TYPE_EXTRACTION_POST_PROCESSING_COMPLETED,
+    EVENT_TYPE_EXTRACTION_POST_PROCESSING_REQUESTED,
+    EVENT_TYPE_EXTRACTION_SUBMITTED,
+    BboxQuality,
+    BboxRefinementInfo,
+    BboxSource,
+    BoundingBox,
+    CheckStatus,
+    ClassificationInfo,
+    ContentAuthenticity,
+    ContentCoherenceCheck,
+    ContentIntegrityStatus,
+    Document,
+    DocumentAuthenticity,
+    DocumentTypeSpec,
+    EntityResolutionTransformation,
+    EscalationConfig,
+    EscalationInfo,
+    EventEnvelope,
+    ExtractedField,
+    ExtractedFieldGroup,
+    Extraction,
+    ExtractionError,
+    ExtractionListQuery,
+    ExtractionListResponse,
+    ExtractionOptions,
     ExtractionRequest,
     ExtractionResult,
-    JobListResponse,
-    JobResult,
-    JobStatus,
-    JobStatusResponse,
-    JobWebhookPayload,
-    SubmitJobRequest,
-    SubmitJobResponse,
-    VersionInfo,
-)
-from flydocs_sdk.request import (
-    DocSpec,
-    DocType,
-    ExtractionOptions,
+    ExtractionResultEnvelope,
+    ExtractionStatus,
+    Field,
     FieldGroup,
-    FieldItem,
-    FieldSpec,
     FieldType,
+    FieldValidation,
+    FieldValidationError,
+    FileInput,
+    FileSummary,
+    JudgeOutcome,
+    JudgeStatus,
+    LlmTransformation,
+    PipelineError,
+    PipelineMeta,
+    PostProcessing,
+    PostProcessingStatus,
     RuleFieldParent,
     RuleOutputSpec,
+    RuleParent,
+    RuleResult,
     RuleRuleParent,
     RuleSpec,
     RuleValidatorParent,
     StageToggles,
     StandardFormat,
-    StandardValidatorSpec,
-    StandardValidatorType,
+    SubmitExtractionRequest,
+    TraceEntry,
+    Transformation,
     TransformationScope,
-    ValidatorsSpec,
-    VisualValidatorSpec,
-    entity_resolution,
-    llm_transformation,
+    UsageBreakdown,
+    ValidationResponse,
+    ValidationRule,
+    ValidatorSpec,
+    ValidatorType,
+    VersionInfo,
+    VisualCheck,
+    VisualCheckResult,
 )
 from flydocs_sdk.webhooks import WebhookVerificationError, WebhookVerifier
 
 __all__ = [
     "__version__",
+    # ------------------------------------------------------------------
     # Clients
-    "AsyncFlydocsClient",
-    "FlydocsClient",
+    # ------------------------------------------------------------------
+    "AsyncClient",
+    "AsyncExtractionsResource",
+    "Client",
+    "ExtractionsResource",
+    # ------------------------------------------------------------------
     # Errors
+    # ------------------------------------------------------------------
     "FlydocsAPIError",
     "FlydocsClientError",
     "FlydocsError",
     "FlydocsHTTPError",
+    "FlydocsHttpError",
     "FlydocsTimeoutError",
-    # Wire response / shared models
-    "DocumentInput",
-    "ExtractionRequest",
-    "ExtractionResult",
-    "JobListResponse",
-    "JobResult",
-    "JobStatus",
-    "JobStatusResponse",
-    "JobWebhookPayload",
-    "SubmitJobRequest",
-    "SubmitJobResponse",
-    "VersionInfo",
-    # Typed request schema
-    "DocSpec",
-    "DocType",
+    "ProblemDetails",
+    # ------------------------------------------------------------------
+    # Event-type constants
+    # ------------------------------------------------------------------
+    "ALL_EVENT_TYPES",
+    "EVENT_TYPE_EXTRACTION_COMPLETED",
+    "EVENT_TYPE_EXTRACTION_POST_PROCESSING_COMPLETED",
+    "EVENT_TYPE_EXTRACTION_POST_PROCESSING_REQUESTED",
+    "EVENT_TYPE_EXTRACTION_SUBMITTED",
+    # ------------------------------------------------------------------
+    # Wire models -- request side
+    # ------------------------------------------------------------------
+    "DocumentTypeSpec",
+    "EntityResolutionTransformation",
+    "EscalationConfig",
     "ExtractionOptions",
+    "ExtractionRequest",
+    "Field",
     "FieldGroup",
-    "FieldItem",
-    "FieldSpec",
     "FieldType",
+    "FileInput",
+    "LlmTransformation",
     "RuleFieldParent",
     "RuleOutputSpec",
+    "RuleParent",
     "RuleRuleParent",
     "RuleSpec",
     "RuleValidatorParent",
     "StageToggles",
     "StandardFormat",
-    "StandardValidatorSpec",
-    "StandardValidatorType",
+    "SubmitExtractionRequest",
+    "Transformation",
     "TransformationScope",
-    "ValidatorsSpec",
-    "VisualValidatorSpec",
-    "entity_resolution",
-    "llm_transformation",
+    "ValidatorSpec",
+    "ValidatorType",
+    "VisualCheck",
+    # ------------------------------------------------------------------
+    # Wire models -- response side
+    # ------------------------------------------------------------------
+    "BboxQuality",
+    "BboxSource",
+    "BoundingBox",
+    "CheckStatus",
+    "ClassificationInfo",
+    "ContentAuthenticity",
+    "ContentCoherenceCheck",
+    "ContentIntegrityStatus",
+    "Document",
+    "DocumentAuthenticity",
+    "EscalationInfo",
+    "ExtractedField",
+    "ExtractedFieldGroup",
+    "ExtractionResult",
+    "FieldValidation",
+    "FieldValidationError",
+    "FileSummary",
+    "JudgeOutcome",
+    "JudgeStatus",
+    "PipelineError",
+    "PipelineMeta",
+    "RuleResult",
+    "TraceEntry",
+    "UsageBreakdown",
+    "ValidationResponse",
+    "ValidationRule",
+    "VisualCheckResult",
+    # ------------------------------------------------------------------
+    # Wire models -- extraction lifecycle
+    # ------------------------------------------------------------------
+    "BboxRefinementInfo",
+    "Extraction",
+    "ExtractionError",
+    "ExtractionListQuery",
+    "ExtractionListResponse",
+    "ExtractionResultEnvelope",
+    "ExtractionStatus",
+    "PostProcessing",
+    "PostProcessingStatus",
+    # ------------------------------------------------------------------
+    # Wire models -- identity + events
+    # ------------------------------------------------------------------
+    "EventEnvelope",
+    "VersionInfo",
+    # ------------------------------------------------------------------
     # Webhooks
+    # ------------------------------------------------------------------
     "WebhookVerificationError",
     "WebhookVerifier",
 ]
