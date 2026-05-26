@@ -1,0 +1,5 @@
+    warnings.warn(pytest.PytestUnhandledThreadExceptionWarning(msg))
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+================= 308 passed, 1 skipped, 20 warnings in 6.36s ==================
+<sys>:0: DeprecationWarning: builtin type swigvarlink has no __module__ attribute
