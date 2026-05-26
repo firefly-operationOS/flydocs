@@ -28,9 +28,9 @@ from flydocs.core.services.binary.libreoffice import LibreOfficeConverter
 from flydocs.core.services.binary.pdf_guard import PdfGuard
 from flydocs.core.services.workers.bbox_refine_worker import BboxRefineWorker
 from flydocs.interfaces.dtos.bbox import BboxSource, BoundingBox
-from flydocs.interfaces.dtos.extract import ExtractedDocument, ExtractionResult
+from flydocs.interfaces.dtos.extract import Document, ExtractionResult, PipelineMeta
 from flydocs.interfaces.dtos.field import ExtractedField, ExtractedFieldGroup
-from flydocs.interfaces.enums.job_status import JobStatus
+from flydocs.interfaces.enums.extraction_status import ExtractionStatus
 
 
 def _real_pdf() -> bytes:
@@ -44,23 +44,23 @@ def _real_pdf() -> bytes:
 
 def _result_with_field(value: str) -> ExtractionResult:
     field_ = ExtractedField(
-        fieldName="customer_name",
-        fieldValueFound=value,
-        pagesFound=[1],
+        name="customer_name",
+        value=value,
+        pages=[1],
         bbox=BoundingBox(xmin=0.05, ymin=0.05, xmax=0.95, ymax=0.95),
     )
-    group = ExtractedFieldGroup(fieldGroupName="customer", fieldGroupFields=[field_])
-    doc = ExtractedDocument(
-        document_type="invoice",
+    group = ExtractedFieldGroup(name="customer", fields=[field_])
+    doc = Document(
+        type="invoice",
         pages=[1],
-        fields=[group],
+        field_groups=[group],
         source_file="invoice.pdf",
     )
     return ExtractionResult(
-        request_id="00000000-0000-0000-0000-000000000001",
+        id="ext_RESULT0000000000000000000000",
+        files=[],
         documents=[doc],
-        model="anthropic:claude-sonnet-4-6",
-        latency_ms=1000,
+        pipeline=PipelineMeta(model="anthropic:claude-sonnet-4-6", latency_ms=1000),
     )
 
 
@@ -68,70 +68,80 @@ def _result_with_field(value: str) -> ExtractionResult:
 
 
 @dataclass
-class _StubJob:
-    id: str = "job-1"
-    status: str = JobStatus.PARTIAL_SUCCEEDED.value
+class _StubExtraction:
+    id: str = "ext_TEST00000000000000000000001"
+    status: str = ExtractionStatus.SUCCEEDED.value
     filename: str = "invoice.pdf"
     schema_json: dict[str, Any] = field(default_factory=dict)
     options_json: dict[str, Any] = field(default_factory=dict)
     result_json: dict[str, Any] = field(default_factory=dict)
     metadata_json: dict[str, Any] = field(default_factory=dict)
     callback_url: str | None = None
-    bbox_refine_status: str | None = "pending"
-    bbox_refine_attempts: int = 0
+    post_processing_bbox_status: str | None = "pending"
+    post_processing_bbox_attempts: int = 0
+    post_processing_bbox_started_at: datetime | None = None
+    post_processing_bbox_finished_at: datetime | None = None
+    post_processing_bbox_error_code: str | None = None
+    post_processing_bbox_error_message: str | None = None
+    error_code: str | None = None
+    error_message: str | None = None
+    attempts: int = 0
     started_at: datetime | None = None
     finished_at: datetime | None = None
-    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    submitted_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 class _StubRepo:
-    def __init__(self, job: _StubJob) -> None:
-        self.job = job
+    def __init__(self, ext: _StubExtraction) -> None:
+        self.ext = ext
         self.calls: list[tuple[str, dict[str, Any]]] = []
 
-    async def get(self, job_id: str) -> _StubJob | None:
-        return self.job if self.job.id == job_id else None
+    async def get(self, ext_id: str) -> _StubExtraction | None:
+        return self.ext if self.ext.id == ext_id else None
 
-    async def mark_bbox_refining(self, job_id: str, *, lease_seconds: int) -> _StubJob | None:
-        # Mirror the production semantics: only claim PARTIAL_SUCCEEDED
-        # (or stale REFINING_BBOXES); return None otherwise.
-        if self.job.status not in (
-            JobStatus.PARTIAL_SUCCEEDED.value,
-            JobStatus.REFINING_BBOXES.value,
-        ):
+    async def claim_bbox_refinement(
+        self, ext_id: str, *, lease_seconds: int
+    ) -> _StubExtraction | None:
+        # Production semantics: claim only when main is succeeded AND the
+        # sub-status is pending (or stale running).
+        self.calls.append(
+            ("claim_bbox_refinement", {"ext_id": ext_id, "lease_seconds": lease_seconds})
+        )
+        if self.ext.status != ExtractionStatus.SUCCEEDED.value:
             return None
-        self.job.status = JobStatus.REFINING_BBOXES.value
-        self.job.bbox_refine_status = "running"
-        self.job.bbox_refine_attempts = (self.job.bbox_refine_attempts or 0) + 1
-        self.calls.append(("mark_bbox_refining", {"job_id": job_id, "lease_seconds": lease_seconds}))
-        return self.job
+        if self.ext.post_processing_bbox_status not in ("pending", "running"):
+            return None
+        self.ext.post_processing_bbox_status = "running"
+        self.ext.post_processing_bbox_attempts = (self.ext.post_processing_bbox_attempts or 0) + 1
+        return self.ext
 
-    async def mark_bbox_refined(self, job_id: str, *, result: dict[str, Any]) -> _StubJob | None:
-        self.job.status = JobStatus.SUCCEEDED.value
-        self.job.bbox_refine_status = "succeeded"
-        self.job.result_json = result
-        self.calls.append(("mark_bbox_refined", {"job_id": job_id}))
-        return self.job
+    async def complete_bbox_refinement(
+        self, ext_id: str, *, result: dict[str, Any]
+    ) -> _StubExtraction | None:
+        self.ext.post_processing_bbox_status = "succeeded"
+        self.ext.result_json = result
+        self.calls.append(("complete_bbox_refinement", {"ext_id": ext_id}))
+        return self.ext
 
-    async def mark_bbox_refine_failed(self, job_id: str, *, code: str, message: str) -> _StubJob | None:
-        self.job.status = JobStatus.PARTIAL_SUCCEEDED.value
-        self.job.bbox_refine_status = "failed"
-        self.calls.append(("mark_bbox_refine_failed", {"code": code, "message": message}))
-        return self.job
+    async def fail_bbox_refinement(
+        self, ext_id: str, *, code: str, message: str
+    ) -> _StubExtraction | None:
+        self.ext.post_processing_bbox_status = "failed"
+        self.calls.append(("fail_bbox_refinement", {"code": code, "message": message}))
+        return self.ext
 
-    async def update(self, job_id: str, **changes: Any) -> _StubJob | None:
+    async def update(self, ext_id: str, **changes: Any) -> _StubExtraction | None:
         for k, v in changes.items():
-            setattr(self.job, k, v)
+            setattr(self.ext, k, v)
         self.calls.append(("update", changes))
-        return self.job
+        return self.ext
 
-    async def requeue_bbox_refine(self, job_id: str) -> _StubJob | None:
-        if self.job.status != JobStatus.REFINING_BBOXES.value:
+    async def requeue_bbox_refinement(self, ext_id: str) -> _StubExtraction | None:
+        if self.ext.post_processing_bbox_status != "running":
             return None
-        self.job.status = JobStatus.PARTIAL_SUCCEEDED.value
-        self.job.bbox_refine_status = "pending"
-        self.calls.append(("requeue_bbox_refine", {"job_id": job_id}))
-        return self.job
+        self.ext.post_processing_bbox_status = "pending"
+        self.calls.append(("requeue_bbox_refinement", {"ext_id": ext_id}))
+        return self.ext
 
 
 class _StubPublisher:
@@ -185,11 +195,11 @@ def _make_worker(repo: _StubRepo, publisher: _StubPublisher, webhook: _StubWebho
 
 
 @pytest.mark.asyncio
-async def test_grounds_partial_succeeded_job_and_transitions_to_succeeded() -> None:
+async def test_grounds_succeeded_extraction_and_marks_bbox_leg_succeeded() -> None:
     pdf = _real_pdf()
-    job = _StubJob(
+    ext = _StubExtraction(
         schema_json={
-            "documents": [
+            "files": [
                 {
                     "filename": "invoice.pdf",  # matches result.documents[0].source_file
                     "content_base64": base64.b64encode(pdf).decode(),
@@ -199,45 +209,54 @@ async def test_grounds_partial_succeeded_job_and_transitions_to_succeeded() -> N
         },
         result_json=_result_with_field("Acme Corporation").model_dump(mode="json", by_alias=True),
     )
-    repo = _StubRepo(job)
+    repo = _StubRepo(ext)
     publisher = _StubPublisher()
     webhook = _StubWebhook()
     worker = _make_worker(repo, publisher, webhook)
 
-    await worker._process(job.id)
+    await worker._process(ext.id)
 
-    assert job.status == JobStatus.SUCCEEDED.value
-    assert job.bbox_refine_status == "succeeded"
-    assert [name for name, _ in repo.calls] == ["mark_bbox_refining", "mark_bbox_refined"]
-    # No webhook delivered because the stub job has no callback_url.
+    # Main status stays succeeded; only the bbox sub-status moves.
+    assert ext.status == ExtractionStatus.SUCCEEDED.value
+    assert ext.post_processing_bbox_status == "succeeded"
+    assert [name for name, _ in repo.calls] == [
+        "claim_bbox_refinement",
+        "complete_bbox_refinement",
+    ]
+    # No webhook delivered because the stub has no callback_url.
     assert webhook.delivered == []
     # No retry was scheduled.
     assert publisher.published == []
     # The refined result should now carry source=pdf_text on the field.
-    refined = ExtractionResult.model_validate(job.result_json)
-    field_ = refined.documents[0].fields[0].fieldGroupFields[0]
+    refined = ExtractionResult.model_validate(ext.result_json)
+    field_ = refined.documents[0].field_groups[0].fields[0]
     assert field_.bbox.source == BboxSource.PDF_TEXT
 
 
 @pytest.mark.asyncio
-async def test_skips_jobs_not_in_partial_succeeded() -> None:
-    job = _StubJob(status=JobStatus.SUCCEEDED.value, result_json={})
-    repo = _StubRepo(job)
+async def test_skips_extractions_whose_bbox_leg_is_not_claimable() -> None:
+    """Main status succeeded but bbox sub-status already terminal -> no-op."""
+    ext = _StubExtraction(
+        status=ExtractionStatus.SUCCEEDED.value,
+        post_processing_bbox_status="succeeded",  # already done
+        result_json={},
+    )
+    repo = _StubRepo(ext)
     publisher = _StubPublisher()
     webhook = _StubWebhook()
     worker = _make_worker(repo, publisher, webhook)
 
-    await worker._process(job.id)
+    await worker._process(ext.id)
 
-    # No state transitions, no retries, no webhooks.
-    assert repo.calls == []
+    # claim_bbox_refinement got called but returned None -- no further work.
+    assert [name for name, _ in repo.calls] == ["claim_bbox_refinement"]
     assert webhook.delivered == []
     assert publisher.published == []
 
 
 @pytest.mark.asyncio
-async def test_drops_unknown_job_id() -> None:
-    repo = _StubRepo(_StubJob(id="other"))
+async def test_drops_unknown_extraction_id() -> None:
+    repo = _StubRepo(_StubExtraction(id="other"))
     publisher = _StubPublisher()
     webhook = _StubWebhook()
     worker = _make_worker(repo, publisher, webhook)
@@ -251,20 +270,22 @@ async def test_drops_unknown_job_id() -> None:
 
 @pytest.mark.asyncio
 async def test_permanent_error_marks_failed_no_republish() -> None:
-    # Empty schema_json triggers a permanent ValueError ("missing 'documents'").
-    job = _StubJob(
+    # Empty schema_json triggers a permanent ValueError ("missing 'files'").
+    ext = _StubExtraction(
         schema_json={},
         result_json=_result_with_field("Acme").model_dump(mode="json", by_alias=True),
     )
-    repo = _StubRepo(job)
+    repo = _StubRepo(ext)
     publisher = _StubPublisher()
     webhook = _StubWebhook()
     worker = _make_worker(repo, publisher, webhook)
 
-    await worker._process(job.id)
+    await worker._process(ext.id)
 
-    assert job.status == JobStatus.PARTIAL_SUCCEEDED.value
-    assert job.bbox_refine_status == "failed"
+    # Main status untouched.
+    assert ext.status == ExtractionStatus.SUCCEEDED.value
+    # Bbox leg marked failed.
+    assert ext.post_processing_bbox_status == "failed"
     names = [name for name, _ in repo.calls]
-    assert "mark_bbox_refine_failed" in names
+    assert "fail_bbox_refinement" in names
     assert publisher.published == []  # never republish on permanent

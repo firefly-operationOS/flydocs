@@ -1,5 +1,5 @@
 # Copyright 2026 Firefly Software Solutions Inc
-"""Unit tests for :class:`JobWorker` retry hardening.
+"""Unit tests for :class:`ExtractionWorker` retry hardening.
 
 We hit the private classification helper and the backoff math directly
 rather than spinning the worker against a real queue -- the orchestration
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from flydocs.core.services.workers.job_worker import JobWorker, _is_permanent
+from flydocs.core.services.workers.job_worker import ExtractionWorker, _is_permanent
 
 # -- classification --------------------------------------------------------
 
@@ -50,13 +50,13 @@ def test_generic_runtime_error_is_retryable() -> None:
 # -- backoff math ----------------------------------------------------------
 
 
-def _worker_with(base: float, ceiling: float) -> JobWorker:
+def _worker_with(base: float, ceiling: float) -> ExtractionWorker:
     settings = MagicMock()
     settings.eda_adapter = "memory"
     settings.retry_base_delay_s = base
     settings.retry_max_delay_s = ceiling
     settings.job_max_attempts = 3
-    return JobWorker(
+    return ExtractionWorker(
         orchestrator=MagicMock(),
         repository=MagicMock(),
         event_publisher=MagicMock(),
