@@ -19,8 +19,12 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import pytest
 
 from flydocs.core.services.webhook import WebhookPublisher
-from flydocs.interfaces.dtos.webhook import JobWebhookPayload
-from flydocs.interfaces.enums.job_status import JobStatus
+from flydocs.interfaces.dtos.event import (
+    EVENT_TYPE_EXTRACTION_COMPLETED,
+    EventEnvelope,
+)
+from flydocs.interfaces.dtos.extraction import Extraction
+from flydocs.interfaces.enums.extraction_status import ExtractionStatus
 
 # ---------------------------------------------------------------------------
 # In-process webhook receiver
@@ -89,11 +93,15 @@ def receiver():
         server.server_close()
 
 
-def _payload() -> JobWebhookPayload:
-    return JobWebhookPayload(
-        job_id="01HEM2ZZ7M0Q800000000",
-        status=JobStatus.SUCCEEDED,
+def _payload() -> EventEnvelope:
+    return EventEnvelope(
+        event_type=EVENT_TYPE_EXTRACTION_COMPLETED,
         occurred_at=datetime(2026, 5, 14, 12, 0, 0, tzinfo=UTC),
+        extraction=Extraction(
+            id="ext_TEST00000000000000000000000",
+            status=ExtractionStatus.SUCCEEDED,
+            submitted_at=datetime(2026, 5, 14, 11, 59, 0, tzinfo=UTC),
+        ),
         metadata={"tenant_id": "acme"},
         result=None,
     )
@@ -117,8 +125,9 @@ async def test_webhook_delivers_and_signs(receiver) -> None:
     assert capture.path == "/webhook"
     # The body is the JSON-encoded payload.
     body = json.loads(capture.body.decode("utf-8"))
-    assert body["job_id"] == "01HEM2ZZ7M0Q800000000"
-    assert body["status"] == "SUCCEEDED"
+    assert body["event_type"] == "extraction.completed"
+    assert body["extraction"]["id"] == "ext_TEST00000000000000000000000"
+    assert body["extraction"]["status"] == "succeeded"
     # The signature header carries an HMAC-SHA256 of the body.
     sig = capture.headers.get("X-Flydocs-Signature", "")
     assert sig.startswith("sha256=")

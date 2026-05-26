@@ -1,5 +1,5 @@
 # Copyright 2026 Firefly Software Solutions Inc
-""":class:`ExtractionJobRepository` -- concurrency-safety contract.
+""":class:`ExtractionRepository` -- concurrency-safety contract.
 
 These tests exercise the atomic state-transition methods against a
 real SQLite-backed engine. SQLite serialises writers at the database
@@ -18,22 +18,22 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from flydocs.models.entities.extraction_job import Base, ExtractionJob
-from flydocs.models.repositories import ExtractionJobRepository
+from flydocs.models.entities.extraction import Base, Extraction
+from flydocs.models.repositories import ExtractionRepository
 
 
-async def _fresh_repo() -> ExtractionJobRepository:
+async def _fresh_repo() -> ExtractionRepository:
     engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     factory = async_sessionmaker(engine, expire_on_commit=False)
-    return ExtractionJobRepository(factory, engine=engine)
+    return ExtractionRepository(factory, engine=engine)
 
 
-async def _seed(repo: ExtractionJobRepository, **overrides) -> ExtractionJob:
-    job = ExtractionJob(
+async def _seed(repo: ExtractionRepository, **overrides) -> Extraction:
+    ext = Extraction(
         idempotency_key=overrides.get("idempotency_key"),
-        status=overrides.get("status", "QUEUED"),
+        status=overrides.get("status", "queued"),
         filename=overrides.get("filename", "test.pdf"),
         content_sha256=overrides.get("content_sha256", "0" * 64),
         content_bytes=overrides.get("content_bytes", 1),
@@ -42,31 +42,31 @@ async def _seed(repo: ExtractionJobRepository, **overrides) -> ExtractionJob:
         metadata_json=overrides.get("metadata_json", {}),
         attempts=overrides.get("attempts", 0),
         started_at=overrides.get("started_at"),
-        bbox_refine_status=overrides.get("bbox_refine_status"),
-        bbox_refine_started_at=overrides.get("bbox_refine_started_at"),
+        post_processing_bbox_status=overrides.get("post_processing_bbox_status"),
+        post_processing_bbox_started_at=overrides.get("post_processing_bbox_started_at"),
     )
-    return await repo.add(job)
+    return await repo.add(ext)
 
 
 # --------------------------------------------------------------------- mark_running
 
 
 @pytest.mark.asyncio
-async def test_mark_running_claims_queued_job() -> None:
+async def test_mark_running_claims_queued_extraction() -> None:
     repo = await _fresh_repo()
     seeded = await _seed(repo)
 
     claimed = await repo.mark_running(seeded.id, lease_seconds=60)
 
     assert claimed is not None
-    assert claimed.status == "RUNNING"
+    assert claimed.status == "running"
     assert claimed.attempts == 1
     assert claimed.started_at is not None
 
 
 @pytest.mark.asyncio
 async def test_mark_running_rejects_already_running_with_fresh_lease() -> None:
-    """Concurrent re-claim of a job whose lease hasn't expired returns None."""
+    """Concurrent re-claim of an extraction whose lease hasn't expired returns None."""
     repo = await _fresh_repo()
     seeded = await _seed(repo)
     first = await repo.mark_running(seeded.id, lease_seconds=300)
@@ -79,30 +79,30 @@ async def test_mark_running_rejects_already_running_with_fresh_lease() -> None:
 
 @pytest.mark.asyncio
 async def test_mark_running_reclaims_stale_running_for_crash_recovery() -> None:
-    """A RUNNING job with started_at past the lease window is re-claimable."""
+    """A running extraction with started_at past the lease window is re-claimable."""
     repo = await _fresh_repo()
     # Simulate a worker that claimed long ago and crashed.
     started_ago = datetime.now(UTC) - timedelta(seconds=600)
-    seeded = await _seed(repo, status="RUNNING", started_at=started_ago, attempts=1)
+    seeded = await _seed(repo, status="running", started_at=started_ago, attempts=1)
 
     reclaimed = await repo.mark_running(seeded.id, lease_seconds=60)
 
     assert reclaimed is not None
-    assert reclaimed.status == "RUNNING"
+    assert reclaimed.status == "running"
     assert reclaimed.attempts == 2  # crash-recovery bumps attempts
 
 
 @pytest.mark.asyncio
 async def test_mark_running_skips_cancelled_succeeded_failed() -> None:
-    for terminal in ("CANCELLED", "SUCCEEDED", "FAILED"):
+    for terminal in ("cancelled", "succeeded", "failed"):
         repo = await _fresh_repo()
         seeded = await _seed(repo, status=terminal)
         result = await repo.mark_running(seeded.id, lease_seconds=60)
-        assert result is None, f"unexpectedly claimed a {terminal} job"
+        assert result is None, f"unexpectedly claimed a {terminal} extraction"
 
 
 @pytest.mark.asyncio
-async def test_mark_running_returns_none_for_missing_job() -> None:
+async def test_mark_running_returns_none_for_missing_extraction() -> None:
     repo = await _fresh_repo()
     result = await repo.mark_running("does-not-exist", lease_seconds=60)
     assert result is None
@@ -136,14 +136,14 @@ async def test_mark_cancelled_succeeds_only_for_queued() -> None:
 
     cancelled = await repo.mark_cancelled(seeded.id)
     assert cancelled is not None
-    assert cancelled.status == "CANCELLED"
+    assert cancelled.status == "cancelled"
 
 
 @pytest.mark.asyncio
-async def test_mark_cancelled_rejects_running_job() -> None:
+async def test_mark_cancelled_rejects_running_extraction() -> None:
     """The cancel/run race is settled by a single atomic UPDATE."""
     repo = await _fresh_repo()
-    seeded = await _seed(repo, status="RUNNING", started_at=datetime.now(UTC))
+    seeded = await _seed(repo, status="running", started_at=datetime.now(UTC))
 
     result = await repo.mark_cancelled(seeded.id)
     assert result is None
@@ -160,7 +160,7 @@ async def test_concurrent_cancel_vs_claim_exactly_one_wins() -> None:
         repo.mark_running(seeded.id, lease_seconds=300),
     )
     # The two transitions have disjoint preconditions -- both target
-    # QUEUED but flip the row to mutually exclusive successors. Whichever
+    # queued but flip the row to mutually exclusive successors. Whichever
     # commits first locks the row in a state the other's WHERE no longer
     # matches.
     winners = [r for r in (cancel_result, claim_result) if r is not None]
@@ -173,13 +173,13 @@ async def test_concurrent_cancel_vs_claim_exactly_one_wins() -> None:
 
 
 @pytest.mark.asyncio
-async def test_mark_succeeded_only_finalises_running_or_refining() -> None:
+async def test_mark_succeeded_only_finalises_running() -> None:
     repo = await _fresh_repo()
-    seeded = await _seed(repo, status="RUNNING", started_at=datetime.now(UTC))
+    seeded = await _seed(repo, status="running", started_at=datetime.now(UTC))
 
     finalised = await repo.mark_succeeded(seeded.id, result={"ok": True})
     assert finalised is not None
-    assert finalised.status == "SUCCEEDED"
+    assert finalised.status == "succeeded"
     assert finalised.result_json == {"ok": True}
 
     # Second mark_succeeded is a no-op.
@@ -188,13 +188,39 @@ async def test_mark_succeeded_only_finalises_running_or_refining() -> None:
 
 
 @pytest.mark.asyncio
+async def test_mark_succeeded_with_request_bbox_refinement_sets_pending() -> None:
+    """mark_succeeded(request_bbox_refinement=True) flips the bbox leg to pending atomically."""
+    repo = await _fresh_repo()
+    seeded = await _seed(repo, status="running", started_at=datetime.now(UTC))
+
+    finalised = await repo.mark_succeeded(
+        seeded.id,
+        result={"ok": True},
+        request_bbox_refinement=True,
+    )
+    assert finalised is not None
+    assert finalised.status == "succeeded"
+    assert finalised.post_processing_bbox_status == "pending"
+
+
+@pytest.mark.asyncio
+async def test_mark_succeeded_without_bbox_request_leaves_bbox_status_null() -> None:
+    repo = await _fresh_repo()
+    seeded = await _seed(repo, status="running", started_at=datetime.now(UTC))
+
+    finalised = await repo.mark_succeeded(seeded.id, result={"ok": True})
+    assert finalised is not None
+    assert finalised.post_processing_bbox_status is None
+
+
+@pytest.mark.asyncio
 async def test_mark_failed_only_finalises_running() -> None:
     repo = await _fresh_repo()
-    seeded = await _seed(repo, status="RUNNING", started_at=datetime.now(UTC))
+    seeded = await _seed(repo, status="running", started_at=datetime.now(UTC))
 
     failed = await repo.mark_failed(seeded.id, code="X", message="boom")
     assert failed is not None
-    assert failed.status == "FAILED"
+    assert failed.status == "failed"
     # Idempotent: second call returns None instead of clobbering.
     again = await repo.mark_failed(seeded.id, code="Y", message="other")
     assert again is None
@@ -204,49 +230,63 @@ async def test_mark_failed_only_finalises_running() -> None:
 
 
 @pytest.mark.asyncio
-async def test_mark_bbox_refining_claims_partial_succeeded() -> None:
+async def test_claim_bbox_refinement_starts_from_pending() -> None:
+    """Main status is succeeded + bbox sub-status pending -> running."""
     repo = await _fresh_repo()
-    seeded = await _seed(repo, status="PARTIAL_SUCCEEDED", bbox_refine_status="pending")
+    seeded = await _seed(
+        repo,
+        status="succeeded",
+        post_processing_bbox_status="pending",
+    )
 
-    claimed = await repo.mark_bbox_refining(seeded.id, lease_seconds=60)
+    claimed = await repo.claim_bbox_refinement(seeded.id, lease_seconds=60)
     assert claimed is not None
-    assert claimed.status == "REFINING_BBOXES"
-    assert claimed.bbox_refine_status == "running"
-    assert claimed.bbox_refine_attempts == 1
+    # Main status stays succeeded; only the sub-status moves.
+    assert claimed.status == "succeeded"
+    assert claimed.post_processing_bbox_status == "running"
+    assert claimed.post_processing_bbox_attempts == 1
 
 
 @pytest.mark.asyncio
-async def test_mark_bbox_refining_rejects_fresh_refining_lease() -> None:
+async def test_claim_bbox_refinement_rejects_fresh_running_lease() -> None:
     repo = await _fresh_repo()
-    seeded = await _seed(repo, status="PARTIAL_SUCCEEDED", bbox_refine_status="pending")
-    first = await repo.mark_bbox_refining(seeded.id, lease_seconds=300)
+    seeded = await _seed(
+        repo,
+        status="succeeded",
+        post_processing_bbox_status="pending",
+    )
+    first = await repo.claim_bbox_refinement(seeded.id, lease_seconds=300)
     assert first is not None
-    second = await repo.mark_bbox_refining(seeded.id, lease_seconds=300)
+    second = await repo.claim_bbox_refinement(seeded.id, lease_seconds=300)
     assert second is None
 
 
 @pytest.mark.asyncio
-async def test_mark_bbox_refining_reclaims_stale_lease() -> None:
+async def test_claim_bbox_refinement_reclaims_stale_lease() -> None:
     repo = await _fresh_repo()
     long_ago = datetime.now(UTC) - timedelta(seconds=600)
     seeded = await _seed(
         repo,
-        status="REFINING_BBOXES",
-        bbox_refine_status="running",
-        bbox_refine_started_at=long_ago,
+        status="succeeded",
+        post_processing_bbox_status="running",
+        post_processing_bbox_started_at=long_ago,
     )
-    reclaimed = await repo.mark_bbox_refining(seeded.id, lease_seconds=60)
+    reclaimed = await repo.claim_bbox_refinement(seeded.id, lease_seconds=60)
     assert reclaimed is not None
-    assert reclaimed.bbox_refine_attempts == 1
+    assert reclaimed.post_processing_bbox_attempts == 1
 
 
 @pytest.mark.asyncio
-async def test_concurrent_bbox_refining_one_winner() -> None:
+async def test_concurrent_claim_bbox_refinement_one_winner() -> None:
     repo = await _fresh_repo()
-    seeded = await _seed(repo, status="PARTIAL_SUCCEEDED", bbox_refine_status="pending")
+    seeded = await _seed(
+        repo,
+        status="succeeded",
+        post_processing_bbox_status="pending",
+    )
     results = await asyncio.gather(
-        repo.mark_bbox_refining(seeded.id, lease_seconds=300),
-        repo.mark_bbox_refining(seeded.id, lease_seconds=300),
+        repo.claim_bbox_refinement(seeded.id, lease_seconds=300),
+        repo.claim_bbox_refinement(seeded.id, lease_seconds=300),
     )
     winners = [r for r in results if r is not None]
     losers = [r for r in results if r is None]
@@ -255,38 +295,57 @@ async def test_concurrent_bbox_refining_one_winner() -> None:
 
 
 @pytest.mark.asyncio
-async def test_mark_bbox_refined_only_from_refining() -> None:
+async def test_complete_bbox_refinement_only_from_running() -> None:
     repo = await _fresh_repo()
     now = datetime.now(UTC)
     seeded = await _seed(
         repo,
-        status="REFINING_BBOXES",
-        bbox_refine_status="running",
-        bbox_refine_started_at=now,
+        status="succeeded",
+        post_processing_bbox_status="running",
+        post_processing_bbox_started_at=now,
     )
-    finalised = await repo.mark_bbox_refined(seeded.id, result={"grounded": True})
+    finalised = await repo.complete_bbox_refinement(seeded.id, result={"grounded": True})
     assert finalised is not None
-    assert finalised.status == "SUCCEEDED"
-    assert finalised.bbox_refine_status == "succeeded"
+    # Main status was already succeeded; sub-status flips to succeeded.
+    assert finalised.status == "succeeded"
+    assert finalised.post_processing_bbox_status == "succeeded"
+    assert finalised.result_json == {"grounded": True}
 
 
 @pytest.mark.asyncio
-async def test_requeue_bbox_refine_only_from_refining() -> None:
+async def test_requeue_bbox_refinement_only_from_running() -> None:
     repo = await _fresh_repo()
     now = datetime.now(UTC)
     seeded = await _seed(
         repo,
-        status="REFINING_BBOXES",
-        bbox_refine_status="running",
-        bbox_refine_started_at=now,
+        status="succeeded",
+        post_processing_bbox_status="running",
+        post_processing_bbox_started_at=now,
     )
-    requeued = await repo.requeue_bbox_refine(seeded.id)
+    requeued = await repo.requeue_bbox_refinement(seeded.id)
     assert requeued is not None
-    assert requeued.status == "PARTIAL_SUCCEEDED"
-    assert requeued.bbox_refine_status == "pending"
+    assert requeued.status == "succeeded"
+    assert requeued.post_processing_bbox_status == "pending"
 
-    again = await repo.requeue_bbox_refine(seeded.id)
+    again = await repo.requeue_bbox_refinement(seeded.id)
     assert again is None
+
+
+@pytest.mark.asyncio
+async def test_fail_bbox_refinement_only_from_running() -> None:
+    repo = await _fresh_repo()
+    now = datetime.now(UTC)
+    seeded = await _seed(
+        repo,
+        status="succeeded",
+        post_processing_bbox_status="running",
+        post_processing_bbox_started_at=now,
+    )
+    failed = await repo.fail_bbox_refinement(seeded.id, code="X", message="boom")
+    assert failed is not None
+    # Main status stays succeeded; only the sub-status fails.
+    assert failed.status == "succeeded"
+    assert failed.post_processing_bbox_status == "failed"
 
 
 # --------------------------------------------------------------------- requeue_for_retry
@@ -295,10 +354,10 @@ async def test_requeue_bbox_refine_only_from_refining() -> None:
 @pytest.mark.asyncio
 async def test_requeue_for_retry_only_from_running() -> None:
     repo = await _fresh_repo()
-    seeded = await _seed(repo, status="RUNNING", started_at=datetime.now(UTC))
+    seeded = await _seed(repo, status="running", started_at=datetime.now(UTC))
     requeued = await repo.requeue_for_retry(seeded.id)
     assert requeued is not None
-    assert requeued.status == "QUEUED"
+    assert requeued.status == "queued"
     # A cancel that arrived while we were running can no longer be
     # racing -- the retry's next ``mark_running`` will atomically claim
     # again. Verify a redundant requeue is a no-op.
