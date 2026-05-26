@@ -155,7 +155,7 @@ class FieldValidator:
                 suffix = " [warning]" if sv.severity == "warning" else ""
                 errors.append(
                     FieldValidationError(
-                        rule=ValidationRule.STANDARD,
+                        rule=ValidationRule.VALIDATOR,
                         message=f"{sv.name.value}: {message}{suffix}",
                     )
                 )

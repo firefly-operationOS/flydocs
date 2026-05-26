@@ -8,14 +8,14 @@ import base64
 import pytest
 
 from flydocs.core.services.validation import RequestValidator
-from flydocs.interfaces.dtos.doc import DocSpec, DocType, ValidatorsSpec, VisualValidatorSpec
+from flydocs.interfaces.dtos.document_type import DocumentTypeSpec, VisualCheck
 from flydocs.interfaces.dtos.extract import (
-    DocumentInput,
     ExtractionOptions,
     ExtractionRequest,
+    FileInput,
     StageToggles,
 )
-from flydocs.interfaces.dtos.field import FieldGroup, FieldSpec
+from flydocs.interfaces.dtos.field import Field, FieldGroup
 from flydocs.interfaces.dtos.rule import (
     RuleFieldParent,
     RuleOutputSpec,
@@ -28,31 +28,31 @@ from flydocs.interfaces.enums.field_type import FieldType
 _DUMMY_B64 = base64.b64encode(b"%PDF-1.4 dummy").decode("ascii")
 
 
-def _doc(doc_type: str = "passport", *, with_visual: bool = False) -> DocSpec:
-    return DocSpec(
-        docType=DocType(documentType=doc_type, description="x", country="ES"),
-        fieldGroups=[
+def _doc(doc_type: str = "passport", *, with_visual: bool = False) -> DocumentTypeSpec:
+    return DocumentTypeSpec(
+        id=doc_type,
+        description="x",
+        country="ES",
+        field_groups=[
             FieldGroup(
-                fieldGroupName="g",
-                fieldGroupDesc="",
-                fieldGroupFields=[
-                    FieldSpec(fieldName="full_name", fieldDescription="x", fieldType=FieldType.STRING),
-                    FieldSpec(fieldName="nif", fieldDescription="x", fieldType=FieldType.STRING),
+                name="g",
+                description="",
+                fields=[
+                    Field(name="full_name", description="x", type=FieldType.STRING),
+                    Field(name="nif", description="x", type=FieldType.STRING),
                 ],
             )
         ],
-        validators=ValidatorsSpec(
-            visual=[VisualValidatorSpec(name="photo_present", description="x")] if with_visual else []
-        ),
+        visual_checks=[VisualCheck(name="photo_present", description="x")] if with_visual else [],
     )
 
 
-def _request(*, docs=None, rules=None, options=None) -> ExtractionRequest:
+def _request(*, document_types=None, rules=None, options=None) -> ExtractionRequest:
     return ExtractionRequest(
-        documents=[
-            DocumentInput(filename="x.pdf", content_base64=_DUMMY_B64, content_type="application/pdf")
+        files=[
+            FileInput(filename="x.pdf", content_base64=_DUMMY_B64, content_type="application/pdf")
         ],
-        docs=docs or [_doc()],
+        document_types=document_types or [_doc()],
         rules=rules or [],
         options=options or ExtractionOptions(),
     )
@@ -77,7 +77,7 @@ def test_valid_rule_with_field_parent(validator: RequestValidator) -> None:
         RuleSpec(
             id="r1",
             predicate="full_name is set.",
-            parents=[RuleFieldParent(parentType="field", documentType="passport", fieldNames=["full_name"])],
+            parents=[RuleFieldParent(kind="field", document_type="passport", fields=["full_name"])],
             output=RuleOutputSpec(type="boolean"),
         )
     ]
@@ -85,7 +85,7 @@ def test_valid_rule_with_field_parent(validator: RequestValidator) -> None:
     assert not report.has_errors
 
 
-# -- error: rule references unknown docType ----------------------------------
+# -- error: rule references unknown document type ----------------------------
 
 
 def test_rule_unknown_doctype(validator: RequestValidator) -> None:
@@ -93,7 +93,7 @@ def test_rule_unknown_doctype(validator: RequestValidator) -> None:
         RuleSpec(
             id="r1",
             predicate="x",
-            parents=[RuleFieldParent(parentType="field", documentType="invoice", fieldNames=["foo"])],
+            parents=[RuleFieldParent(kind="field", document_type="invoice", fields=["foo"])],
         )
     ]
     report = validator.validate(_request(rules=rules))
@@ -110,7 +110,7 @@ def test_rule_unknown_field(validator: RequestValidator) -> None:
         RuleSpec(
             id="r1",
             predicate="x",
-            parents=[RuleFieldParent(parentType="field", documentType="passport", fieldNames=["nope"])],
+            parents=[RuleFieldParent(kind="field", document_type="passport", fields=["nope"])],
         )
     ]
     report = validator.validate(_request(rules=rules))
@@ -127,11 +127,11 @@ def test_rule_unknown_validator(validator: RequestValidator) -> None:
             id="r1",
             predicate="x",
             parents=[
-                RuleValidatorParent(parentType="validator", documentType="passport", validatorName="missing")
+                RuleValidatorParent(kind="validator", document_type="passport", validator="missing")
             ],
         )
     ]
-    report = validator.validate(_request(docs=[_doc()], rules=rules))
+    report = validator.validate(_request(document_types=[_doc()], rules=rules))
     codes = [i.code for i in report.errors]
     assert "rule_unknown_validator" in codes
 
@@ -143,12 +143,12 @@ def test_rule_validator_parent_ok_when_declared(validator: RequestValidator) -> 
             predicate="x",
             parents=[
                 RuleValidatorParent(
-                    parentType="validator", documentType="passport", validatorName="photo_present"
+                    kind="validator", document_type="passport", validator="photo_present"
                 )
             ],
         )
     ]
-    report = validator.validate(_request(docs=[_doc(with_visual=True)], rules=rules))
+    report = validator.validate(_request(document_types=[_doc(with_visual=True)], rules=rules))
     assert not report.has_errors
 
 
@@ -160,7 +160,7 @@ def test_rule_unknown_parent_rule(validator: RequestValidator) -> None:
         RuleSpec(
             id="r1",
             predicate="x",
-            parents=[RuleRuleParent(parentType="rule", ruleId="ghost")],
+            parents=[RuleRuleParent(kind="rule", rule="ghost")],
         )
     ]
     report = validator.validate(_request(rules=rules))
@@ -176,7 +176,7 @@ def test_rule_self_reference(validator: RequestValidator) -> None:
         RuleSpec(
             id="r1",
             predicate="x",
-            parents=[RuleRuleParent(parentType="rule", ruleId="r1")],
+            parents=[RuleRuleParent(kind="rule", rule="r1")],
         )
     ]
     report = validator.validate(_request(rules=rules))
@@ -189,8 +189,8 @@ def test_rule_self_reference(validator: RequestValidator) -> None:
 
 def test_rule_cycle(validator: RequestValidator) -> None:
     rules = [
-        RuleSpec(id="a", predicate="x", parents=[RuleRuleParent(parentType="rule", ruleId="b")]),
-        RuleSpec(id="b", predicate="x", parents=[RuleRuleParent(parentType="rule", ruleId="a")]),
+        RuleSpec(id="a", predicate="x", parents=[RuleRuleParent(kind="rule", rule="b")]),
+        RuleSpec(id="b", predicate="x", parents=[RuleRuleParent(kind="rule", rule="a")]),
     ]
     report = validator.validate(_request(rules=rules))
     codes = [i.code for i in report.errors]
@@ -210,12 +210,12 @@ def test_duplicate_rule_id(validator: RequestValidator) -> None:
     assert "duplicate_rule_id" in codes
 
 
-# -- error: duplicate docType across docs[] ----------------------------------
+# -- error: duplicate document type across document_types[] ------------------
 
 
 def test_duplicate_document_type(validator: RequestValidator) -> None:
-    docs = [_doc("passport"), _doc("passport")]
-    report = validator.validate(_request(docs=docs))
+    document_types = [_doc("passport"), _doc("passport")]
+    report = validator.validate(_request(document_types=document_types))
     codes = [i.code for i in report.errors]
     assert "duplicate_document_type" in codes
 
@@ -242,12 +242,12 @@ def test_splitter_single_doc_is_warning_only(validator: RequestValidator) -> Non
     assert "splitter_single_doc" in codes
 
 
-# -- warning: visual_authenticity on but no visual validators ----------------
+# -- warning: visual_authenticity on but no visual checks --------------------
 
 
 def test_visual_auth_without_validators_is_warning_only(validator: RequestValidator) -> None:
     options = ExtractionOptions(stages=StageToggles(visual_authenticity=True))
-    report = validator.validate(_request(docs=[_doc()], options=options))
+    report = validator.validate(_request(document_types=[_doc()], options=options))
     assert not report.has_errors
     codes = [i.code for i in report.warnings]
     assert "visual_authenticity_no_validators" in codes
