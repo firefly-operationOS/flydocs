@@ -1,5 +1,11 @@
 # Copyright 2026 Firefly Software Solutions Inc
-"""``GetJobResultHandler`` -- partial result reads + wait_for_bboxes long-poll."""
+"""``GetExtractionResultHandler`` -- final result reads + post-processing long-poll.
+
+In v1 only ``succeeded`` carries a readable result. Bbox refinement is
+purely additive post-processing on an already-succeeded result: the
+result is already returnable, the optional ``wait_for_post_processing``
+flag lets callers block until the bbox leg lands in a terminal state.
+"""
 
 from __future__ import annotations
 
@@ -10,136 +16,159 @@ from typing import Any
 
 import pytest
 
-from flydocs.core.services.jobs.get_job_result_handler import (
-    GetJobResultHandler,
-    GetJobResultQuery,
-    JobNotReady,
+from flydocs.core.services.extractions.get_extraction_result_handler import (
+    ExtractionNotReady,
+    GetExtractionResultHandler,
+    GetExtractionResultQuery,
 )
-from flydocs.interfaces.dtos.extract import ExtractionResult
-from flydocs.interfaces.enums.job_status import JobStatus
+from flydocs.interfaces.dtos.extract import ExtractionResult, PipelineMeta
+from flydocs.interfaces.enums.extraction_status import (
+    ExtractionStatus,
+    PostProcessingStatus,
+)
 
 
 def _result_payload() -> dict[str, Any]:
     return ExtractionResult(
-        request_id="00000000-0000-0000-0000-000000000001",
+        id="ext_RESULT0000000000000000000000",
+        files=[],
         documents=[],
-        model="m",
-        latency_ms=10,
+        pipeline=PipelineMeta(model="m", latency_ms=10),
     ).model_dump(mode="json", by_alias=True)
 
 
 @dataclass
-class _StubJob:
-    id: str = "job-1"
-    status: str = JobStatus.SUCCEEDED.value
+class _StubExtraction:
+    id: str = "ext_TEST0000000000000000000000A"
+    status: str = ExtractionStatus.SUCCEEDED.value
     result_json: dict[str, Any] | None = field(default_factory=_result_payload)
-    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    submitted_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    post_processing_bbox_status: str | None = None
 
 
 class _StubRepo:
     """Repository stub that can flip status mid-poll to simulate the refiner."""
 
-    def __init__(self, job: _StubJob, *, flip_to: str | None = None, after_calls: int = 0) -> None:
-        self.job = job
-        self.flip_to = flip_to
+    def __init__(
+        self,
+        ext: _StubExtraction,
+        *,
+        flip_bbox_to: str | None = None,
+        after_calls: int = 0,
+    ) -> None:
+        self.ext = ext
+        self.flip_bbox_to = flip_bbox_to
         self.after_calls = after_calls
         self.calls = 0
 
-    async def get(self, job_id: str) -> _StubJob | None:
+    async def get(self, ext_id: str) -> _StubExtraction | None:
         self.calls += 1
-        if self.flip_to is not None and self.calls > self.after_calls:
-            self.job.status = self.flip_to
-        return self.job if self.job.id == job_id else None
+        if self.flip_bbox_to is not None and self.calls > self.after_calls:
+            self.ext.post_processing_bbox_status = self.flip_bbox_to
+        return self.ext if self.ext.id == ext_id else None
 
 
 @pytest.mark.asyncio
 async def test_returns_result_for_succeeded() -> None:
-    handler = GetJobResultHandler(repository=_StubRepo(_StubJob()))  # type: ignore[arg-type]
-    out = await handler.do_handle(GetJobResultQuery(job_id="job-1"))
+    handler = GetExtractionResultHandler(repository=_StubRepo(_StubExtraction()))  # type: ignore[arg-type]
+    out = await handler.do_handle(
+        GetExtractionResultQuery(extraction_id="ext_TEST0000000000000000000000A")
+    )
     assert out is not None
-    assert out.job_id == "job-1"
+    assert out.id == "ext_TEST0000000000000000000000A"
 
 
 @pytest.mark.asyncio
-async def test_returns_partial_result_when_status_partial_succeeded() -> None:
-    job = _StubJob(status=JobStatus.PARTIAL_SUCCEEDED.value)
-    handler = GetJobResultHandler(repository=_StubRepo(job))  # type: ignore[arg-type]
-    out = await handler.do_handle(GetJobResultQuery(job_id="job-1"))
+async def test_returns_result_when_bbox_leg_pending() -> None:
+    """The main pipeline is succeeded; the bbox leg is additive post-processing."""
+    ext = _StubExtraction(post_processing_bbox_status=PostProcessingStatus.PENDING.value)
+    handler = GetExtractionResultHandler(repository=_StubRepo(ext))  # type: ignore[arg-type]
+    out = await handler.do_handle(
+        GetExtractionResultQuery(extraction_id="ext_TEST0000000000000000000000A")
+    )
     assert out is not None
-    assert out.job_id == "job-1"
+    assert out.id == "ext_TEST0000000000000000000000A"
 
 
 @pytest.mark.asyncio
-async def test_returns_partial_result_when_status_refining_bboxes() -> None:
-    job = _StubJob(status=JobStatus.REFINING_BBOXES.value)
-    handler = GetJobResultHandler(repository=_StubRepo(job))  # type: ignore[arg-type]
-    out = await handler.do_handle(GetJobResultQuery(job_id="job-1"))
+async def test_returns_result_when_bbox_leg_running() -> None:
+    ext = _StubExtraction(post_processing_bbox_status=PostProcessingStatus.RUNNING.value)
+    handler = GetExtractionResultHandler(repository=_StubRepo(ext))  # type: ignore[arg-type]
+    out = await handler.do_handle(
+        GetExtractionResultQuery(extraction_id="ext_TEST0000000000000000000000A")
+    )
     assert out is not None
 
 
 @pytest.mark.asyncio
-async def test_raises_job_not_ready_for_queued() -> None:
-    job = _StubJob(status=JobStatus.QUEUED.value, result_json=None)
-    handler = GetJobResultHandler(repository=_StubRepo(job))  # type: ignore[arg-type]
-    with pytest.raises(JobNotReady) as ei:
-        await handler.do_handle(GetJobResultQuery(job_id="job-1"))
-    assert ei.value.status == JobStatus.QUEUED
+async def test_raises_not_ready_for_queued() -> None:
+    ext = _StubExtraction(status=ExtractionStatus.QUEUED.value, result_json=None)
+    handler = GetExtractionResultHandler(repository=_StubRepo(ext))  # type: ignore[arg-type]
+    with pytest.raises(ExtractionNotReady) as ei:
+        await handler.do_handle(
+            GetExtractionResultQuery(extraction_id="ext_TEST0000000000000000000000A")
+        )
+    assert ei.value.status == ExtractionStatus.QUEUED
 
 
 @pytest.mark.asyncio
-async def test_raises_job_not_ready_for_failed() -> None:
-    job = _StubJob(status=JobStatus.FAILED.value, result_json=None)
-    handler = GetJobResultHandler(repository=_StubRepo(job))  # type: ignore[arg-type]
-    with pytest.raises(JobNotReady) as ei:
-        await handler.do_handle(GetJobResultQuery(job_id="job-1"))
-    assert ei.value.status == JobStatus.FAILED
+async def test_raises_not_ready_for_failed() -> None:
+    ext = _StubExtraction(status=ExtractionStatus.FAILED.value, result_json=None)
+    handler = GetExtractionResultHandler(repository=_StubRepo(ext))  # type: ignore[arg-type]
+    with pytest.raises(ExtractionNotReady) as ei:
+        await handler.do_handle(
+            GetExtractionResultQuery(extraction_id="ext_TEST0000000000000000000000A")
+        )
+    assert ei.value.status == ExtractionStatus.FAILED
 
 
 @pytest.mark.asyncio
-async def test_returns_none_for_unknown_job() -> None:
-    handler = GetJobResultHandler(repository=_StubRepo(_StubJob(id="other")))  # type: ignore[arg-type]
-    out = await handler.do_handle(GetJobResultQuery(job_id="missing"))
+async def test_returns_none_for_unknown_extraction() -> None:
+    handler = GetExtractionResultHandler(
+        repository=_StubRepo(_StubExtraction(id="other"))  # type: ignore[arg-type]
+    )
+    out = await handler.do_handle(GetExtractionResultQuery(extraction_id="missing"))
     assert out is None
 
 
 @pytest.mark.asyncio
-async def test_wait_for_bboxes_returns_partial_at_timeout() -> None:
-    # Job stays in PARTIAL_SUCCEEDED throughout; poll should return that
-    # state (with its result) once the deadline elapses.
-    job = _StubJob(status=JobStatus.PARTIAL_SUCCEEDED.value)
-    handler = GetJobResultHandler(repository=_StubRepo(job))  # type: ignore[arg-type]
+async def test_wait_for_post_processing_returns_at_timeout() -> None:
+    """Bbox leg stays in pending; poll should return at timeout."""
+    ext = _StubExtraction(post_processing_bbox_status=PostProcessingStatus.PENDING.value)
+    handler = GetExtractionResultHandler(repository=_StubRepo(ext))  # type: ignore[arg-type]
     started = asyncio.get_running_loop().time()
     out = await handler.do_handle(
-        GetJobResultQuery(
-            job_id="job-1",
-            wait_for_bboxes=True,
+        GetExtractionResultQuery(
+            extraction_id="ext_TEST0000000000000000000000A",
+            wait_for_post_processing=True,
             timeout_s=0.3,
             poll_interval_s=0.1,
         )
     )
     elapsed = asyncio.get_running_loop().time() - started
     assert out is not None
-    assert 0.2 < elapsed < 1.0  # respected the timeout, didn't return instantly
+    assert 0.2 < elapsed < 1.0  # respected the timeout
 
 
 @pytest.mark.asyncio
-async def test_wait_for_bboxes_returns_early_when_status_flips_to_succeeded() -> None:
-    # Job starts in PARTIAL_SUCCEEDED; after 2 polls the stub flips it to
-    # SUCCEEDED -- handler should return before the timeout fires.
-    job = _StubJob(status=JobStatus.PARTIAL_SUCCEEDED.value)
-    handler = GetJobResultHandler(
-        repository=_StubRepo(job, flip_to=JobStatus.SUCCEEDED.value, after_calls=2)  # type: ignore[arg-type]
+async def test_wait_for_post_processing_returns_early_when_bbox_succeeds() -> None:
+    """Bbox leg flips from pending to succeeded mid-poll -> exit early."""
+    ext = _StubExtraction(post_processing_bbox_status=PostProcessingStatus.PENDING.value)
+    handler = GetExtractionResultHandler(
+        repository=_StubRepo(  # type: ignore[arg-type]
+            ext, flip_bbox_to=PostProcessingStatus.SUCCEEDED.value, after_calls=2
+        )
     )
     started = asyncio.get_running_loop().time()
     out = await handler.do_handle(
-        GetJobResultQuery(
-            job_id="job-1",
-            wait_for_bboxes=True,
+        GetExtractionResultQuery(
+            extraction_id="ext_TEST0000000000000000000000A",
+            wait_for_post_processing=True,
             timeout_s=10.0,
             poll_interval_s=0.1,
         )
     )
     elapsed = asyncio.get_running_loop().time() - started
     assert out is not None
-    assert job.status == JobStatus.SUCCEEDED.value
+    assert ext.post_processing_bbox_status == PostProcessingStatus.SUCCEEDED.value
     assert elapsed < 5.0  # well under the 10s timeout

@@ -1,9 +1,9 @@
 # Copyright 2026 Firefly Software Solutions Inc
-""":class:`SubmitJobHandler` -- persistence shape.
+""":class:`SubmitExtractionHandler` -- persistence shape.
 
 These tests pin the contract between the REST DTO and what the worker
-later finds in ``ExtractionJob.schema_json``. Every submission writes
-a ``documents`` list (single-file submits are just a 1-element list).
+later finds in ``Extraction.schema_json``. Every submission writes a
+``files`` list (single-file submits are just a 1-element list).
 The DB row's ``filename`` column gets a summary ("first.pdf (+N more)")
 for multi-file submits and ``content_sha256`` hashes the concatenation
 of every file's bytes so idempotency still collapses identical retries.
@@ -17,46 +17,67 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from flydocs.core.services.jobs.submit_job_handler import (
-    SubmitJobCommand,
-    SubmitJobHandler,
+from flydocs.core.services.extractions.submit_extraction_handler import (
+    SubmitExtractionCommand,
+    SubmitExtractionHandler,
 )
 from flydocs.core.services.validation import ValidationReport
-from flydocs.interfaces.dtos.doc import DocSpec, DocType
-from flydocs.interfaces.dtos.extract import DocumentInput
-from flydocs.interfaces.dtos.job import SubmitJobRequest
-from flydocs.interfaces.enums.job_status import JobStatus
+from flydocs.interfaces.dtos.document_type import DocumentTypeSpec
+from flydocs.interfaces.dtos.extract import FileInput
+from flydocs.interfaces.dtos.extraction import SubmitExtractionRequest
+from flydocs.interfaces.dtos.field import Field, FieldGroup
+from flydocs.interfaces.enums.extraction_status import ExtractionStatus
+from flydocs.interfaces.enums.field_type import FieldType
 
 
 def _pdf_b64(marker: bytes) -> str:
     return base64.b64encode(b"%PDF-1.4\n" + marker + b"\n%%EOF\n").decode()
 
 
-def _doc_spec() -> DocSpec:
-    return DocSpec(
-        docType=DocType(documentType="invoice", description="test"),
-        fieldGroups=[
-            {
-                "fieldGroupName": "g",
-                "fieldGroupFields": [{"fieldName": "f", "fieldDescription": "x", "fieldType": "string"}],
-            }
+def _doc_spec() -> DocumentTypeSpec:
+    return DocumentTypeSpec(
+        id="invoice",
+        description="test",
+        field_groups=[
+            FieldGroup(
+                name="g",
+                fields=[
+                    Field(name="f", description="x", type=FieldType.STRING),
+                ],
+            )
         ],
     )
 
 
-def _handler() -> tuple[SubmitJobHandler, MagicMock, MagicMock]:
+def _handler() -> tuple[SubmitExtractionHandler, MagicMock, dict[str, Any]]:
     repository = MagicMock()
     repository.get_by_idempotency_key = AsyncMock(return_value=None)
 
     captured: dict[str, Any] = {}
 
-    async def _add(job: Any) -> Any:
-        captured["job"] = job
-        job.id = "test-job-id"
+    async def _add(ext: Any) -> Any:
+        captured["ext"] = ext
+        ext.id = "ext_TEST00000000000000000000000"
         from datetime import UTC, datetime
 
-        job.created_at = datetime.now(UTC)
-        return job
+        ext.submitted_at = datetime.now(UTC)
+        # Defaults the projector reads from a real row.
+        for attr, default in (
+            ("started_at", None),
+            ("finished_at", None),
+            ("attempts", 0),
+            ("error_code", None),
+            ("error_message", None),
+            ("post_processing_bbox_status", None),
+            ("post_processing_bbox_attempts", 0),
+            ("post_processing_bbox_started_at", None),
+            ("post_processing_bbox_finished_at", None),
+            ("post_processing_bbox_error_code", None),
+            ("post_processing_bbox_error_message", None),
+        ):
+            if not hasattr(ext, attr) or getattr(ext, attr) is None:
+                setattr(ext, attr, default)
+        return ext
 
     repository.add = AsyncMock(side_effect=_add)
 
@@ -67,65 +88,64 @@ def _handler() -> tuple[SubmitJobHandler, MagicMock, MagicMock]:
     validator.validate = MagicMock(return_value=ValidationReport(issues=[]))
 
     settings = MagicMock()
-    settings.jobs_topic = "jobs.extract"
-    settings.jobs_event_type = "job.submitted"
+    settings.jobs_topic = "extractions.queue"
 
-    handler = SubmitJobHandler(
+    handler = SubmitExtractionHandler(
         repository=repository,
         event_publisher=publisher,
         validator=validator,
         settings=settings,
     )
-    return handler, repository, captured  # type: ignore[return-value]
+    return handler, repository, captured
 
 
 @pytest.mark.asyncio
-async def test_single_file_submit_persists_documents_list() -> None:
-    """A 1-element ``documents`` list is the only shape we accept."""
+async def test_single_file_submit_persists_files_list() -> None:
+    """A 1-element ``files`` list is the only shape we accept."""
     handler, _, captured = _handler()
-    request = SubmitJobRequest(
-        documents=[
-            DocumentInput(
+    request = SubmitExtractionRequest(
+        files=[
+            FileInput(
                 filename="invoice.pdf",
                 content_base64=_pdf_b64(b"alpha"),
                 content_type="application/pdf",
             )
         ],
-        docs=[_doc_spec()],
+        document_types=[_doc_spec()],
     )
-    response = await handler.do_handle(SubmitJobCommand(request=request))
+    response = await handler.do_handle(SubmitExtractionCommand(request=request))
 
-    assert response.status is JobStatus.QUEUED
-    job = captured["job"]
-    assert job.filename == "invoice.pdf"
-    assert "documents" in job.schema_json
-    assert len(job.schema_json["documents"]) == 1
-    assert job.schema_json["documents"][0]["filename"] == "invoice.pdf"
-    assert job.content_bytes > 0
+    assert response.status is ExtractionStatus.QUEUED
+    ext = captured["ext"]
+    assert ext.filename == "invoice.pdf"
+    assert "files" in ext.schema_json
+    assert len(ext.schema_json["files"]) == 1
+    assert ext.schema_json["files"][0]["filename"] == "invoice.pdf"
+    assert ext.content_bytes > 0
 
 
 @pytest.mark.asyncio
-async def test_multi_file_submit_persists_documents_list() -> None:
+async def test_multi_file_submit_persists_files_list() -> None:
     handler, _, captured = _handler()
-    request = SubmitJobRequest(
-        documents=[
-            DocumentInput(
+    request = SubmitExtractionRequest(
+        files=[
+            FileInput(
                 filename=f"deed_{i}.pdf",
                 content_base64=_pdf_b64(bytes([0x30 + i])),
                 content_type="application/pdf",
             )
             for i in range(3)
         ],
-        docs=[_doc_spec()],
+        document_types=[_doc_spec()],
     )
-    await handler.do_handle(SubmitJobCommand(request=request))
+    await handler.do_handle(SubmitExtractionCommand(request=request))
 
-    job = captured["job"]
-    assert job.filename.startswith("deed_0.pdf")
-    assert "(+2 more)" in job.filename
-    assert "documents" in job.schema_json
-    assert len(job.schema_json["documents"]) == 3
-    for entry in job.schema_json["documents"]:
+    ext = captured["ext"]
+    assert ext.filename.startswith("deed_0.pdf")
+    assert "(+2 more)" in ext.filename
+    assert "files" in ext.schema_json
+    assert len(ext.schema_json["files"]) == 3
+    for entry in ext.schema_json["files"]:
         assert entry["content_type"] == "application/pdf"
         assert entry["filename"].startswith("deed_")
         assert entry["content_base64"]
@@ -137,22 +157,30 @@ async def test_multi_file_idempotency_hash_includes_every_file() -> None:
     handler_a, _, captured_a = _handler()
     handler_b, _, captured_b = _handler()
     files = [
-        DocumentInput(
+        FileInput(
             filename=f"d_{i}.pdf",
             content_base64=_pdf_b64(bytes([0x40 + i])),
             content_type="application/pdf",
         )
         for i in range(2)
     ]
-    await handler_a.do_handle(SubmitJobCommand(request=SubmitJobRequest(documents=files, docs=[_doc_spec()])))
-    await handler_b.do_handle(SubmitJobCommand(request=SubmitJobRequest(documents=files, docs=[_doc_spec()])))
-    assert captured_a["job"].content_sha256 == captured_b["job"].content_sha256
+    await handler_a.do_handle(
+        SubmitExtractionCommand(
+            request=SubmitExtractionRequest(files=files, document_types=[_doc_spec()])
+        )
+    )
+    await handler_b.do_handle(
+        SubmitExtractionCommand(
+            request=SubmitExtractionRequest(files=files, document_types=[_doc_spec()])
+        )
+    )
+    assert captured_a["ext"].content_sha256 == captured_b["ext"].content_sha256
 
 
-def test_request_rejects_empty_documents() -> None:
-    """``documents`` is required and must have at least one entry."""
+def test_request_rejects_empty_files() -> None:
+    """``files`` is required and must have at least one entry."""
     with pytest.raises(ValueError):
-        SubmitJobRequest(documents=[], docs=[_doc_spec()])
+        SubmitExtractionRequest(files=[], document_types=[_doc_spec()])
 
 
 @pytest.mark.asyncio
@@ -169,16 +197,25 @@ async def test_concurrent_idempotent_submit_resolves_winning_row() -> None:
 
     from sqlalchemy.exc import IntegrityError
 
-    from flydocs.interfaces.dtos.job import SubmitJobResponse  # noqa: F401
-
-    handler, repository, captured = _handler()
+    handler, repository, _ = _handler()
 
     # First call: SELECT returns None, INSERT raises IntegrityError, then
     # the recovery path SELECTs again and finds the winning row.
     winning_row = MagicMock()
-    winning_row.id = "winner-job-id"
-    winning_row.status = JobStatus.QUEUED.value
-    winning_row.created_at = datetime.now(UTC)
+    winning_row.id = "ext_WIN00000000000000000000000"
+    winning_row.status = ExtractionStatus.QUEUED.value
+    winning_row.submitted_at = datetime.now(UTC)
+    winning_row.started_at = None
+    winning_row.finished_at = None
+    winning_row.attempts = 0
+    winning_row.error_code = None
+    winning_row.error_message = None
+    winning_row.post_processing_bbox_status = None
+    winning_row.post_processing_bbox_attempts = 0
+    winning_row.post_processing_bbox_started_at = None
+    winning_row.post_processing_bbox_finished_at = None
+    winning_row.post_processing_bbox_error_code = None
+    winning_row.post_processing_bbox_error_message = None
 
     select_calls = {"n": 0}
 
@@ -192,20 +229,22 @@ async def test_concurrent_idempotent_submit_resolves_winning_row() -> None:
     repository.IntegrityError = IntegrityError
     repository.add = AsyncMock(side_effect=IntegrityError("", None, None))
 
-    request = SubmitJobRequest(
-        documents=[
-            DocumentInput(
+    request = SubmitExtractionRequest(
+        files=[
+            FileInput(
                 filename="invoice.pdf",
                 content_base64=_pdf_b64(b"x"),
                 content_type="application/pdf",
             )
         ],
-        docs=[_doc_spec()],
+        document_types=[_doc_spec()],
     )
-    response = await handler.do_handle(SubmitJobCommand(request=request, idempotency_key="dupe-key"))
+    response = await handler.do_handle(
+        SubmitExtractionCommand(request=request, idempotency_key="dupe-key")
+    )
 
-    assert response.job_id == "winner-job-id"
-    assert response.status is JobStatus.QUEUED
+    assert response.id == "ext_WIN00000000000000000000000"
+    assert response.status is ExtractionStatus.QUEUED
     # Two SELECTs: pre-INSERT probe + post-IntegrityError recovery probe.
     assert select_calls["n"] == 2
 
@@ -215,20 +254,20 @@ async def test_idempotent_submit_reraises_if_no_winner_resolved() -> None:
     """IntegrityError with no recoverable row re-raises (vanishingly rare)."""
     from sqlalchemy.exc import IntegrityError
 
-    handler, repository, captured = _handler()
+    handler, repository, _ = _handler()
     repository.get_by_idempotency_key = AsyncMock(return_value=None)
     repository.IntegrityError = IntegrityError
     repository.add = AsyncMock(side_effect=IntegrityError("", None, None))
 
-    request = SubmitJobRequest(
-        documents=[
-            DocumentInput(
+    request = SubmitExtractionRequest(
+        files=[
+            FileInput(
                 filename="invoice.pdf",
                 content_base64=_pdf_b64(b"x"),
                 content_type="application/pdf",
             )
         ],
-        docs=[_doc_spec()],
+        document_types=[_doc_spec()],
     )
     with pytest.raises(IntegrityError):
-        await handler.do_handle(SubmitJobCommand(request=request, idempotency_key="k"))
+        await handler.do_handle(SubmitExtractionCommand(request=request, idempotency_key="k"))

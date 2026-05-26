@@ -1,11 +1,10 @@
 # Copyright 2026 Firefly Software Solutions Inc
-""":class:`ListJobsHandler` -- pagination + filter contract.
+""":class:`ListExtractionsHandler` -- pagination + filter contract.
 
-The handler delegates to ``ExtractionJobRepository.list_jobs``; here
+The handler delegates to ``ExtractionRepository.list_extractions``; here
 we mock the repository and assert (a) the right filter args travel
-through, (b) the row mapping into :class:`JobStatusResponse` is
-faithful, and (c) ``total`` reflects the filtered set independent of
-``limit``.
+through, (b) the row mapping into :class:`Extraction` is faithful, and
+(c) ``total`` reflects the filtered set independent of ``limit``.
 """
 
 from __future__ import annotations
@@ -16,29 +15,32 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from flydocs.core.services.jobs.list_jobs_handler import (
-    ListJobsHandler,
-    ListJobsQuery,
+from flydocs.core.services.extractions.list_extractions_handler import (
+    ListExtractionsHandler,
+    ListExtractionsQuery,
 )
-from flydocs.interfaces.enums.job_status import JobStatus
+from flydocs.interfaces.enums.extraction_status import (
+    ExtractionStatus,
+    PostProcessingStatus,
+)
 
 
 def _row(**overrides):
     base = {
-        "id": "job-1",
-        "status": "SUCCEEDED",
-        "created_at": datetime(2026, 5, 15, 10, 0, tzinfo=UTC),
+        "id": "ext_TEST00000000000000000000001",
+        "status": "succeeded",
+        "submitted_at": datetime(2026, 5, 15, 10, 0, tzinfo=UTC),
         "started_at": datetime(2026, 5, 15, 10, 0, 1, tzinfo=UTC),
         "finished_at": datetime(2026, 5, 15, 10, 1, tzinfo=UTC),
         "attempts": 1,
         "error_code": None,
         "error_message": None,
-        "bbox_refine_status": None,
-        "bbox_refine_attempts": 0,
-        "bbox_refine_started_at": None,
-        "bbox_refine_finished_at": None,
-        "bbox_refine_error_code": None,
-        "bbox_refine_error_message": None,
+        "post_processing_bbox_status": None,
+        "post_processing_bbox_attempts": 0,
+        "post_processing_bbox_started_at": None,
+        "post_processing_bbox_finished_at": None,
+        "post_processing_bbox_error_code": None,
+        "post_processing_bbox_error_message": None,
     }
     base.update(overrides)
     return SimpleNamespace(**base)
@@ -47,69 +49,77 @@ def _row(**overrides):
 @pytest.mark.asyncio
 async def test_passes_filters_through_and_maps_rows() -> None:
     repository = MagicMock()
-    repository.list_jobs = AsyncMock(
+    repository.list_extractions = AsyncMock(
         return_value=(
             [
-                _row(id="job-1", status="SUCCEEDED"),
+                _row(id="ext_AAA00000000000000000000001", status="succeeded"),
                 _row(
-                    id="job-2",
-                    status="PARTIAL_SUCCEEDED",
-                    bbox_refine_status="pending",
+                    id="ext_BBB00000000000000000000002",
+                    status="succeeded",
+                    post_processing_bbox_status="pending",
                 ),
             ],
             42,  # total across the filter
         )
     )
-    handler = ListJobsHandler(repository=repository)
+    handler = ListExtractionsHandler(repository=repository)
 
     response = await handler.do_handle(
-        ListJobsQuery(
-            statuses=(JobStatus.SUCCEEDED, JobStatus.PARTIAL_SUCCEEDED),
-            bbox_refine_statuses=("pending",),
+        ListExtractionsQuery(
+            statuses=(ExtractionStatus.SUCCEEDED,),
+            post_processing_statuses=(PostProcessingStatus.PENDING,),
             created_after=datetime(2026, 5, 15, tzinfo=UTC),
             limit=2,
             offset=0,
         )
     )
 
-    repository.list_jobs.assert_awaited_once()
-    kwargs = repository.list_jobs.await_args.kwargs
-    assert kwargs["statuses"] == ["SUCCEEDED", "PARTIAL_SUCCEEDED"]
-    assert kwargs["bbox_refine_statuses"] == ["pending"]
+    repository.list_extractions.assert_awaited_once()
+    kwargs = repository.list_extractions.await_args.kwargs
+    assert kwargs["statuses"] == ["succeeded"]
+    assert kwargs["post_processing_bbox_statuses"] == ["pending"]
     assert kwargs["limit"] == 2
     assert kwargs["offset"] == 0
 
     assert response.total == 42  # filtered total, not limited
     assert response.limit == 2
     assert response.offset == 0
-    assert [i.job_id for i in response.items] == ["job-1", "job-2"]
-    assert response.items[0].status is JobStatus.SUCCEEDED
-    assert response.items[1].status is JobStatus.PARTIAL_SUCCEEDED
-    assert response.items[1].bbox_refine_status == "pending"
+    assert [i.id for i in response.items] == [
+        "ext_AAA00000000000000000000001",
+        "ext_BBB00000000000000000000002",
+    ]
+    assert response.items[0].status is ExtractionStatus.SUCCEEDED
+    assert response.items[1].status is ExtractionStatus.SUCCEEDED
+    # The second row carries a post_processing block with pending status.
+    assert response.items[1].post_processing is not None
+    assert (
+        response.items[1].post_processing.bbox_refinement.status
+        is PostProcessingStatus.PENDING
+    )
 
 
 @pytest.mark.asyncio
 async def test_empty_filter_lists_passes_none_to_repository() -> None:
     """Empty tuples should become ``None`` so the repository builds no SQL clause."""
     repository = MagicMock()
-    repository.list_jobs = AsyncMock(return_value=([], 0))
-    handler = ListJobsHandler(repository=repository)
+    repository.list_extractions = AsyncMock(return_value=([], 0))
+    handler = ListExtractionsHandler(repository=repository)
 
-    await handler.do_handle(ListJobsQuery())
+    await handler.do_handle(ListExtractionsQuery())
 
-    kwargs = repository.list_jobs.await_args.kwargs
+    kwargs = repository.list_extractions.await_args.kwargs
     assert kwargs["statuses"] is None
-    assert kwargs["bbox_refine_statuses"] is None
+    assert kwargs["post_processing_bbox_statuses"] is None
     assert kwargs["idempotency_key"] is None
 
 
 @pytest.mark.asyncio
 async def test_pagination_defaults() -> None:
     repository = MagicMock()
-    repository.list_jobs = AsyncMock(return_value=([], 0))
-    handler = ListJobsHandler(repository=repository)
+    repository.list_extractions = AsyncMock(return_value=([], 0))
+    handler = ListExtractionsHandler(repository=repository)
 
-    response = await handler.do_handle(ListJobsQuery())
+    response = await handler.do_handle(ListExtractionsQuery())
 
     assert response.limit == 50
     assert response.offset == 0
