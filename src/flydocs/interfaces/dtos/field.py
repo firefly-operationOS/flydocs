@@ -1,127 +1,134 @@
 # Copyright 2026 Firefly Software Solutions Inc
 """Field-level DTOs -- schema in, extraction out.
 
-The request side groups fields under a named :class:`FieldGroup` (for
-example ``personal``, ``billing``) and supports JSON-Schema-style
-constraints plus an extensible :class:`StandardValidatorSpec` list per
-field. The response side carries the parallel :class:`ExtractedField`
-structure with confidence, page, bounding box, judge verdict, and
-field-validation result. Array fields (repeating rows of sub-fields)
-are supported recursively.
+One recursive :class:`Field` handles primitives, arrays, and nested
+objects. Arrays require ``items`` (a single ``Field`` describing the row
+shape, typically of type ``object``); objects require ``fields`` (a list
+of ``Field`` members); primitives forbid both.
+
+The response side carries :class:`ExtractedField` with the same recursion.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field as _PydField, model_validator
 
 from flydocs.interfaces.dtos.bbox import BoundingBox
-from flydocs.interfaces.dtos.standard_validator import StandardValidatorSpec
+from flydocs.interfaces.dtos.validator import ValidatorSpec
 from flydocs.interfaces.enums.field_type import FieldType, StandardFormat
 from flydocs.interfaces.enums.status import JudgeStatus, ValidationRule
 
+
 # ---------------------------------------------------------------------------
-# REQUEST side -- the schema the caller submits
+# REQUEST SIDE -- the schema the caller submits
 # ---------------------------------------------------------------------------
 
 
-class FieldItem(BaseModel):
-    """One sub-field inside an array field (e.g. a column of a line-items table)."""
+class Field(BaseModel):
+    """One field in a schema. Recursive for arrays and objects."""
 
-    fieldName: str = Field(..., min_length=1)
-    fieldDescription: str = ""
-    fieldType: FieldType = FieldType.STRING
+    model_config = ConfigDict(extra="forbid")
 
-    pattern: str | None = None
-    format: StandardFormat | None = None
-    enum: list[Any] | None = None
-    minimum: float | None = None
-    maximum: float | None = None
-    standard_validators: list[StandardValidatorSpec] = Field(default_factory=list)
-
-
-class FieldSpec(BaseModel):
-    """One field the caller wants extracted.
-
-    For ``fieldType == array`` the ``items`` list describes the columns
-    of every repeating row. For primitive types ``items`` must be
-    empty / null.
-    """
-
-    model_config = ConfigDict(populate_by_name=True)
-
-    fieldName: str = Field(..., min_length=1, alias="name")
-    fieldDescription: str = Field(default="", alias="description")
-    fieldType: FieldType = Field(default=FieldType.STRING, alias="type")
+    name: str = _PydField(..., min_length=1)
+    description: str | None = None
+    type: FieldType = FieldType.STRING
     required: bool = False
-
     pattern: str | None = None
     format: StandardFormat | None = None
     enum: list[Any] | None = None
     minimum: float | None = None
     maximum: float | None = None
-    items: list[FieldItem] | None = None
-    standard_validators: list[StandardValidatorSpec] = Field(default_factory=list)
+    items: "Field | None" = None
+    fields: "list[Field] | None" = None
+    validators: list[ValidatorSpec] = _PydField(default_factory=list)
 
     @model_validator(mode="after")
-    def _check_constraints(self) -> FieldSpec:
+    def _check_constraints(self) -> Field:
         if self.minimum is not None and self.maximum is not None and self.minimum > self.maximum:
             raise ValueError("minimum must be <= maximum")
-        if self.fieldType != FieldType.ARRAY and self.items:
-            raise ValueError("items is only valid when fieldType is array")
+
+        if self.type == FieldType.ARRAY:
+            if self.items is None:
+                raise ValueError("type 'array' requires items")
+            if self.fields is not None:
+                raise ValueError("type 'array' must not set fields")
+        elif self.type == FieldType.OBJECT:
+            if not self.fields:
+                raise ValueError("type 'object' requires fields (non-empty list)")
+            if self.items is not None:
+                raise ValueError("type 'object' must not set items")
+        else:
+            if self.items is not None:
+                raise ValueError(f"type '{self.type.value}' must not set items")
+            if self.fields is not None:
+                raise ValueError(f"type '{self.type.value}' must not set fields")
         return self
 
 
+Field.model_rebuild()
+
+
 class FieldGroup(BaseModel):
-    fieldGroupName: str = Field(..., min_length=1)
-    fieldGroupDesc: str = ""
-    fieldGroupFields: list[FieldSpec] = Field(..., min_length=1)
+    """A named bundle of fields the service extracts together."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = _PydField(..., min_length=1)
+    description: str | None = None
+    fields: list[Field] = _PydField(..., min_length=1)
 
 
 # ---------------------------------------------------------------------------
-# RESPONSE side -- the structure returned alongside each extracted value
+# RESPONSE SIDE -- structure returned alongside each extracted value
 # ---------------------------------------------------------------------------
 
 
 class FieldValidationError(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     rule: ValidationRule
     message: str
 
 
 class FieldValidation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     valid: bool = True
-    errors: list[FieldValidationError] = Field(default_factory=list)
+    errors: list[FieldValidationError] = _PydField(default_factory=list)
 
 
 class JudgeOutcome(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     status: JudgeStatus = JudgeStatus.UNCERTAIN
-    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
-    evidence: str = ""
-    notes: str = ""
+    confidence: float = _PydField(default=0.0, ge=0.0, le=1.0)
+    evidence: str | None = None
+    notes: str | None = None
     flag_for_review: bool = False
 
 
 class ExtractedField(BaseModel):
-    """One extracted field. Recursive: array fields contain rows of sub-fields."""
+    """One extracted field. Recursive for arrays and objects."""
 
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(extra="forbid")
 
-    fieldName: str = Field(..., alias="name")
-    fieldValueFound: str | int | float | bool | list[ExtractedField] | None = Field(
-        default=None, alias="value"
-    )
-    pagesFound: list[int] = Field(default_factory=list)
-    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
-    bbox: BoundingBox = Field(default_factory=BoundingBox.empty)
+    name: str
+    value: "str | int | float | bool | list[ExtractedField] | None" = None
+    pages: list[int] = _PydField(default_factory=list)
+    confidence: float = _PydField(default=0.0, ge=0.0, le=1.0)
+    bbox: BoundingBox | None = None
+    validation: FieldValidation = _PydField(default_factory=FieldValidation)
+    judge: JudgeOutcome = _PydField(default_factory=JudgeOutcome)
     notes: str | None = None
-    judge: JudgeOutcome = Field(default_factory=JudgeOutcome)
-    field_validation: FieldValidation = Field(default_factory=FieldValidation)
-
-
-class ExtractedFieldGroup(BaseModel):
-    fieldGroupName: str
-    fieldGroupFields: list[ExtractedField]
 
 
 ExtractedField.model_rebuild()
+
+
+class ExtractedFieldGroup(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    fields: list[ExtractedField]

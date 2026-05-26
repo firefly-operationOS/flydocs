@@ -1,6 +1,9 @@
 # Copyright 2026 Firefly Software Solutions Inc
-"""Status enums shared across nodes (validation rules, judge verdicts,
-content-authenticity verdicts)."""
+"""Status enums shared across pipeline nodes (validation rules, judge verdicts,
+content-authenticity verdicts).
+
+All values are lowercase snake_case to match the universal v1 enum convention.
+"""
 
 from __future__ import annotations
 
@@ -16,26 +19,25 @@ class ValidationRule(StrEnum):
     ENUM = "enum"
     MINIMUM = "minimum"
     MAXIMUM = "maximum"
-    STANDARD = "standard"
+    VALIDATOR = "validator"
 
 
 class JudgeStatus(StrEnum):
-    PASS = "PASS"
-    FAIL = "FAIL"
-    UNCERTAIN = "UNCERTAIN"
+    PASS = "pass"
+    FAIL = "fail"
+    UNCERTAIN = "uncertain"
 
 
 class ContentIntegrityStatus(StrEnum):
-    VALID = "VALID"
-    INVALID = "INVALID"
-    UNCERTAIN = "UNCERTAIN"
+    VALID = "valid"
+    INVALID = "invalid"
+    UNCERTAIN = "uncertain"
 
 
 class CheckStatus(StrEnum):
-    PASS = "PASS"
-    FAIL = "FAIL"
-    UNCERTAIN = "UNCERTAIN"
+    PASS = "pass"
+    FAIL = "fail"
+    UNCERTAIN = "uncertain"
 
 
-# Re-export so importers can grab everything from .status
 __all__ = ["CheckStatus", "ContentIntegrityStatus", "JudgeStatus", "ValidationRule"]
