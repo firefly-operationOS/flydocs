@@ -4,10 +4,10 @@
 Two layers:
 
   * :class:`FieldValidator` runs *after* extraction: regex, range, enum
-    and ``StandardValidator`` checks on each ExtractedField.
+    and ``ValidatorSpec`` checks on each ExtractedField.
   * :class:`RequestValidator` runs *before* the pipeline: semantic
     cross-field checks that pydantic can't express (rule parents that
-    reference unknown docTypes / fields, cycles in the rule DAG,
+    reference unknown document types / fields, cycles in the rule DAG,
     duplicate ids, etc.).
 """
 
@@ -17,10 +17,16 @@ from flydocs.core.services.validation.request_validator import (
     ValidationIssue,
     ValidationReport,
 )
+from flydocs.core.services.validation.validator_registry import (
+    ValidatorRegistry,
+    run_validator,
+)
 
 __all__ = [
     "FieldValidator",
     "RequestValidator",
     "ValidationIssue",
     "ValidationReport",
+    "ValidatorRegistry",
+    "run_validator",
 ]

@@ -21,7 +21,7 @@ from flydocs.interfaces.dtos.authenticity import (
     ContentAuthenticity,
     ContentCoherenceCheck,
 )
-from flydocs.interfaces.dtos.doc import DocSpec
+from flydocs.interfaces.dtos.document_type import DocumentTypeSpec
 from flydocs.interfaces.enums.status import CheckStatus, ContentIntegrityStatus
 
 logger = logging.getLogger(__name__)
@@ -57,14 +57,14 @@ class ContentAuthenticityChecker:
         *,
         document_bytes: bytes,
         media_type: str,
-        doc: DocSpec,
+        doc: DocumentTypeSpec,
         intention: str,
         model: str | None = None,
     ) -> ContentAuthenticity:
         prompt = self._template.render(
-            documentType=doc.docType.documentType,
-            description=doc.docType.description,
-            country=doc.docType.country,
+            documentType=doc.id,
+            description=doc.description,
+            country=doc.country,
             intention=intention,
         )
         agent: FireflyAgent[Any, _ContentOutput] = FireflyAgent(

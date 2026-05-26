@@ -14,8 +14,6 @@ review or trigger an LLM-based bbox verification step (future work).
 Heuristics, in order of priority (each maps to a verdict and a
 weighted contribution to the score):
 
-* ``empty`` -- the field has no extracted value, or the bbox is the
-  zero placeholder ``BoundingBox.empty()``. Score 0.0.
 * ``invalid`` -- corners outside ``[0, 1]``, degenerate (xmin >= xmax
   or ymin >= ymax), area exactly 0. Score 0.0.
 * ``suspicious`` -- area too big to plausibly fence a single value:
@@ -25,6 +23,9 @@ weighted contribution to the score):
 * ``poor`` -- area too small (< 0.00005, roughly < 5px at 1000px width)
   or extreme aspect ratio (height/width > 30 or < 1/30).
 * ``good`` -- everything else.
+
+In v1 fields with no extracted value carry ``bbox = None`` instead of
+a synthetic empty placeholder; the validator skips those entirely.
 
 The score combines:
 
@@ -61,27 +62,28 @@ class BboxValidator:
     def validate_groups(self, groups: list[ExtractedFieldGroup]) -> None:
         """Mutate every field's ``bbox`` in place with quality + score."""
         for group in groups:
-            for field in group.fieldGroupFields:
+            for field in group.fields:
                 self._validate_field(field)
 
     def _validate_field(self, field: ExtractedField) -> None:
+        # Recurse into nested rows for array fields before assessing
+        # this field's own bbox (which may be ``None`` for arrays).
+        if isinstance(field.value, list):
+            for child in field.value:
+                if isinstance(child, ExtractedField):
+                    self._validate_field(child)
+                    if isinstance(child.value, list):
+                        for sub in child.value:
+                            if isinstance(sub, ExtractedField):
+                                self._validate_field(sub)
         bbox = field.bbox
         if bbox is None:
             return
-        # Recurse into nested rows for array fields.
-        if isinstance(field.fieldValueFound, list):
-            for child in field.fieldValueFound:
-                if isinstance(child, ExtractedField):
-                    self._validate_field(child)
-                    if isinstance(child.fieldValueFound, list):
-                        for sub in child.fieldValueFound:
-                            if isinstance(sub, ExtractedField):
-                                self._validate_field(sub)
-        if field.fieldValueFound is None:
-            self._stamp(bbox, BboxQuality.EMPTY, 0.0)
+        if field.value is None:
+            field.bbox = None
             return
         if _is_zero_placeholder(bbox):
-            self._stamp(bbox, BboxQuality.EMPTY, 0.0)
+            field.bbox = None
             return
         verdict, score = _classify(bbox)
         self._stamp(bbox, verdict, score)

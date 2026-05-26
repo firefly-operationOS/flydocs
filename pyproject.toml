@@ -158,11 +158,11 @@ select = ["E", "F", "I", "N", "UP", "B", "SIM"]
 # ``ruleId``, …). The mixedCase fields and Exception-suffix-less
 # identifiers are intentional — renaming them would break the API.
 "src/flydocs/interfaces/**" = ["N801", "N811", "N815", "N818"]
-# Domain exceptions on the jobs CQRS handlers + the webhook publisher
-# follow the framework's exception-naming convention (no ``Error``
-# suffix); renaming them would ripple through every controller advice
-# mapping.
-"src/flydocs/core/services/jobs/**" = ["N818"]
+# Domain exceptions on the async extraction CQRS handlers + the
+# webhook publisher follow the framework's exception-naming
+# convention (no ``Error`` suffix); renaming them would ripple
+# through every controller advice mapping.
+"src/flydocs/core/services/extractions/**" = ["N818"]
 "src/flydocs/core/services/webhook/**" = ["N818"]
 # Judge re-binds the public wire-contract field names locally; same
 # justification as the interfaces package.

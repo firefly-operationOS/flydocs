@@ -22,8 +22,8 @@ from fireflyframework_agentic.prompts import PromptTemplate
 from pydantic import BaseModel, Field
 
 from flydocs.core.observability import DEFAULT_MIDDLEWARE, timed_agent_run
-from flydocs.interfaces.dtos.authenticity import VisualValidationOutcome
-from flydocs.interfaces.dtos.doc import DocSpec
+from flydocs.interfaces.dtos.authenticity import VisualCheckResult
+from flydocs.interfaces.dtos.document_type import DocumentTypeSpec
 from flydocs.interfaces.dtos.field import ExtractedField, ExtractedFieldGroup
 from flydocs.interfaces.dtos.rule import (
     RuleFieldParent,
@@ -65,9 +65,9 @@ class RuleEngine:
         self,
         rules: list[RuleSpec],
         *,
-        docs: list[DocSpec],
+        docs: list[DocumentTypeSpec],
         extracted_by_doc: dict[str, list[ExtractedFieldGroup]],
-        visual_by_doc: dict[str, list[VisualValidationOutcome]],
+        visual_by_doc: dict[str, list[VisualCheckResult]],
         intention: str,
         model: str | None = None,
     ) -> list[RuleResult]:
@@ -148,9 +148,9 @@ class RuleEngine:
                         predicate=raw.predicate
                         or (rule_by_id[raw.rule_id].predicate if raw.rule_id in rule_by_id else ""),
                         output=raw.output,
-                        summary=raw.summary,
+                        summary=raw.summary or None,
                         notes=list(raw.notes),
-                        human_revision=raw.human_revision,
+                        human_revision=raw.human_revision or None,
                     )
                 )
             sorter.done(*ready_ids)
@@ -164,10 +164,10 @@ class RuleEngine:
             parents: list[str] = []
             for parent in rule.parents:
                 if isinstance(parent, RuleRuleParent):
-                    if parent.ruleId in rule_by_id:
-                        parents.append(parent.ruleId)
+                    if parent.rule in rule_by_id:
+                        parents.append(parent.rule)
                     else:
-                        logger.warning("Rule %r references unknown parent rule %r", rule.id, parent.ruleId)
+                        logger.warning("Rule %r references unknown parent rule %r", rule.id, parent.rule)
             sorter.add(rule.id, *parents)
         return sorter
 
@@ -177,40 +177,40 @@ class RuleEngine:
     def _build_documents_context(
         self,
         active_rules: list[RuleSpec],
-        docs: list[DocSpec],
+        docs: list[DocumentTypeSpec],
         extracted_by_doc: dict[str, list[ExtractedFieldGroup]],
-        visual_by_doc: dict[str, list[VisualValidationOutcome]],
+        visual_by_doc: dict[str, list[VisualCheckResult]],
     ) -> list[dict[str, Any]]:
-        # Collect which fields/validators each rule touches per doc type.
+        # Collect which fields/validators each rule touches per document type.
         deps: dict[str, dict[str, set[str]]] = {}
         for rule in active_rules:
             for parent in rule.parents:
                 if isinstance(parent, RuleFieldParent):
-                    deps.setdefault(parent.documentType, {"fields": set(), "validators": set()})[
+                    deps.setdefault(parent.document_type, {"fields": set(), "validators": set()})[
                         "fields"
-                    ].update(parent.fieldNames)
+                    ].update(parent.fields)
                 elif isinstance(parent, RuleValidatorParent):
-                    deps.setdefault(parent.documentType, {"fields": set(), "validators": set()})[
+                    deps.setdefault(parent.document_type, {"fields": set(), "validators": set()})[
                         "validators"
-                    ].add(parent.validatorName)
+                    ].add(parent.validator)
         # Walk every required dep and emit a row per match.
         rows: list[dict[str, Any]] = []
-        spec_by_type = {d.docType.documentType: d for d in docs}
+        spec_by_type = {d.id: d for d in docs}
         for doc_type, want in deps.items():
             spec = spec_by_type.get(doc_type)
             if spec is None:
                 logger.warning("Rule references unknown documentType %r", doc_type)
                 continue
             for group in extracted_by_doc.get(doc_type, []):
-                for field in group.fieldGroupFields:
-                    if field.fieldName in want["fields"]:
+                for field in group.fields:
+                    if field.name in want["fields"]:
                         rows.append(
                             {
                                 "documentType": doc_type,
-                                "fieldGroupName": group.fieldGroupName,
-                                "fieldName": field.fieldName,
+                                "fieldGroupName": group.name,
+                                "fieldName": field.name,
                                 "fieldValueFound": _serialise_field_value(field),
-                                "field_validation": field.field_validation.model_dump(mode="json"),
+                                "field_validation": field.validation.model_dump(mode="json"),
                                 "judge": field.judge.model_dump(mode="json"),
                             }
                         )
@@ -230,28 +230,28 @@ class RuleEngine:
     def _used_by_any(self, parent_rule_id: str, active_rules: Iterable[RuleSpec]) -> bool:
         for rule in active_rules:
             for parent in rule.parents:
-                if isinstance(parent, RuleRuleParent) and parent.ruleId == parent_rule_id:
+                if isinstance(parent, RuleRuleParent) and parent.rule == parent_rule_id:
                     return True
         return False
 
 
 def _serialise_field_value(field: ExtractedField) -> Any:
-    if isinstance(field.fieldValueFound, list):
+    if isinstance(field.value, list):
         return [
             {
-                "rowName": row.fieldName,
-                # Nested ``fieldValueFound`` only carries a row of
-                # sub-fields for array-typed parents; for scalar leaves
-                # it is the value itself, which we skip here. The
-                # isinstance guard also satisfies pyright -- without it
-                # the iterator type is the full union (str / int / …).
+                "rowName": row.name,
+                # Nested ``value`` only carries a row of sub-fields for
+                # array-typed parents; for scalar leaves it is the value
+                # itself, which we skip here. The isinstance guard also
+                # satisfies pyright -- without it the iterator type is
+                # the full union (str / int / …).
                 "row": [
-                    {"fieldName": sub.fieldName, "value": sub.fieldValueFound}
-                    for sub in (row.fieldValueFound if isinstance(row.fieldValueFound, list) else [])
+                    {"fieldName": sub.name, "value": sub.value}
+                    for sub in (row.value if isinstance(row.value, list) else [])
                     if isinstance(sub, ExtractedField)
                 ],
             }
-            for row in field.fieldValueFound
+            for row in field.value
             if isinstance(row, ExtractedField)
         ]
-    return field.fieldValueFound
+    return field.value

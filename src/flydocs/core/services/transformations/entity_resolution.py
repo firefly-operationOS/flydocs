@@ -66,38 +66,36 @@ class EntityResolutionTransformer:
             )
             return None
 
-        raw = array_field.fieldValueFound if isinstance(array_field.fieldValueFound, list) else []
+        raw = array_field.value if isinstance(array_field.value, list) else []
         rows = [r for r in raw if isinstance(r, ExtractedField)]
         if not rows:
             return None
 
         merged_rows = _dedupe_rows(rows, transformation)
 
-        # Build the replacement array field. We keep the same
-        # ``fieldName`` so downstream consumers don't need to special-case
-        # the post-transformation shape. ``name=`` / ``value=`` are
-        # Pydantic aliases declared on :class:`ExtractedField`; we use
-        # them here so static type checkers don't flag the call.
+        # Build the replacement array field. We keep the same field name
+        # so downstream consumers don't need to special-case the
+        # post-transformation shape.
         new_array = ExtractedField(
-            name=array_field.fieldName,
+            name=array_field.name,
             value=merged_rows,
-            pagesFound=array_field.pagesFound,
+            pages=array_field.pages,
             confidence=array_field.confidence,
             bbox=array_field.bbox,
         )
 
         if transformation.output_group:
             new_group = ExtractedFieldGroup(
-                fieldGroupName=transformation.output_group,
-                fieldGroupFields=[new_array],
+                name=transformation.output_group,
+                fields=[new_array],
             )
             groups.append(new_group)
             return new_group
 
         # Mutate in place — replace the array field on the existing group.
-        for idx, fld in enumerate(target.fieldGroupFields):
+        for idx, fld in enumerate(target.fields):
             if fld is array_field:
-                target.fieldGroupFields[idx] = new_array
+                target.fields[idx] = new_array
                 break
         return target
 
@@ -109,15 +107,15 @@ class EntityResolutionTransformer:
 
 def _find_group(groups: list[ExtractedFieldGroup], name: str) -> ExtractedFieldGroup | None:
     for g in groups:
-        if g.fieldGroupName == name:
+        if g.name == name:
             return g
     return None
 
 
 def _find_array_field(group: ExtractedFieldGroup) -> ExtractedField | None:
     """Return the first field whose value is a list (the array row container)."""
-    for f in group.fieldGroupFields:
-        if isinstance(f.fieldValueFound, list):
+    for f in group.fields:
+        if isinstance(f.value, list):
             return f
     return None
 
@@ -138,12 +136,12 @@ def _name_tokens(value: str) -> frozenset[str]:
 
 def _row_value(row: ExtractedField, field_name: str) -> str:
     """Extract a scalar value from a row's sub-fields, by name."""
-    inner = row.fieldValueFound if isinstance(row.fieldValueFound, list) else []
+    inner = row.value if isinstance(row.value, list) else []
     for sub in inner:
         if not isinstance(sub, ExtractedField):
             continue
-        if sub.fieldName == field_name:
-            v = sub.fieldValueFound
+        if sub.name == field_name:
+            v = sub.value
             if isinstance(v, (str, int, float)):
                 return str(v).strip()
     return ""
@@ -239,30 +237,30 @@ def _canonicalise(cluster: list[ExtractedField], _t: EntityResolutionTransformat
     For each sub-field name found across the cluster, we keep the
     "most complete" value -- the longest string, or the first
     non-empty value when comparing scalars / multi-type fields. The
-    canonical row inherits its ``fieldName`` and bbox-ish metadata
-    from the first row in the cluster (the row we encountered first
-    in source order).
+    canonical row inherits its ``name`` and bbox-ish metadata from the
+    first row in the cluster (the row we encountered first in source
+    order).
     """
     if not cluster:
         # Defensive — callers ensure non-empty clusters but keep this safe.
         return ExtractedField(name="row", value=None)
 
     base = cluster[0]
-    if not isinstance(base.fieldValueFound, list):
+    if not isinstance(base.value, list):
         return base
 
     # Collect every sub-field name we've seen, preserving insertion order.
     seen_names: list[str] = []
     by_name: dict[str, list[ExtractedField]] = {}
     for row in cluster:
-        inner = row.fieldValueFound if isinstance(row.fieldValueFound, list) else []
+        inner = row.value if isinstance(row.value, list) else []
         for sub in inner:
             if not isinstance(sub, ExtractedField):
                 continue
-            if sub.fieldName not in by_name:
-                seen_names.append(sub.fieldName)
-                by_name[sub.fieldName] = []
-            by_name[sub.fieldName].append(sub)
+            if sub.name not in by_name:
+                seen_names.append(sub.name)
+                by_name[sub.name] = []
+            by_name[sub.name].append(sub)
 
     merged_subs: list[ExtractedField] = []
     for fname in seen_names:
@@ -270,9 +268,9 @@ def _canonicalise(cluster: list[ExtractedField], _t: EntityResolutionTransformat
         merged_subs.append(_pick_canonical(candidates))
 
     return ExtractedField(
-        name=base.fieldName,
+        name=base.name,
         value=merged_subs,
-        pagesFound=_merge_pages(cluster),
+        pages=_merge_pages(cluster),
         confidence=max((r.confidence for r in cluster), default=0.0),
         bbox=base.bbox,
     )
@@ -282,7 +280,7 @@ def _pick_canonical(candidates: list[ExtractedField]) -> ExtractedField:
     """Of N candidate sub-fields for the same name, return the 'best' value."""
 
     def score(sub: ExtractedField) -> tuple[int, int]:
-        v = sub.fieldValueFound
+        v = sub.value
         if isinstance(v, str):
             return (1, len(v.strip()))
         if isinstance(v, (int, float)):
@@ -297,11 +295,11 @@ def _pick_canonical(candidates: list[ExtractedField]) -> ExtractedField:
 
 
 def _merge_pages(cluster: list[ExtractedField]) -> list[int]:
-    """Union of all pagesFound across a cluster, preserving order."""
+    """Union of all pages across a cluster, preserving order."""
     seen: set[int] = set()
     out: list[int] = []
     for row in cluster:
-        for p in row.pagesFound or []:
+        for p in row.pages or []:
             if p not in seen:
                 seen.add(p)
                 out.append(p)

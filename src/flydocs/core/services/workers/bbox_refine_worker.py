@@ -1,33 +1,36 @@
 # Copyright 2026 Firefly Software Solutions Inc
-"""``BboxRefineWorker`` -- second-stage EDA worker for grounded bbox refinement.
+"""``BboxRefineWorker`` -- post-processing EDA worker for grounded bbox refinement.
 
-Subscribes to ``IDPSettings.bbox_refine_event_type`` on
-``IDPSettings.bbox_refine_topic``. Each event carries one ``job_id``
-whose main extraction has already finished with
-``JobStatus.PARTIAL_SUCCEEDED`` and whose ``options.stages.bbox_refine``
-was ``true``.
+Subscribes to ``extraction.post_processing.requested`` events.
+Each event carries one extraction whose main pipeline has already
+finished ``succeeded`` AND whose ``options.stages.bbox_refine`` was
+``true``. The bbox-leg sub-status on the row is ``pending`` when we
+get to here -- :meth:`ExtractionRepository.mark_succeeded` set it
+atomically with the main success transition.
 
 Per-event lifecycle:
 
-1. Load the job row.
-2. Skip if the job is already past ``REFINING_BBOXES`` (idempotent
-   re-delivery from at-least-once buses is normal).
-3. Transition ``PARTIAL_SUCCEEDED -> REFINING_BBOXES`` and bump the
-   refine attempts counter atomically.
+1. Load the extraction row.
+2. Skip if the bbox leg is already past ``pending`` / stale
+   ``running`` (idempotent re-delivery from at-least-once buses is
+   normal).
+3. Transition ``pending`` -> ``running`` on
+   ``post_processing_bbox_status`` (atomic claim with a lease).
 4. Re-run :class:`BinaryNormalizer` on the saved input bytes to recover
    the per-file LLM-renderable rows. (Deterministic; cheaper than
-   persisting the normalised bytes alongside the job.)
-5. For each :class:`ExtractedDocument` in the persisted result, find
-   the matching normalised binary by ``source_file`` and call
+   persisting the normalised bytes alongside the row.)
+5. For each :class:`Document` in the persisted result, find the
+   matching normalised binary by ``source_file`` and call
    :class:`BboxRefiner.refine` against that document's field groups.
-6. Re-serialise the mutated result, transition the job to
-   :class:`JobStatus.SUCCEEDED`, and fire the final webhook.
+6. Re-serialise the mutated result and transition the bbox leg to
+   ``succeeded`` (the main extraction status was already ``succeeded``).
+   Fire the post-processing-completed webhook.
 
-Failures degrade gracefully: the partial result is **never** dropped.
+Failures degrade gracefully: the result is **never** dropped.
 Retryable errors (timeouts, transient OCR engine failures) re-publish
 the same event with exponential backoff up to
 ``IDPSettings.bbox_refine_max_attempts``; permanent errors mark the
-refine leg ``failed`` and the job reverts to ``PARTIAL_SUCCEEDED`` with
+bbox leg ``failed`` and the main extraction stays ``succeeded`` with
 its LLM-bbox result intact.
 """
 
@@ -42,27 +45,30 @@ import time
 from datetime import UTC, datetime
 from typing import Any
 
-from pyfly.eda import EventEnvelope, EventPublisher
+from pyfly.eda import EventEnvelope as EdaEnvelope
+from pyfly.eda import EventPublisher
 
 from flydocs.config import IDPSettings
 from flydocs.core.observability import log_outbound
 from flydocs.core.services.bbox import BboxRefiner
 from flydocs.core.services.binary import BinaryNormalizer, NormalisedBinary
+from flydocs.core.services.extractions._projector import row_to_extraction
 from flydocs.core.services.webhook import WebhookPublisher
 from flydocs.interfaces.dtos.event import (
-    IDPBboxRefineRequestedEvent,
+    EVENT_TYPE_EXTRACTION_POST_PROCESSING_COMPLETED,
+    EVENT_TYPE_EXTRACTION_POST_PROCESSING_REQUESTED,
+    EventEnvelope,
     envelope_for_publish,
 )
 from flydocs.interfaces.dtos.extract import ExtractionResult
-from flydocs.interfaces.dtos.webhook import JobWebhookPayload
-from flydocs.interfaces.enums.job_status import JobStatus
-from flydocs.models.repositories import ExtractionJobRepository
+from flydocs.interfaces.dtos.extraction import Extraction
+from flydocs.models.repositories import ExtractionRepository
 
 logger = logging.getLogger(__name__)
 
 
-# Same permanent-error hints the JobWorker uses; the refiner can hit
-# the same provider-side failure classes via OCR adapters.
+# Same permanent-error hints the ExtractionWorker uses; the refiner can
+# hit the same provider-side failure classes via OCR adapters.
 _PERMANENT_ERROR_HINTS: tuple[str, ...] = (
     "content policy",
     "content_filter",
@@ -84,12 +90,12 @@ def _is_permanent(exc: Exception) -> bool:
 
 
 class BboxRefineWorker:
-    """Second-stage EDA consumer: ground bboxes after main extraction."""
+    """Post-processing EDA consumer: ground bboxes after main extraction."""
 
     def __init__(
         self,
         *,
-        repository: ExtractionJobRepository,
+        repository: ExtractionRepository,
         event_publisher: EventPublisher,
         webhook: WebhookPublisher,
         normalizer: BinaryNormalizer,
@@ -109,14 +115,16 @@ class BboxRefineWorker:
     async def run_forever(self) -> None:
         # Subscribe before start() -- the EDA adapters only spin up the
         # consumer loop when at least one handler is registered.
-        self._publisher.subscribe(self._settings.bbox_refine_event_type, self._on_event)
+        self._publisher.subscribe(
+            EVENT_TYPE_EXTRACTION_POST_PROCESSING_REQUESTED, self._on_event
+        )
         await self._publisher.start()
         logger.info(
             "BboxRefineWorker %s started (adapter=%s, destination=%s, event_type=%s)",
             self._consumer_id,
             self._settings.eda_adapter,
             self._settings.bbox_refine_topic,
-            self._settings.bbox_refine_event_type,
+            EVENT_TYPE_EXTRACTION_POST_PROCESSING_REQUESTED,
         )
         try:
             await self._stop.wait()
@@ -128,63 +136,64 @@ class BboxRefineWorker:
 
     # ------------------------------------------------------------------
 
-    async def _on_event(self, envelope: EventEnvelope) -> None:
-        job_id = envelope.payload.get("job_id") if isinstance(envelope.payload, dict) else None
-        if not job_id:
+    async def _on_event(self, envelope: EdaEnvelope) -> None:
+        extraction_id = _extraction_id_from_payload(envelope.payload)
+        if not extraction_id:
             logger.warning(
-                "Received %s event without job_id: %r -- dropping",
+                "Received %s event without extraction id: %r -- dropping",
                 envelope.event_type,
                 envelope.payload,
             )
             return
-        await self._process(str(job_id))
+        await self._process(extraction_id)
 
-    async def _process(self, job_id: str) -> None:
-        job = await self._repository.get(job_id)
-        if job is None:
-            logger.warning("EDA delivered unknown bbox-refine job %s -- dropping", job_id)
+    async def _process(self, extraction_id: str) -> None:
+        row = await self._repository.get(extraction_id)
+        if row is None:
+            logger.warning(
+                "EDA delivered unknown extraction %s -- dropping", extraction_id
+            )
             return
-        # Atomic claim: precondition matches PARTIAL_SUCCEEDED (first
-        # delivery) or stale REFINING_BBOXES (previous claimant crashed
-        # past its lease). Anything else -- SUCCEEDED, FAILED,
-        # fresh REFINING_BBOXES -- returns None so we treat the event
-        # as already handled and bail.
-        claimed = await self._repository.mark_bbox_refining(
-            job.id, lease_seconds=self._settings.bbox_refine_lease_s
+        # Atomic claim: precondition matches pending (first delivery) or
+        # stale running (previous claimant crashed past its lease).
+        # Anything else (succeeded / failed bbox leg, fresh running)
+        # returns None so we treat the event as already handled and bail.
+        claimed = await self._repository.claim_bbox_refinement(
+            row.id, lease_seconds=self._settings.bbox_refine_lease_s
         )
         if claimed is None:
             logger.info(
-                "Bbox refine for job %s could not be claimed (status=%s) -- "
-                "another worker owns it or the job advanced past PARTIAL_SUCCEEDED",
-                job.id,
-                job.status,
+                "Bbox refine for extraction %s could not be claimed (bbox_status=%s) -- "
+                "another worker owns it or the leg already finished",
+                row.id,
+                row.post_processing_bbox_status,
             )
             return
-        job = claimed
-        attempts = job.bbox_refine_attempts or 1
+        row = claimed
+        attempts = row.post_processing_bbox_attempts or 1
         log_outbound(
             "bbox-worker",
             op="bbox.refine",
             status="started",
             latency_ms=0.0,
-            job_id=job.id,
+            extraction_id=row.id,
             attempt=attempts,
         )
 
         started = time.monotonic()
         try:
             refined = await asyncio.wait_for(
-                self._refine_job_result(job),
+                self._refine_extraction_result(row),
                 timeout=self._settings.bbox_refine_timeout_s,
             )
-            finalised = await self._repository.mark_bbox_refined(
-                job.id, result=refined.model_dump(mode="json", by_alias=True)
+            finalised = await self._repository.complete_bbox_refinement(
+                row.id, result=refined.model_dump(mode="json", by_alias=True)
             )
             if finalised is None:
                 logger.info(
-                    "Bbox refine for job %s no longer in REFINING_BBOXES -- "
+                    "Bbox refine for extraction %s no longer in running -- "
                     "another worker finalised it, discarding our result",
-                    job.id,
+                    row.id,
                 )
                 return
             log_outbound(
@@ -192,99 +201,96 @@ class BboxRefineWorker:
                 op="bbox.refine",
                 status="ok",
                 latency_ms=(time.monotonic() - started) * 1000,
-                job_id=job.id,
+                extraction_id=row.id,
                 attempt=attempts,
             )
             await self._fire_webhook(
-                job_id=job.id,
-                status=JobStatus.SUCCEEDED,
+                extraction=row_to_extraction(finalised),
                 result=refined,
-                metadata=job.metadata_json or {},
-                callback_url=job.callback_url,
-                correlation=_extract_correlation(job.metadata_json),
-                started_at=getattr(job, "bbox_refine_started_at", None),
-                finished_at=datetime.now(UTC),
-                attempts=attempts,
+                metadata=row.metadata_json or {},
+                callback_url=row.callback_url,
+                correlation=_extract_correlation(row.metadata_json),
             )
         except Exception as exc:  # noqa: BLE001
             permanent = _is_permanent(exc)
             exhausted = attempts >= self._settings.bbox_refine_max_attempts
             terminal = permanent or exhausted
-            error_code = "PERMANENT_ERROR" if permanent else "BBOX_REFINE_FAILED"
+            error_code = "permanent_error" if permanent else "bbox_refine_failed"
             log_outbound(
                 "bbox-worker",
                 op="bbox.refine",
                 status="error",
                 latency_ms=(time.monotonic() - started) * 1000,
-                job_id=job.id,
+                extraction_id=row.id,
                 attempt=attempts,
                 permanent=permanent,
                 exhausted=exhausted,
                 error=type(exc).__name__,
             )
             if terminal:
-                failed = await self._repository.mark_bbox_refine_failed(
-                    job.id, code=error_code, message=str(exc)
+                failed = await self._repository.fail_bbox_refinement(
+                    row.id, code=error_code, message=str(exc)
                 )
                 if failed is None:
                     logger.info(
-                        "Bbox refine for job %s already past REFINING_BBOXES -- "
+                        "Bbox refine for extraction %s already past running -- "
                         "another worker handled the terminal transition",
-                        job.id,
+                        row.id,
                     )
                 # No webhook on bbox-refine permanent failure: the caller
-                # already received the ``idp.job.partial`` payload with
-                # the LLM-bbox result; nothing new to deliver.
+                # already received the ``extraction.completed`` payload
+                # with the LLM-bbox result; nothing new to deliver.
             else:
                 delay = self._backoff_delay(attempts)
                 logger.warning(
-                    "Bbox refine for job %s failed attempt %d (%s); re-publishing in %.1fs",
-                    job.id,
+                    "Bbox refine for extraction %s failed attempt %d (%s); re-publishing in %.1fs",
+                    row.id,
                     attempts,
                     exc,
                     delay,
                 )
-                # Atomically revert REFINING_BBOXES -> PARTIAL_SUCCEEDED
-                # so the next delivery's claim precondition passes. If
-                # we lost the row (another worker advanced it), skip the
-                # republish: someone else owns the lifecycle now.
-                requeued = await self._repository.requeue_bbox_refine(job.id)
+                # Atomically revert running -> pending so the next
+                # delivery's claim precondition passes. If we lost the
+                # row (another worker advanced it), skip the republish.
+                requeued = await self._repository.requeue_bbox_refinement(row.id)
                 if requeued is None:
                     logger.info(
-                        "Bbox refine for job %s not requeueable -- skipping retry",
-                        job.id,
+                        "Bbox refine for extraction %s not requeueable -- skipping retry",
+                        row.id,
                     )
                 else:
-                    asyncio.create_task(self._delayed_publish(job.id, delay))
+                    asyncio.create_task(self._delayed_publish(row.id, delay))
 
     # ------------------------------------------------------------------
 
-    async def _refine_job_result(self, job: Any) -> ExtractionResult:
-        """Reconstruct the per-document bytes + run the refiner per doc."""
-        if not job.result_json:
-            raise ValueError(f"job {job.id} has no result_json to refine")
-        result = ExtractionResult.model_validate(job.result_json)
+    async def _refine_extraction_result(self, row: Any) -> ExtractionResult:
+        """Reconstruct the per-document bytes + run the refiner per document."""
+        if not row.result_json:
+            raise ValueError(f"extraction {row.id} has no result_json to refine")
+        result = ExtractionResult.model_validate(row.result_json)
 
-        schema = job.schema_json or {}
-        # ``schema_json.documents`` carries every input file the submit
+        schema = row.schema_json or {}
+        # ``schema_json.files`` carries every input file the submit
         # handler stored: a list of ``{filename, content_base64,
-        # content_type, document_type}``. We normalise each one
+        # content_type, expected_type}``. We normalise each one
         # independently so the refiner has one :class:`NormalisedBinary`
         # row per ``source_file`` to look up.
-        documents_payload = schema.get("documents") or []
-        if not documents_payload:
-            raise ValueError(f"job {job.id} schema_json missing 'documents'")
+        files_payload = schema.get("files") or []
+        if not files_payload:
+            raise ValueError(f"extraction {row.id} schema_json missing 'files'")
         sources: list[tuple[bytes, str | None, str]] = [
             (
                 base64.b64decode(entry.get("content_base64") or ""),
                 entry.get("content_type"),
-                entry.get("filename") or job.filename,
+                entry.get("filename") or row.filename,
             )
-            for entry in documents_payload
+            for entry in files_payload
             if entry.get("content_base64")
         ]
         if not sources:
-            raise ValueError(f"job {job.id} has no decodable document bytes in schema_json")
+            raise ValueError(
+                f"extraction {row.id} has no decodable file bytes in schema_json"
+            )
 
         normalised: list[NormalisedBinary] = []
         for raw_bytes, media_type, name in sources:
@@ -299,19 +305,19 @@ class BboxRefineWorker:
         # carry their normalised filename in ``row.filename``.
         by_filename: dict[str, NormalisedBinary] = {row.filename: row for row in normalised}
 
-        language_hint = (job.options_json or {}).get("language_hint")
+        language_hint = (row.options_json or {}).get("language_hint")
 
         for document in result.documents:
-            if not document.fields:
+            if not document.field_groups:
                 continue
-            row = by_filename.get(document.source_file or "")
-            if row is None:
+            mapped = by_filename.get(document.source_file or "")
+            if mapped is None:
                 continue
             await self._refiner.refine(
-                document_bytes=row.bytes,
-                media_type=row.media_type,
-                page_count=row.page_count,
-                groups=document.fields,
+                document_bytes=mapped.bytes,
+                media_type=mapped.media_type,
+                page_count=mapped.page_count,
+                groups=document.field_groups,
                 language_hint=language_hint,
             )
         return result
@@ -324,65 +330,74 @@ class BboxRefineWorker:
         jitter = capped * 0.2 * random.random()
         return capped + jitter
 
-    async def _delayed_publish(self, job_id: str, delay_s: float) -> None:
+    async def _delayed_publish(self, extraction_id: str, delay_s: float) -> None:
         try:
             await asyncio.sleep(delay_s)
-            republish = IDPBboxRefineRequestedEvent(job_id=job_id, attempt=2)
+            row = await self._repository.get(extraction_id)
+            if row is None:
+                logger.warning(
+                    "Delayed republish: extraction %s vanished", extraction_id
+                )
+                return
+            envelope = EventEnvelope(
+                event_type=EVENT_TYPE_EXTRACTION_POST_PROCESSING_REQUESTED,
+                extraction=row_to_extraction(row),
+            )
             await self._publisher.publish(
                 destination=self._settings.bbox_refine_topic,
-                event_type=self._settings.bbox_refine_event_type,
-                payload=envelope_for_publish(republish),
+                event_type=EVENT_TYPE_EXTRACTION_POST_PROCESSING_REQUESTED,
+                payload=envelope_for_publish(envelope),
             )
             log_outbound(
                 "eda",
-                op="republish.bbox_refine",
+                op="republish.post_processing",
                 status="ok",
                 latency_ms=delay_s * 1000,
-                job_id=job_id,
+                extraction_id=extraction_id,
             )
         except Exception as exc:  # noqa: BLE001
-            logger.error("Failed to re-publish bbox refine job %s after backoff: %s", job_id, exc)
+            logger.error(
+                "Failed to re-publish bbox refine extraction %s after backoff: %s",
+                extraction_id,
+                exc,
+            )
 
     async def _fire_webhook(
         self,
         *,
-        job_id: str,
-        status: JobStatus,
+        extraction: Extraction,
         result: ExtractionResult | None,
         metadata: dict[str, Any],
         callback_url: str | None,
         correlation: dict[str, str] | None = None,
-        started_at: datetime | None = None,
-        finished_at: datetime | None = None,
-        attempts: int = 1,
-        error_code: str | None = None,
-        error_message: str | None = None,
     ) -> None:
         if not callback_url:
             return
         clean_metadata = {k: v for k, v in (metadata or {}).items() if not k.startswith("_")}
         corr = correlation or {}
-        payload = JobWebhookPayload(
-            # Bbox-refine's terminal webhook still carries the
-            # IDPJobCompleted event_type — from the consumer's POV
-            # the job has reached its FINAL terminal state at this
-            # point. The IDPBboxRefineCompleted EDA event is a
-            # separate internal signal not surfaced to webhook clients.
-            event_type="IDPJobCompleted",
-            job_id=job_id,
-            status=status,
+        envelope = EventEnvelope(
+            event_type=EVENT_TYPE_EXTRACTION_POST_PROCESSING_COMPLETED,
             occurred_at=datetime.now(UTC),
-            started_at=started_at,
-            finished_at=finished_at,
-            attempts=attempts,
             correlation_id=corr.get("X-Correlation-Id"),
             tenant_id=corr.get("X-Tenant-Id"),
-            metadata=clean_metadata,
+            extraction=extraction,
             result=result,
-            error_code=error_code,
-            error_message=error_message,
+            metadata=clean_metadata,
         )
-        await self._webhook.deliver(callback_url, payload, extra_headers=corr)
+        await self._webhook.deliver(callback_url, envelope, extra_headers=corr)
+
+
+def _extraction_id_from_payload(payload: Any) -> str | None:
+    if not isinstance(payload, dict):
+        return None
+    extraction = payload.get("extraction")
+    if isinstance(extraction, dict) and extraction.get("id"):
+        return str(extraction["id"])
+    for key in ("extraction_id", "job_id"):
+        value = payload.get(key)
+        if value:
+            return str(value)
+    return None
 
 
 def _extract_correlation(metadata: dict[str, Any] | None) -> dict[str, str]:
@@ -392,3 +407,6 @@ def _extract_correlation(metadata: dict[str, Any] | None) -> dict[str, str]:
     if not isinstance(raw, dict):
         return {}
     return {str(k): str(v) for k, v in raw.items() if v}
+
+
+__all__ = ["BboxRefineWorker"]

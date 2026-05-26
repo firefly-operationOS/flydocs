@@ -3,7 +3,7 @@
 a file and pin each one to a contiguous, non-overlapping page range.
 
 Pure segmentation: the splitter does **not** decide which caller-declared
-``DocSpec`` each segment matches -- that is the
+:class:`DocumentTypeSpec` each segment matches -- that is the
 :class:`flydocs.core.services.classification.DocumentClassifier`'s
 job. Keeping the two services separate means a single uploaded file
 that happens to contain several documents (a deed + a DNI + a utility
@@ -28,7 +28,7 @@ from fireflyframework_agentic.types import BinaryContent
 from pydantic import BaseModel, Field
 
 from flydocs.core.observability import DEFAULT_MIDDLEWARE, timed_agent_run
-from flydocs.interfaces.dtos.doc import DocSpec
+from flydocs.interfaces.dtos.document_type import DocumentTypeSpec
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +96,7 @@ class DocumentSplitter:
         document_bytes: bytes,
         media_type: str,
         page_count: int,
-        targets: list[DocSpec],
+        targets: list[DocumentTypeSpec],
         intention: str,
         model: str | None = None,
     ) -> SplitResult:
@@ -125,9 +125,9 @@ class DocumentSplitter:
         targets_json = json.dumps(
             [
                 {
-                    "documentType": d.docType.documentType,
-                    "description": d.docType.description,
-                    "country": d.docType.country,
+                    "id": d.id,
+                    "description": d.description,
+                    "country": d.country,
                 }
                 for d in targets
             ],

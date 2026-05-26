@@ -1,10 +1,10 @@
 # Copyright 2026 Firefly Software Solutions Inc
-"""Pure-Python implementations for every :class:`StandardValidatorType`.
+"""Pure-Python implementations for every :class:`ValidatorType`.
 
 Each checker is a function ``(value: Any, params: dict) -> str | None``
 that returns ``None`` on success or a human-readable error message on
 failure. The :class:`FieldValidator` looks the function up by
-``StandardValidatorType`` and runs it after the simple constraint set.
+``ValidatorType`` and runs it after the simple constraint set.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from typing import Any
 from urllib.parse import urlparse
 from uuid import UUID
 
-from flydocs.interfaces.enums.standard_validator import StandardValidatorType
+from flydocs.interfaces.enums.validator import ValidatorType
 
 # ---------------------------------------------------------------------------
 # Low-level helpers
@@ -473,43 +473,58 @@ def _check_passport_number(value: Any, _: dict) -> str | None:
 
 
 CHECKERS = {
-    StandardValidatorType.EMAIL: _check_email,
-    StandardValidatorType.URI: _check_uri,
-    StandardValidatorType.URL: _check_url,
-    StandardValidatorType.IPV4: _check_ipv4,
-    StandardValidatorType.IPV6: _check_ipv6,
-    StandardValidatorType.DOMAIN: _check_domain,
-    StandardValidatorType.SLUG: _check_slug,
-    StandardValidatorType.DATE: _check_date,
-    StandardValidatorType.DATETIME: _check_datetime,
-    StandardValidatorType.TIME: _check_time,
-    StandardValidatorType.ISO_8601: _check_iso_8601,
-    StandardValidatorType.UUID: _check_uuid,
-    StandardValidatorType.JSON: _check_json,
-    StandardValidatorType.HEX_COLOR: _check_hex_color,
-    StandardValidatorType.IBAN: _check_iban,
-    StandardValidatorType.BIC: _check_bic,
-    StandardValidatorType.CREDIT_CARD: _check_credit_card,
-    StandardValidatorType.CURRENCY_CODE: _check_currency_code,
-    StandardValidatorType.AMOUNT: _check_amount,
-    StandardValidatorType.PHONE_E164: _check_phone_e164,
-    StandardValidatorType.COUNTRY_CODE: _check_country_code,
-    StandardValidatorType.LANGUAGE_CODE: _check_language_code,
-    StandardValidatorType.POSTAL_CODE: _check_postal_code,
-    StandardValidatorType.LATITUDE: _check_latitude,
-    StandardValidatorType.LONGITUDE: _check_longitude,
-    StandardValidatorType.NIF: _check_nif,
-    StandardValidatorType.NIE: _check_nie,
-    StandardValidatorType.CIF: _check_cif,
-    StandardValidatorType.VAT_ID: _check_vat_id,
-    StandardValidatorType.SSN: _check_ssn,
-    StandardValidatorType.PASSPORT_NUMBER: _check_passport_number,
+    ValidatorType.EMAIL: _check_email,
+    ValidatorType.URI: _check_uri,
+    ValidatorType.URL: _check_url,
+    ValidatorType.IPV4: _check_ipv4,
+    ValidatorType.IPV6: _check_ipv6,
+    ValidatorType.DOMAIN: _check_domain,
+    ValidatorType.SLUG: _check_slug,
+    ValidatorType.DATE: _check_date,
+    ValidatorType.DATETIME: _check_datetime,
+    ValidatorType.TIME: _check_time,
+    ValidatorType.ISO_8601: _check_iso_8601,
+    ValidatorType.UUID: _check_uuid,
+    ValidatorType.JSON: _check_json,
+    ValidatorType.HEX_COLOR: _check_hex_color,
+    ValidatorType.IBAN: _check_iban,
+    ValidatorType.BIC: _check_bic,
+    ValidatorType.CREDIT_CARD: _check_credit_card,
+    ValidatorType.CURRENCY_CODE: _check_currency_code,
+    ValidatorType.AMOUNT: _check_amount,
+    ValidatorType.PHONE_E164: _check_phone_e164,
+    ValidatorType.COUNTRY_CODE: _check_country_code,
+    ValidatorType.LANGUAGE_CODE: _check_language_code,
+    ValidatorType.POSTAL_CODE: _check_postal_code,
+    ValidatorType.LATITUDE: _check_latitude,
+    ValidatorType.LONGITUDE: _check_longitude,
+    ValidatorType.NIF: _check_nif,
+    ValidatorType.NIE: _check_nie,
+    ValidatorType.CIF: _check_cif,
+    ValidatorType.VAT_ID: _check_vat_id,
+    ValidatorType.SSN: _check_ssn,
+    ValidatorType.PASSPORT_NUMBER: _check_passport_number,
 }
 
 
-def run_standard_validator(validator_type: StandardValidatorType, value: Any, params: dict) -> str | None:
+def run_validator(validator_type: ValidatorType, value: Any, params: dict) -> str | None:
     """Look the checker up and run it. Returns ``None`` on success."""
     checker = CHECKERS.get(validator_type)
     if checker is None:
-        return f"Unknown standard validator: {validator_type.value!r}"
+        return f"Unknown validator: {validator_type.value!r}"
     return checker(value, params)
+
+
+class ValidatorRegistry:
+    """Thin object wrapper exposing the validator catalogue as a service.
+
+    Existing callers can use ``run_validator()`` directly; this class is
+    provided for callers that prefer DI-style injection.
+    """
+
+    @staticmethod
+    def run(validator_type: ValidatorType, value: Any, params: dict) -> str | None:
+        return run_validator(validator_type, value, params)
+
+
+__all__ = ["CHECKERS", "ValidatorRegistry", "run_validator"]

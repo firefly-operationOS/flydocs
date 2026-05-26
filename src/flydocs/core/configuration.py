@@ -12,7 +12,7 @@ that is not picked up by a stereotype decorator
 (``@service``/``@rest_controller``/``@command_handler``/``@query_handler``):
 
 * Configuration: :class:`IDPSettings`
-* Infrastructure: :class:`ExtractionJobRepository`, :class:`WebhookPublisher`.
+* Infrastructure: :class:`ExtractionRepository`, :class:`WebhookPublisher`.
   The :class:`pyfly.eda.EventPublisher` is provided upstream by
   :class:`pyfly.eda.auto_configuration.EdaAutoConfiguration` (Postgres
   outbox by default; see ``pyfly.yaml``).
@@ -74,8 +74,8 @@ from flydocs.core.services.splitting import DocumentSplitter
 from flydocs.core.services.transformations import LlmTransformer, TransformationEngine
 from flydocs.core.services.validation import FieldValidator, RequestValidator
 from flydocs.core.services.webhook import WebhookPublisher
-from flydocs.core.services.workers.job_worker import JobWorker
-from flydocs.models.repositories import ExtractionJobRepository
+from flydocs.core.services.workers.job_worker import ExtractionWorker
+from flydocs.models.repositories import ExtractionRepository
 
 
 @configuration
@@ -91,8 +91,8 @@ class IDPCoreConfiguration:
         return get_settings()
 
     @bean
-    def repository(self, settings: IDPSettings) -> ExtractionJobRepository:
-        return ExtractionJobRepository.from_url(settings.database_url)
+    def repository(self, settings: IDPSettings) -> ExtractionRepository:
+        return ExtractionRepository.from_url(settings.database_url)
 
     @bean
     def webhook(self, settings: IDPSettings) -> WebhookPublisher:
@@ -113,7 +113,7 @@ class IDPCoreConfiguration:
     # ------------------------------------------------------------------
 
     @bean(name="database_health")
-    def database_health(self, repository: ExtractionJobRepository) -> SqlAlchemyHealthIndicator:
+    def database_health(self, repository: ExtractionRepository) -> SqlAlchemyHealthIndicator:
         return SqlAlchemyHealthIndicator(repository.engine)
 
     # ------------------------------------------------------------------
@@ -378,21 +378,21 @@ class IDPCoreConfiguration:
             default_model=settings.model,
         )
 
-    # ``JobWorker`` is NOT a bean. It depends on the
+    # ``ExtractionWorker`` is NOT a bean. It depends on the
     # :class:`EventPublisher` produced by pyfly's auto-configuration,
     # which is registered AFTER user @configuration classes are
     # processed. The CLI's ``flydocs worker`` command builds the
     # worker manually post-startup so the ordering is correct.
 
-    def _build_job_worker(  # noqa: PLR0913 - explicit injection for the CLI helper
+    def _build_extraction_worker(  # noqa: PLR0913 - explicit injection for the CLI helper
         self,
         orchestrator: PipelineOrchestrator,
-        repository: ExtractionJobRepository,
+        repository: ExtractionRepository,
         event_publisher: EventPublisher,
         webhook: WebhookPublisher,
         settings: IDPSettings,
-    ) -> JobWorker:
-        return JobWorker(
+    ) -> ExtractionWorker:
+        return ExtractionWorker(
             orchestrator=orchestrator,
             repository=repository,
             event_publisher=event_publisher,

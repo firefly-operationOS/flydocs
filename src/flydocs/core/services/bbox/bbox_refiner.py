@@ -82,14 +82,13 @@ class BboxRefiner:
         leaves: list[ExtractedField] = []
         targets: list[tuple[str, str, list[int] | None]] = []
         for group in groups:
-            for field in group.fieldGroupFields:
+            for field in group.fields:
                 self._collect_leaves(field, leaves)
         for idx, field in enumerate(leaves):
-            value_str = _value_as_string(field.fieldValueFound)
+            value_str = _value_as_string(field.value)
             if not value_str:
-                self._stamp_no_source(field.bbox)
                 continue
-            targets.append((str(idx), value_str, field.pagesFound or None))
+            targets.append((str(idx), value_str, field.pages or None))
 
         counters = _Counters()
         counters.fields_seen = len(leaves)
@@ -99,7 +98,7 @@ class BboxRefiner:
         # tokens / OCR CPU and risk replacing a high-confidence
         # rectangle with a weaker one. Count those as already-grounded.
         for field in leaves:
-            src = field.bbox.source
+            src = field.bbox.source if field.bbox is not None else None
             if src == BboxSource.PDF_TEXT:
                 counters.grounded_pdf_text += 1
             elif src == BboxSource.OCR:
@@ -107,7 +106,8 @@ class BboxRefiner:
         already_grounded_ids = {
             str(idx)
             for idx, field in enumerate(leaves)
-            if field.bbox.source in (BboxSource.PDF_TEXT, BboxSource.OCR)
+            if field.bbox is not None
+            and field.bbox.source in (BboxSource.PDF_TEXT, BboxSource.OCR)
         }
         residual_targets = [t for t in targets if t[0] not in already_grounded_ids]
         if residual_targets:
@@ -116,8 +116,9 @@ class BboxRefiner:
                 field = leaves[int(field_id)]
                 match = results.get(field_id)
                 if match is None:
-                    field.bbox.source = BboxSource.LLM
-                    field.bbox.refinement_confidence = None
+                    if field.bbox is not None:
+                        field.bbox.source = BboxSource.LLM
+                        field.bbox.refinement_confidence = None
                     counters.kept_llm += 1
                     continue
                 page_source = _page_source(match.page, pages)
@@ -150,8 +151,8 @@ class BboxRefiner:
 
     def _collect_leaves(self, field: ExtractedField, sink: list[ExtractedField]) -> None:
         """Flatten array parents -- only leaf scalar fields are matched."""
-        if isinstance(field.fieldValueFound, list):
-            for child in field.fieldValueFound:
+        if isinstance(field.value, list):
+            for child in field.value:
                 if isinstance(child, ExtractedField):
                     self._collect_leaves(child, sink)
             return
@@ -169,20 +170,14 @@ class BboxRefiner:
             ymin=match.ymin,
             xmax=match.xmax,
             ymax=match.ymax,
-            quality=old.quality,
-            quality_score=old.quality_score,
+            quality=old.quality if old is not None else None,
+            quality_score=old.quality_score if old is not None else 0.0,
             source=source,
             refinement_confidence=match.score,
         )
         field.bbox = new
-        if match.page not in field.pagesFound:
-            field.pagesFound = [match.page, *field.pagesFound]
-
-    @staticmethod
-    def _stamp_no_source(bbox: BoundingBox) -> None:
-        # Empty values keep the placeholder bbox but stamp the source.
-        if bbox.source is None:
-            bbox.source = BboxSource.NONE
+        if match.page not in field.pages:
+            field.pages = [match.page, *field.pages]
 
 
 @dataclass(slots=True)

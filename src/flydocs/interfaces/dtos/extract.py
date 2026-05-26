@@ -23,7 +23,6 @@ from flydocs.interfaces.dtos.field import ExtractedFieldGroup
 from flydocs.interfaces.dtos.rule import RuleResult, RuleSpec
 from flydocs.interfaces.dtos.transformation import Transformation
 
-
 # ---------------------------------------------------------------------------
 # FileInput (request)
 # ---------------------------------------------------------------------------

@@ -13,32 +13,41 @@ from typing import Any
 from pyfly.web import controller_advice, exception_handler
 
 from flydocs.core.services.binary import BinaryNormalizationError
-from flydocs.core.services.jobs.cancel_job_handler import JobNotCancellable
-from flydocs.core.services.jobs.get_job_result_handler import JobNotReady
+from flydocs.core.services.extractions.cancel_extraction_handler import (
+    ExtractionNotCancellable,
+)
+from flydocs.core.services.extractions.get_extraction_result_handler import (
+    ExtractionNotReady,
+)
 from flydocs.interfaces.dtos.error import ProblemDetails
 
 
 @controller_advice
 class ExceptionAdvice:
-    @exception_handler(JobNotReady)
-    async def job_not_ready(self, exc: JobNotReady) -> dict[str, Any]:
+    @exception_handler(ExtractionNotReady)
+    async def extraction_not_ready(self, exc: ExtractionNotReady) -> dict[str, Any]:
         problem = ProblemDetails(
-            type="https://flydocs.dev/problems/job-not-ready",
-            title="Job not ready",
+            type="https://flydocs.dev/problems/not-ready",
+            title="Extraction not ready",
             status=409,
-            code="job_not_ready",
+            code="not_ready",
             detail=str(exc),
-            extensions={"job_id": exc.job_id, "status": exc.status.value},
+            extensions={
+                "extraction_id": exc.extraction_id,
+                "status": exc.status.value,
+            },
         )
         return problem.model_dump(exclude_none=True)
 
-    @exception_handler(JobNotCancellable)
-    async def job_not_cancellable(self, exc: JobNotCancellable) -> dict[str, Any]:
+    @exception_handler(ExtractionNotCancellable)
+    async def extraction_not_cancellable(
+        self, exc: ExtractionNotCancellable
+    ) -> dict[str, Any]:
         problem = ProblemDetails(
-            type="https://flydocs.dev/problems/job-not-cancellable",
-            title="Job cannot be cancelled",
+            type="https://flydocs.dev/problems/not-cancellable",
+            title="Extraction cannot be cancelled",
             status=409,
-            code="job_not_cancellable",
+            code="not_cancellable",
             detail=str(exc),
         )
         return problem.model_dump(exclude_none=True)

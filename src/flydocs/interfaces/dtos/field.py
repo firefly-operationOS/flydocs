@@ -13,13 +13,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field as _PydField, model_validator
+from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import Field as _PydField
 
 from flydocs.interfaces.dtos.bbox import BoundingBox
 from flydocs.interfaces.dtos.validator import ValidatorSpec
 from flydocs.interfaces.enums.field_type import FieldType, StandardFormat
 from flydocs.interfaces.enums.status import JudgeStatus, ValidationRule
-
 
 # ---------------------------------------------------------------------------
 # REQUEST SIDE -- the schema the caller submits
@@ -40,8 +40,8 @@ class Field(BaseModel):
     enum: list[Any] | None = None
     minimum: float | None = None
     maximum: float | None = None
-    items: "Field | None" = None
-    fields: "list[Field] | None" = None
+    items: Field | None = None
+    fields: list[Field] | None = None
     validators: list[ValidatorSpec] = _PydField(default_factory=list)
 
     @model_validator(mode="after")
@@ -115,7 +115,7 @@ class ExtractedField(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str
-    value: "str | int | float | bool | list[ExtractedField] | None" = None
+    value: str | int | float | bool | list[ExtractedField] | None = None
     pages: list[int] = _PydField(default_factory=list)
     confidence: float = _PydField(default=0.0, ge=0.0, le=1.0)
     bbox: BoundingBox | None = None

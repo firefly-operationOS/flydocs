@@ -23,8 +23,8 @@ from pyfly.starters.core import enable_core_stack
     ),
     scan_packages=[
         "flydocs.core",  # @configuration class
-        "flydocs.core.services.extract",  # extract command handler
-        "flydocs.core.services.jobs",  # job command/query handlers
+        "flydocs.core.services.extract",  # sync extract command handler
+        "flydocs.core.services.extractions",  # async extraction handlers
         "flydocs.web.controllers",  # REST controllers
         "flydocs.web.advice",  # exception advice
     ],

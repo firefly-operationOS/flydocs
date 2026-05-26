@@ -53,7 +53,7 @@ def cmd_serve(_: argparse.Namespace) -> int:
 
 
 def cmd_worker(_: argparse.Namespace) -> int:
-    """Boot pyfly, run the :class:`JobWorker` and :class:`JobReaper` together.
+    """Boot pyfly, run the :class:`ExtractionWorker` and :class:`ExtractionReaper`.
 
     The reaper is colocated with the worker so a single container fulfils
     both responsibilities: drain the EDA outbox AND revive orphans whose
@@ -71,31 +71,31 @@ def cmd_worker(_: argparse.Namespace) -> int:
         from flydocs.config import IDPSettings
         from flydocs.core.services.pipeline import PipelineOrchestrator
         from flydocs.core.services.webhook import WebhookPublisher
-        from flydocs.core.services.workers.job_reaper import JobReaper
-        from flydocs.core.services.workers.job_worker import JobWorker
-        from flydocs.models.repositories import ExtractionJobRepository
+        from flydocs.core.services.workers.job_reaper import ExtractionReaper
+        from flydocs.core.services.workers.job_worker import ExtractionWorker
+        from flydocs.models.repositories import ExtractionRepository
 
         pyfly_app = PyFlyApplication(FlydocsApplication)
         await pyfly_app.startup()
-        worker: JobWorker | None = None
-        reaper: JobReaper | None = None
+        worker: ExtractionWorker | None = None
+        reaper: ExtractionReaper | None = None
         try:
             container = pyfly_app.context.container
             settings = container.resolve(IDPSettings)
-            worker = JobWorker(
+            worker = ExtractionWorker(
                 orchestrator=container.resolve(PipelineOrchestrator),
-                repository=container.resolve(ExtractionJobRepository),
+                repository=container.resolve(ExtractionRepository),
                 event_publisher=container.resolve(EventPublisher),
                 webhook=container.resolve(WebhookPublisher),
                 settings=settings,
             )
-            reaper = JobReaper(
-                repository=container.resolve(ExtractionJobRepository),
+            reaper = ExtractionReaper(
+                repository=container.resolve(ExtractionRepository),
                 event_publisher=container.resolve(EventPublisher),
                 settings=settings,
             )
-            worker_task = asyncio.create_task(worker.run_forever(), name="job-worker")
-            reaper_task = asyncio.create_task(reaper.run_forever(), name="job-reaper")
+            worker_task = asyncio.create_task(worker.run_forever(), name="extraction-worker")
+            reaper_task = asyncio.create_task(reaper.run_forever(), name="extraction-reaper")
             done, pending = await asyncio.wait(
                 {worker_task, reaper_task},
                 return_when=asyncio.FIRST_COMPLETED,
@@ -131,7 +131,7 @@ def cmd_bbox_worker(_: argparse.Namespace) -> int:
         from flydocs.core.services.webhook import WebhookPublisher
         from flydocs.core.services.workers.bbox_reaper import BboxReaper
         from flydocs.core.services.workers.bbox_refine_worker import BboxRefineWorker
-        from flydocs.models.repositories import ExtractionJobRepository
+        from flydocs.models.repositories import ExtractionRepository
 
         pyfly_app = PyFlyApplication(FlydocsApplication)
         await pyfly_app.startup()
@@ -141,7 +141,7 @@ def cmd_bbox_worker(_: argparse.Namespace) -> int:
             container = pyfly_app.context.container
             settings = container.resolve(IDPSettings)
             worker = BboxRefineWorker(
-                repository=container.resolve(ExtractionJobRepository),
+                repository=container.resolve(ExtractionRepository),
                 event_publisher=container.resolve(EventPublisher),
                 webhook=container.resolve(WebhookPublisher),
                 normalizer=container.resolve(BinaryNormalizer),
@@ -149,7 +149,7 @@ def cmd_bbox_worker(_: argparse.Namespace) -> int:
                 settings=settings,
             )
             reaper = BboxReaper(
-                repository=container.resolve(ExtractionJobRepository),
+                repository=container.resolve(ExtractionRepository),
                 event_publisher=container.resolve(EventPublisher),
                 settings=settings,
             )

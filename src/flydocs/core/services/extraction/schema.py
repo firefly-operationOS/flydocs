@@ -1,5 +1,5 @@
 # Copyright 2026 Firefly Software Solutions Inc
-"""Dynamic Pydantic models built from a :class:`DocSpec`.
+"""Dynamic Pydantic models built from a :class:`DocumentTypeSpec`.
 
 We build a fresh model per request because every caller's schema
 differs. Each field becomes a sub-model carrying ``value, confidence,
@@ -13,11 +13,12 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, create_model
+from pydantic import BaseModel, ConfigDict, create_model
+from pydantic import Field as _PydField
 
 from flydocs.interfaces.dtos.bbox import BoundingBox
-from flydocs.interfaces.dtos.doc import DocSpec
-from flydocs.interfaces.dtos.field import FieldItem, FieldSpec
+from flydocs.interfaces.dtos.document_type import DocumentTypeSpec
+from flydocs.interfaces.dtos.field import Field as FieldSpec
 from flydocs.interfaces.enums.field_type import FieldType
 
 
@@ -54,40 +55,62 @@ def _scalar_field_model(name: str, field_type: FieldType) -> type[BaseModel]:
     """Build the schema for a primitive field."""
     return create_model(
         f"Scalar_{_safe_attr(name)}",
-        value=(_python_type(field_type), Field(default=None)),
-        confidence=(float, Field(default=0.0, ge=0.0, le=1.0)),
-        page=(int | None, Field(default=None, ge=1)),
-        bbox=(_RawBBox, Field(default_factory=_RawBBox)),
-        notes=(str | None, Field(default=None)),
+        value=(_python_type(field_type), _PydField(default=None)),
+        confidence=(float, _PydField(default=0.0, ge=0.0, le=1.0)),
+        page=(int | None, _PydField(default=None, ge=1)),
+        bbox=(_RawBBox, _PydField(default_factory=_RawBBox)),
+        notes=(str | None, _PydField(default=None)),
         __config__=ConfigDict(extra="ignore"),  # type: ignore[arg-type]
     )
 
 
-def _row_model(items: list[FieldItem]) -> type[BaseModel]:
+def _items_specs(spec: FieldSpec) -> list[FieldSpec]:
+    """Return the per-row sub-field specs for an array field.
+
+    In v1 :class:`Field` is recursive: an array's row shape lives in
+    ``items`` (a single Field, typically of type ``object``). The
+    object's sub-fields live in ``items.fields``. This helper unwraps
+    both layers and returns the row's sub-field specs in declaration
+    order. Returns ``[]`` when the array doesn't declare a row schema.
+    """
+    if spec.items is None:
+        return []
+    items_field = spec.items
+    if items_field.type == FieldType.OBJECT and items_field.fields:
+        return list(items_field.fields)
+    # Allow a single recursive primitive items definition for simple
+    # arrays — its own ``name`` becomes the lone column name.
+    return [items_field]
+
+
+def _row_model(items: list[FieldSpec]) -> type[BaseModel]:
     """Build the schema for one row of an array field."""
     fields: dict[str, Any] = {}
     used: set[str] = set()
     for item in items:
-        attr = _safe_attr(item.fieldName)
+        attr = _safe_attr(item.name)
         while attr in used:
             attr = f"{attr}_"
         used.add(attr)
         fields[attr] = (
-            _scalar_field_model(item.fieldName, item.fieldType),
-            Field(default_factory=_scalar_field_model(item.fieldName, item.fieldType), alias=item.fieldName),
+            _scalar_field_model(item.name, item.type),
+            _PydField(
+                default_factory=_scalar_field_model(item.name, item.type),
+                alias=item.name,
+            ),
         )
     config = ConfigDict(populate_by_name=True, extra="ignore")
     return create_model("ArrayRow", __config__=config, **fields)  # type: ignore[call-overload]
 
 
 def _array_field_model(spec: FieldSpec) -> type[BaseModel]:
-    row_cls = _row_model(spec.items or [])
+    row_cls = _row_model(_items_specs(spec))
     return create_model(
-        f"Array_{_safe_attr(spec.fieldName)}",
-        rows=(list[row_cls], Field(default_factory=list)),  # type: ignore[valid-type]
-        pagesFound=(list[int], Field(default_factory=list)),
-        confidence=(float, Field(default=0.0, ge=0.0, le=1.0)),
-        notes=(str | None, Field(default=None)),
+        f"Array_{_safe_attr(spec.name)}",
+        rows=(list[row_cls], _PydField(default_factory=list)),  # type: ignore[valid-type]
+        pagesFound=(list[int], _PydField(default_factory=list)),
+        confidence=(float, _PydField(default=0.0, ge=0.0, le=1.0)),
+        notes=(str | None, _PydField(default=None)),
         __config__=ConfigDict(extra="ignore"),  # type: ignore[arg-type]
     )
 
@@ -96,33 +119,33 @@ def build_field_group_model(group_name: str, specs: list[FieldSpec]) -> type[Bas
     fields: dict[str, Any] = {}
     used: set[str] = set()
     for spec in specs:
-        attr = _safe_attr(spec.fieldName)
+        attr = _safe_attr(spec.name)
         while attr in used:
             attr = f"{attr}_"
         used.add(attr)
-        if spec.fieldType == FieldType.ARRAY:
+        if spec.type == FieldType.ARRAY:
             sub_cls = _array_field_model(spec)
         else:
-            sub_cls = _scalar_field_model(spec.fieldName, spec.fieldType)
-        fields[attr] = (sub_cls, Field(default_factory=sub_cls, alias=spec.fieldName))
+            sub_cls = _scalar_field_model(spec.name, spec.type)
+        fields[attr] = (sub_cls, _PydField(default_factory=sub_cls, alias=spec.name))
     config = ConfigDict(populate_by_name=True, extra="ignore")
     return create_model(f"Group_{_safe_attr(group_name)}", __config__=config, **fields)  # type: ignore[call-overload]
 
 
-def build_extraction_output_model(doc: DocSpec) -> type[BaseModel]:
-    """Produce the dynamic output model the LLM must return for a single doc."""
+def build_extraction_output_model(doc: DocumentTypeSpec) -> type[BaseModel]:
+    """Produce the dynamic output model the LLM must return for a single document type."""
     groups: dict[str, Any] = {}
     used: set[str] = set()
-    for group in doc.fieldGroups:
-        attr = _safe_attr(group.fieldGroupName, prefix="g")
+    for group in doc.field_groups:
+        attr = _safe_attr(group.name, prefix="g")
         while attr in used:
             attr = f"{attr}_"
         used.add(attr)
-        sub_cls = build_field_group_model(group.fieldGroupName, group.fieldGroupFields)
-        groups[attr] = (sub_cls, Field(default_factory=sub_cls, alias=group.fieldGroupName))
+        sub_cls = build_field_group_model(group.name, group.fields)
+        groups[attr] = (sub_cls, _PydField(default_factory=sub_cls, alias=group.name))
     config = ConfigDict(populate_by_name=True, extra="ignore")
     return create_model(
-        f"ExtractionOutput_{_safe_attr(doc.docType.documentType)}",
+        f"ExtractionOutput_{_safe_attr(doc.id)}",
         __config__=config,
         **groups,
     )
@@ -152,18 +175,24 @@ def coerce_scalar(field_type: FieldType, raw: Any) -> Any:
     return raw
 
 
-def clamp_bbox(box: _RawBBox | dict[str, Any] | None) -> BoundingBox:
+def clamp_bbox(box: _RawBBox | dict[str, Any] | None) -> BoundingBox | None:
+    """Clamp raw LLM bbox coords into a real :class:`BoundingBox`.
+
+    Returns ``None`` for degenerate / missing / zero-area inputs --
+    consumers attach ``None`` to ``ExtractedField.bbox`` in v1 instead
+    of carrying a synthetic ``empty`` placeholder.
+    """
     if box is None:
-        return BoundingBox.empty()
+        return None
     if isinstance(box, dict):
         try:
             box = _RawBBox.model_validate(box)
         except Exception:  # noqa: BLE001
-            return BoundingBox.empty()
+            return None
     xmin = max(0.0, min(1.0, float(getattr(box, "xmin", 0.0))))
     ymin = max(0.0, min(1.0, float(getattr(box, "ymin", 0.0))))
     xmax = max(0.0, min(1.0, float(getattr(box, "xmax", 0.0))))
     ymax = max(0.0, min(1.0, float(getattr(box, "ymax", 0.0))))
     if xmin >= xmax or ymin >= ymax:
-        return BoundingBox.empty()
+        return None
     return BoundingBox(xmin=xmin, ymin=ymin, xmax=xmax, ymax=ymax)

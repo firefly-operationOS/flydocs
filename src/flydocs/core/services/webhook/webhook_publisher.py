@@ -7,6 +7,10 @@ audit every outbound delivery: URL, status, latency, attempt number,
 final outcome. The publisher signs the body with HMAC-SHA256 when a
 secret is configured, and propagates any ``extra_headers`` supplied by
 the caller (the worker uses this to forward correlation IDs).
+
+The payload shape is the unified :class:`EventEnvelope` -- the same
+model the EDA bus carries. Webhook consumers and EDA consumers see one
+mental model end to end.
 """
 
 from __future__ import annotations
@@ -26,7 +30,7 @@ from tenacity import (
 )
 
 from flydocs.core.observability import log_outbound
-from flydocs.interfaces.dtos.webhook import JobWebhookPayload
+from flydocs.interfaces.dtos.event import EventEnvelope
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +54,7 @@ class WebhookPublisher:
     async def deliver(
         self,
         url: str,
-        payload: JobWebhookPayload,
+        payload: EventEnvelope,
         *,
         extra_headers: dict[str, str] | None = None,
     ) -> bool:
@@ -80,6 +84,7 @@ class WebhookPublisher:
             headers[self._signature_header] = f"{self._signature_scheme}={digest}"
 
         attempt_counter = {"n": 0}
+        extraction_id = payload.extraction.id
 
         @retry(
             reraise=True,
@@ -105,7 +110,7 @@ class WebhookPublisher:
                     latency_ms=latency_ms,
                     url=url,
                     attempt=attempt,
-                    job_id=payload.job_id,
+                    extraction_id=extraction_id,
                     correlation_id=correlation_id,
                     error=type(exc).__name__,
                 )
@@ -121,7 +126,7 @@ class WebhookPublisher:
                     url=url,
                     attempt=attempt,
                     http_status=http_status,
-                    job_id=payload.job_id,
+                    extraction_id=extraction_id,
                     correlation_id=correlation_id,
                 )
                 raise _RetryableWebhook(f"webhook {url} returned retryable status {http_status}")
@@ -134,7 +139,7 @@ class WebhookPublisher:
                     url=url,
                     attempt=attempt,
                     http_status=http_status,
-                    job_id=payload.job_id,
+                    extraction_id=extraction_id,
                     correlation_id=correlation_id,
                 )
                 logger.error(
@@ -152,7 +157,7 @@ class WebhookPublisher:
                 url=url,
                 attempt=attempt,
                 http_status=http_status,
-                job_id=payload.job_id,
+                extraction_id=extraction_id,
                 correlation_id=correlation_id,
             )
             return True
@@ -167,7 +172,7 @@ class WebhookPublisher:
                 latency_ms=0.0,
                 url=url,
                 attempts=attempt_counter["n"],
-                job_id=payload.job_id,
+                extraction_id=extraction_id,
                 error=type(exc).__name__,
             )
             logger.error("Webhook %s exhausted retries: %s", url, exc)
@@ -180,7 +185,7 @@ class WebhookPublisher:
                 latency_ms=0.0,
                 url=url,
                 attempts=attempt_counter["n"],
-                job_id=payload.job_id,
+                extraction_id=extraction_id,
                 error=type(exc).__name__,
             )
             logger.error("Webhook %s transport error: %s", url, exc)

@@ -85,7 +85,7 @@ class LlmTransformer:
             )
             return None
 
-        raw = array_field.fieldValueFound if isinstance(array_field.fieldValueFound, list) else []
+        raw = array_field.value if isinstance(array_field.value, list) else []
         rows = [r for r in raw if isinstance(r, ExtractedField)]
         if not rows:
             return None
@@ -126,24 +126,24 @@ class LlmTransformer:
 
         produced_rows = _rebuild_rows(run_result.output.rows, rows[0])
         new_array = ExtractedField(
-            name=array_field.fieldName,
+            name=array_field.name,
             value=produced_rows,
-            pagesFound=array_field.pagesFound,
+            pages=array_field.pages,
             confidence=array_field.confidence,
             bbox=array_field.bbox,
         )
 
         if transformation.output_group:
             new_group = ExtractedFieldGroup(
-                fieldGroupName=transformation.output_group,
-                fieldGroupFields=[new_array],
+                name=transformation.output_group,
+                fields=[new_array],
             )
             groups.append(new_group)
             return new_group
 
-        for idx, fld in enumerate(target.fieldGroupFields):
+        for idx, fld in enumerate(target.fields):
             if fld is array_field:
-                target.fieldGroupFields[idx] = new_array
+                target.fields[idx] = new_array
                 break
         return target
 
@@ -155,26 +155,26 @@ class LlmTransformer:
 
 def _find_group(groups: list[ExtractedFieldGroup], name: str) -> ExtractedFieldGroup | None:
     for g in groups:
-        if g.fieldGroupName == name:
+        if g.name == name:
             return g
     return None
 
 
 def _find_array_field(group: ExtractedFieldGroup) -> ExtractedField | None:
-    for f in group.fieldGroupFields:
-        if isinstance(f.fieldValueFound, list):
+    for f in group.fields:
+        if isinstance(f.value, list):
             return f
     return None
 
 
 def _serialise_row(row: ExtractedField) -> dict[str, Any]:
     """Flatten a row to a JSON dict the LLM can read."""
-    inner = row.fieldValueFound if isinstance(row.fieldValueFound, list) else []
+    inner = row.value if isinstance(row.value, list) else []
     out: dict[str, Any] = {}
     for sub in inner:
         if not isinstance(sub, ExtractedField):
             continue
-        out[sub.fieldName] = sub.fieldValueFound
+        out[sub.name] = sub.value
     return out
 
 
@@ -187,8 +187,8 @@ def _rebuild_rows(llm_rows: list[_TransformRow], template_row: ExtractedField) -
     names produced by the LLM are added as fresh ExtractedField
     children with default metadata.
     """
-    template_subs = template_row.fieldValueFound if isinstance(template_row.fieldValueFound, list) else []
-    template_by_name = {s.fieldName: s for s in template_subs if isinstance(s, ExtractedField)}
+    template_subs = template_row.value if isinstance(template_row.value, list) else []
+    template_by_name = {s.name: s for s in template_subs if isinstance(s, ExtractedField)}
 
     materialised: list[ExtractedField] = []
     for i, lr in enumerate(llm_rows):
@@ -199,7 +199,7 @@ def _rebuild_rows(llm_rows: list[_TransformRow], template_row: ExtractedField) -
                 ExtractedField(
                     name=name,
                     value=value,
-                    pagesFound=tmpl.pagesFound if tmpl else [],
+                    pages=tmpl.pages if tmpl else [],
                     confidence=tmpl.confidence if tmpl else 0.0,
                     bbox=tmpl.bbox if tmpl else template_row.bbox,
                 )
@@ -208,7 +208,7 @@ def _rebuild_rows(llm_rows: list[_TransformRow], template_row: ExtractedField) -
             ExtractedField(
                 name=f"row_{i + 1}",
                 value=sub_fields,
-                pagesFound=template_row.pagesFound,
+                pages=template_row.pages,
                 confidence=template_row.confidence,
                 bbox=template_row.bbox,
             )

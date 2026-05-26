@@ -22,7 +22,6 @@ from pydantic import BaseModel, ConfigDict, Field
 from flydocs.interfaces.dtos.extract import ExtractionResult
 from flydocs.interfaces.dtos.extraction import Extraction
 
-
 EVENT_TYPE_EXTRACTION_SUBMITTED = "extraction.submitted"
 EVENT_TYPE_EXTRACTION_COMPLETED = "extraction.completed"
 EVENT_TYPE_EXTRACTION_POST_PROCESSING_REQUESTED = "extraction.post_processing.requested"

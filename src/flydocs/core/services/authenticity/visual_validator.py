@@ -1,10 +1,10 @@
 # Copyright 2026 Firefly Software Solutions Inc
-"""``VisualAuthenticityChecker`` -- runs caller-defined visual validators.
+"""``VisualAuthenticityChecker`` -- runs caller-defined visual checks.
 
-Each validator is a ``(name, description)`` pair the LLM evaluates
-against the document image; output is a :class:`VisualValidationOutcome`
-per validator with a yes/no verdict, confidence, and free-text notes.
-The prompt template is supplied by the DI container.
+Each check is a ``(name, description)`` pair the LLM evaluates against
+the document image; output is a :class:`VisualCheckResult` per check
+with a yes/no verdict, confidence, and free-text notes. The prompt
+template is supplied by the DI container.
 """
 
 from __future__ import annotations
@@ -19,8 +19,8 @@ from fireflyframework_agentic.types import BinaryContent
 from pydantic import BaseModel, Field
 
 from flydocs.core.observability import DEFAULT_MIDDLEWARE, timed_agent_run
-from flydocs.interfaces.dtos.authenticity import VisualValidationOutcome
-from flydocs.interfaces.dtos.doc import DocSpec
+from flydocs.interfaces.dtos.authenticity import VisualCheckResult
+from flydocs.interfaces.dtos.document_type import DocumentTypeSpec
 
 logger = logging.getLogger(__name__)
 
@@ -53,21 +53,21 @@ class VisualAuthenticityChecker:
         *,
         document_bytes: bytes,
         media_type: str,
-        doc: DocSpec,
+        doc: DocumentTypeSpec,
         intention: str,
         model: str | None = None,
-    ) -> list[VisualValidationOutcome]:
-        if not doc.validators.visual:
+    ) -> list[VisualCheckResult]:
+        if not doc.visual_checks:
             return []
 
         validators_json = json.dumps(
-            [v.model_dump(mode="json") for v in doc.validators.visual],
+            [v.model_dump(mode="json") for v in doc.visual_checks],
             indent=2,
             ensure_ascii=False,
         )
         prompt = self._template.render(
-            documentType=doc.docType.documentType,
-            country=doc.docType.country,
+            documentType=doc.id,
+            country=doc.country,
             intention=intention,
             validators_json=validators_json,
         )
@@ -87,18 +87,18 @@ class VisualAuthenticityChecker:
         ]
         run_result = await timed_agent_run(agent, content, op="visual_auth", model=model or self._model)
         raw_by_name = {v.name: v for v in run_result.output.validations}
-        outcomes: list[VisualValidationOutcome] = []
-        for spec in doc.validators.visual:
+        outcomes: list[VisualCheckResult] = []
+        for spec in doc.visual_checks:
             raw = raw_by_name.get(spec.name)
             if raw is None:
                 outcomes.append(
-                    VisualValidationOutcome(
+                    VisualCheckResult(
                         name=spec.name, passed=False, confidence=0.0, notes="Not evaluated"
                     )
                 )
                 continue
             outcomes.append(
-                VisualValidationOutcome(
+                VisualCheckResult(
                     name=raw.name, passed=bool(raw.passed), confidence=float(raw.confidence), notes=raw.notes
                 )
             )

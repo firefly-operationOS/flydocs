@@ -41,15 +41,16 @@ class IDPSettings(BaseSettings):
     # Postgres for persistence — no extra broker is required.
     eda_adapter: str = Field(default="postgres", description="memory | postgres | redis | kafka")
     redis_url: str = "redis://localhost:6379/0"
-    jobs_topic: str = "flydocs.jobs"
-    jobs_event_type: str = "IDPJobSubmitted"
-    jobs_completed_event_type: str = "IDPJobCompleted"
-    # Second-stage destination for the out-of-band bbox refiner. Triggered
-    # by ``JobWorker`` after main extraction succeeds AND
+    # Main extraction topic. Workers subscribe to the
+    # ``extraction.submitted`` event type (declared as a constant in
+    # ``flydocs.interfaces.dtos.event``); the destination here is the
+    # broker channel the bus publishes / drains on.
+    jobs_topic: str = "flydocs.extractions"
+    # Post-processing topic for the out-of-band bbox refiner. Triggered
+    # by the ``ExtractionWorker`` after main extraction succeeds AND
     # ``options.stages.bbox_refine == true``. Consumed by
     # ``BboxRefineWorker``.
-    bbox_refine_topic: str = "flydocs.bbox.refine"
-    bbox_refine_event_type: str = "IDPBboxRefineRequested"
+    bbox_refine_topic: str = "flydocs.extractions.post_processing"
     # Retry budget + timeout for the bbox refine leg, independent of the
     # main extraction. Refinement is CPU-bound (PyMuPDF / OCR) so the
     # default ceiling is generous.

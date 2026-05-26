@@ -64,8 +64,12 @@ class Extraction(Base):
     # Post-processing: bbox refinement leg. ``null`` until/unless requested.
     post_processing_bbox_status: Mapped[str | None] = mapped_column(String(16), nullable=True)
     post_processing_bbox_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    post_processing_bbox_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    post_processing_bbox_finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    post_processing_bbox_started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    post_processing_bbox_finished_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     post_processing_bbox_error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     post_processing_bbox_error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 

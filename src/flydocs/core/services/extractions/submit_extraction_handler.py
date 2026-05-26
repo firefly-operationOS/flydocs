@@ -1,12 +1,13 @@
 # Copyright 2026 Firefly Software Solutions Inc
-"""``SubmitJobHandler`` -- persist the job + publish it on the EDA bus.
+"""``SubmitExtractionHandler`` -- persist the extraction + publish it on the EDA bus.
 
 Before anything is written to Postgres or the EDA outbox, the handler
 runs the same :class:`RequestValidator` the sync controller uses. A
-semantic mismatch (rule pointing at a non-existent docType, cycles in
-the rule DAG, duplicate rule ids, ...) raises :class:`InvalidRequestError`
-so the REST layer can return a ``422 invalid_request`` problem-detail
-with every issue surfaced -- without persisting an unrunnable job.
+semantic mismatch (rule pointing at a non-existent document type,
+cycles in the rule DAG, duplicate rule ids, ...) raises
+:class:`InvalidRequestError` so the REST layer can return a ``422
+validation_failed`` problem-detail with every issue surfaced -- without
+persisting an unrunnable extraction.
 """
 
 from __future__ import annotations
@@ -23,13 +24,18 @@ from pyfly.eda import EventPublisher
 from pyfly.observability.correlation import current_correlation_context
 
 from flydocs.config import IDPSettings
+from flydocs.core.services.extractions._projector import row_to_extraction
 from flydocs.core.services.validation import RequestValidator, ValidationReport
-from flydocs.interfaces.dtos.event import IDPJobSubmittedEvent, envelope_for_publish
+from flydocs.interfaces.dtos.event import (
+    EVENT_TYPE_EXTRACTION_SUBMITTED,
+    EventEnvelope,
+    envelope_for_publish,
+)
 from flydocs.interfaces.dtos.extract import ExtractionRequest
-from flydocs.interfaces.dtos.job import SubmitJobRequest, SubmitJobResponse
-from flydocs.interfaces.enums.job_status import JobStatus
-from flydocs.models.entities.extraction_job import ExtractionJob
-from flydocs.models.repositories import ExtractionJobRepository
+from flydocs.interfaces.dtos.extraction import Extraction, SubmitExtractionRequest
+from flydocs.interfaces.enums.extraction_status import ExtractionStatus
+from flydocs.models.entities.extraction import Extraction as ExtractionEntity
+from flydocs.models.repositories import ExtractionRepository
 
 logger = logging.getLogger(__name__)
 
@@ -47,17 +53,20 @@ class InvalidRequestError(ValueError):
 
 
 @dataclass(frozen=True)
-class SubmitJobCommand(Command[SubmitJobResponse]):
-    request: SubmitJobRequest
+class SubmitExtractionCommand(Command[Extraction]):
+    request: SubmitExtractionRequest
     idempotency_key: str | None = None
+
+
+_row_to_dto = row_to_extraction
 
 
 @command_handler
 @service
-class SubmitJobHandler(CommandHandler[SubmitJobCommand, SubmitJobResponse]):
+class SubmitExtractionHandler(CommandHandler[SubmitExtractionCommand, Extraction]):
     def __init__(
         self,
-        repository: ExtractionJobRepository,
+        repository: ExtractionRepository,
         event_publisher: EventPublisher,
         validator: RequestValidator,
         settings: IDPSettings,
@@ -68,15 +77,11 @@ class SubmitJobHandler(CommandHandler[SubmitJobCommand, SubmitJobResponse]):
         self._validator = validator
         self._settings = settings
 
-    async def do_handle(self, command: SubmitJobCommand) -> SubmitJobResponse:
+    async def do_handle(self, command: SubmitExtractionCommand) -> Extraction:
         if command.idempotency_key:
             existing = await self._repository.get_by_idempotency_key(command.idempotency_key)
             if existing is not None:
-                return SubmitJobResponse(
-                    job_id=existing.id,
-                    status=JobStatus(existing.status),
-                    submitted_at=existing.created_at,
-                )
+                return _row_to_dto(existing)
 
         # NOTE: the SELECT-then-INSERT above has a TOCTOU window when
         # two requests submit the same idempotency_key concurrently:
@@ -88,11 +93,11 @@ class SubmitJobHandler(CommandHandler[SubmitJobCommand, SubmitJobResponse]):
         payload = command.request
         # Reuse the sync semantic validator over an ExtractionRequest
         # built from the submit payload -- same checks, same error shape.
-        files = payload.documents
+        files = payload.files
         as_extraction = ExtractionRequest(
             intention=payload.intention,
-            documents=files,
-            docs=payload.docs,
+            files=files,
+            document_types=payload.document_types,
             rules=payload.rules,
             options=payload.options,
         )
@@ -108,7 +113,7 @@ class SubmitJobHandler(CommandHandler[SubmitJobCommand, SubmitJobResponse]):
             )
 
         # The DB row carries a single ``filename`` / ``content_sha256``
-        # pair; the per-file bytes live in ``schema_json.documents``. For
+        # pair; the per-file bytes live in ``schema_json.files``. For
         # multi-file submits the primary filename summarises the bundle
         # ("first (+N more)") and the content hash rolls every file's
         # bytes so idempotency / dedupe checks still discriminate
@@ -127,14 +132,14 @@ class SubmitJobHandler(CommandHandler[SubmitJobCommand, SubmitJobResponse]):
             content_sha256 = roll.hexdigest()
         schema_json: dict[str, Any] = {
             "intention": payload.intention,
-            "docs": [d.model_dump(mode="json") for d in payload.docs],
+            "document_types": [d.model_dump(mode="json") for d in payload.document_types],
             "rules": [r.model_dump(mode="json") for r in payload.rules],
-            "documents": [
+            "files": [
                 {
                     "filename": f.filename,
                     "content_base64": f.content_base64,
                     "content_type": f.content_type,
-                    "document_type": f.document_type,
+                    "expected_type": f.expected_type,
                 }
                 for f in files
             ],
@@ -149,9 +154,9 @@ class SubmitJobHandler(CommandHandler[SubmitJobCommand, SubmitJobResponse]):
         if ctx:
             metadata.setdefault("_correlation", ctx)
 
-        job = ExtractionJob(
+        extraction = ExtractionEntity(
             idempotency_key=command.idempotency_key,
-            status=JobStatus.QUEUED.value,
+            status=ExtractionStatus.QUEUED.value,
             filename=primary_filename,
             content_sha256=content_sha256,
             content_bytes=total_bytes,
@@ -161,7 +166,7 @@ class SubmitJobHandler(CommandHandler[SubmitJobCommand, SubmitJobResponse]):
             metadata_json=metadata,
         )
         try:
-            job = await self._repository.add(job)
+            extraction = await self._repository.add(extraction)
         except self._repository.IntegrityError:
             # Concurrent submit with the same idempotency_key collided
             # on the partial unique index. Re-resolve the winning row
@@ -178,28 +183,24 @@ class SubmitJobHandler(CommandHandler[SubmitJobCommand, SubmitJobResponse]):
                 # violation was rolled back between INSERT and our
                 # follow-up SELECT. Re-raise so the caller retries.
                 raise
-            return SubmitJobResponse(
-                job_id=winner.id,
-                status=JobStatus(winner.status),
-                submitted_at=winner.created_at,
-            )
-        submitted_at = job.created_at or datetime.now(UTC)
-        event = IDPJobSubmittedEvent(
-            job_id=job.id,
-            submitted_at=submitted_at,
-            attempt=1,
+            return _row_to_dto(winner)
+        submitted_at = extraction.submitted_at or datetime.now(UTC)
+        extraction_dto = _row_to_dto(extraction)
+        envelope = EventEnvelope(
+            event_type=EVENT_TYPE_EXTRACTION_SUBMITTED,
+            occurred_at=submitted_at,
             correlation_id=(ctx or {}).get("X-Correlation-Id"),
             tenant_id=(ctx or {}).get("X-Tenant-Id"),
+            extraction=extraction_dto,
         )
         await self._publisher.publish(
             destination=self._settings.jobs_topic,
-            event_type=self._settings.jobs_event_type,
-            payload=envelope_for_publish(event),
+            event_type=EVENT_TYPE_EXTRACTION_SUBMITTED,
+            payload=envelope_for_publish(envelope),
             headers=ctx,
         )
 
-        return SubmitJobResponse(
-            job_id=job.id,
-            status=JobStatus(job.status),
-            submitted_at=submitted_at,
-        )
+        return extraction_dto
+
+
+__all__ = ["InvalidRequestError", "SubmitExtractionCommand", "SubmitExtractionHandler"]

@@ -27,7 +27,7 @@ class ValidationResponse(BaseModel):
     Returned by ``POST /api/v1/extract:validate`` -- always status 200,
     even when errors are present. The caller inspects ``ok`` to decide
     whether to submit the payload to the real ``POST /api/v1/extract``
-    or ``POST /api/v1/jobs`` endpoints.
+    or ``POST /api/v1/extractions`` endpoints.
     """
 
     ok: bool = Field(description="True when the report has zero errors.")
@@ -49,8 +49,8 @@ class ExtractController:
     Beyond the per-stage timeouts enforced inside the orchestrator,
     the handler wraps the whole call in
     ``asyncio.wait_for(FLYDOCS_SYNC_TIMEOUT_S)``; if that elapses
-    the caller gets a 408 ``extraction_timeout`` problem-detail and is
-    expected to retry through ``POST /api/v1/jobs``.
+    the caller gets a 408 ``timeout`` problem-detail and is
+    expected to retry through ``POST /api/v1/extractions``.
 
     Two gates run *before* the request enters the pipeline so a
     malformed call never reaches the LLM provider:
@@ -105,15 +105,15 @@ class ExtractController:
 
         Use this endpoint when you can wait for the answer
         (sub-minute, single document). For long-running or fire-and-forget
-        workloads, prefer ``POST /api/v1/jobs``.
+        workloads, prefer ``POST /api/v1/extractions``.
 
         Errors map to RFC 7807 problem-details:
-        ``408 extraction_timeout`` (pipeline exceeded the sync ceiling),
-        ``413 document_too_large`` (document over ``FLYDOCS_MAX_BYTES``),
+        ``408 timeout`` (pipeline exceeded the sync ceiling),
+        ``413 file_too_large`` (file over ``FLYDOCS_MAX_BYTES``),
         ``422 invalid_base64`` (``content_base64`` failed strict parsing),
-        ``422 invalid_request`` (semantic mismatch detected by the
+        ``422 validation_failed`` (semantic mismatch detected by the
         :class:`RequestValidator`, e.g. a rule referencing an unknown
-        documentType -- the response includes a list of every issue
+        document type -- the response includes a list of every issue
         found so the caller can fix them all at once).
         """
         _enforce_size_limits(request, max_bytes=self._settings.max_bytes)
@@ -121,27 +121,28 @@ class ExtractController:
         try:
             return await self._commands.send(ExtractCommand(request=request))
         except TimeoutError as exc:
-            raise _http_problem(408, "extraction_timeout", "Extraction timed out", str(exc)) from exc
+            raise _http_problem(408, "timeout", "Extraction timed out", str(exc)) from exc
 
 
 def _enforce_size_limits(request: ExtractionRequest, *, max_bytes: int) -> None:
     """Per-file size + base64 sanity."""
-    for file in request.documents:
-        encoded = file.content_base64
+    for file in request.files:
+        encoded = file.content_base64 or ""
         decoded_size = (len(encoded) * 3) // 4
         if decoded_size > max_bytes:
             raise _http_problem(
                 413,
-                "document_too_large",
-                "Document too large",
+                "file_too_large",
+                "File too large",
                 f"{file.filename} is {decoded_size} bytes (max {max_bytes})",
             )
-        try:
-            base64.b64decode(encoded, validate=True)
-        except Exception as exc:  # noqa: BLE001
-            raise _http_problem(
-                422, "invalid_base64", "Invalid base64 content", f"{file.filename}: {exc}"
-            ) from exc
+        if encoded:
+            try:
+                base64.b64decode(encoded, validate=True)
+            except Exception as exc:  # noqa: BLE001
+                raise _http_problem(
+                    422, "invalid_base64", "Invalid base64 content", f"{file.filename}: {exc}"
+                ) from exc
 
 
 def _enforce_semantic_validation(request: ExtractionRequest, validator: RequestValidator) -> None:
@@ -150,7 +151,7 @@ def _enforce_semantic_validation(request: ExtractionRequest, validator: RequestV
     if report.has_errors:
         raise _http_problem_with_payload(
             status_code=422,
-            code="invalid_request",
+            code="validation_failed",
             title="Request failed semantic validation",
             detail=(
                 f"{len(report.errors)} error(s) and {len(report.warnings)} "
