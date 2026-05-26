@@ -108,7 +108,7 @@ def _array_field_model(spec: FieldSpec) -> type[BaseModel]:
     return create_model(
         f"Array_{_safe_attr(spec.name)}",
         rows=(list[row_cls], _PydField(default_factory=list)),  # type: ignore[valid-type]
-        pagesFound=(list[int], _PydField(default_factory=list)),
+        pages=(list[int], _PydField(default_factory=list)),
         confidence=(float, _PydField(default=0.0, ge=0.0, le=1.0)),
         notes=(str | None, _PydField(default=None)),
         __config__=ConfigDict(extra="ignore"),  # type: ignore[arg-type]

@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 
 class _RawJudgeField(BaseModel):
-    name: str = Field(..., alias="fieldName")
+    name: str
     status: JudgeStatus = JudgeStatus.UNCERTAIN
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     evidence: str = ""
@@ -41,14 +41,10 @@ class _RawJudgeField(BaseModel):
     flag_for_review: bool = False
     items: list[_RawJudgeField] | None = None
 
-    model_config = {"populate_by_name": True}
-
 
 class _RawJudgeGroup(BaseModel):
-    name: str = Field(..., alias="fieldGroupName")
-    fields: list[_RawJudgeField] = Field(default_factory=list, alias="fieldGroupFields")
-
-    model_config = {"populate_by_name": True}
+    name: str
+    fields: list[_RawJudgeField] = Field(default_factory=list)
 
 
 class _JudgeOutput(BaseModel):

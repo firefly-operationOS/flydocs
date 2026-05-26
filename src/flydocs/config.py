@@ -112,13 +112,15 @@ class IDPSettings(BaseSettings):
     bbox_refine_lease_s: int = 660
     # ----- Reaper -----------------------------------------------------
     # The reaper runs alongside each worker (one task per process) and
-    # republishes events for jobs stuck in non-terminal states. It is
-    # the only path that revives orphans:
-    #   * RUNNING whose claimant crashed past its lease;
-    #   * QUEUED whose submit handler crashed between row INSERT and
+    # republishes events for extractions stuck in non-terminal states.
+    # It is the only path that revives orphans:
+    #   * ``running`` whose claimant crashed past its lease;
+    #   * ``queued`` whose submit handler crashed between row INSERT and
     #     outbox PUBLISH (or whose worker died during ``_delayed_publish``);
-    #   * PARTIAL_SUCCEEDED whose bbox-refine event was never published;
-    #   * REFINING_BBOXES whose bbox claimant crashed past its lease.
+    #   * ``succeeded`` with ``post_processing_bbox_status == pending``
+    #     whose bbox-refine event was never published;
+    #   * ``succeeded`` with ``post_processing_bbox_status == running``
+    #     whose bbox claimant crashed past its lease.
     # Each republish is deduped at claim time by the atomic ``mark_*``
     # transitions, so running multiple replicas of the reaper is safe
     # (it just wastes a few outbox INSERTs per stale job).

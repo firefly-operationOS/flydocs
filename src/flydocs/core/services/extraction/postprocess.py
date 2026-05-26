@@ -85,7 +85,7 @@ def _array_from_payload(spec: FieldSpec, payload: dict[str, Any]) -> ExtractedFi
             )
         )
 
-    pages_from_payload = payload.get("pagesFound") or []
+    pages_from_payload = payload.get("pages") or []
     pages = sorted({int(p) for p in pages_from_payload if isinstance(p, int) and p >= 1} | page_set)
     return ExtractedField(
         name=spec.name,

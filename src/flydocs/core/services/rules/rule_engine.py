@@ -206,11 +206,11 @@ class RuleEngine:
                     if field.name in want["fields"]:
                         rows.append(
                             {
-                                "documentType": doc_type,
-                                "fieldGroupName": group.name,
-                                "fieldName": field.name,
-                                "fieldValueFound": _serialise_field_value(field),
-                                "field_validation": field.validation.model_dump(mode="json"),
+                                "document_type": doc_type,
+                                "field_group": group.name,
+                                "field_name": field.name,
+                                "value": _serialise_field_value(field),
+                                "validation": field.validation.model_dump(mode="json"),
                                 "judge": field.judge.model_dump(mode="json"),
                             }
                         )
@@ -218,8 +218,8 @@ class RuleEngine:
                 if validator.name in want["validators"]:
                     rows.append(
                         {
-                            "documentType": doc_type,
-                            "validatorName": validator.name,
+                            "document_type": doc_type,
+                            "validator_name": validator.name,
                             "validator_passed": validator.passed,
                             "validator_confidence": validator.confidence,
                             "validator_notes": validator.notes,
