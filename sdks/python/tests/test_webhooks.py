@@ -12,61 +12,126 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for the HMAC webhook verifier.
+"""Tests for the v1 HMAC webhook verifier.
 
-Covers the three failure modes the SDK promises to detect: missing
-signature header, wrong scheme prefix, and digest mismatch. Plus a
-roundtrip with :meth:`WebhookVerifier.sign` so the two helpers can't
-drift out of sync.
+Pins three behaviours:
+
+1. A correctly-signed body verifies and is parsed into a typed
+   :class:`EventEnvelope`.
+2. Common failure modes -- missing header, wrong scheme prefix, digest
+   mismatch -- raise :class:`WebhookVerificationError`.
+3. :meth:`WebhookVerifier.sign` produces the canonical
+   ``sha256=<hex>`` form so callers can pin parity with the service.
 """
 
 from __future__ import annotations
 
+import hashlib
+import hmac
+import json
+
 import pytest
 
-from flydocs_sdk import WebhookVerificationError, WebhookVerifier
+from flydocs_sdk import (
+    EVENT_TYPE_EXTRACTION_COMPLETED,
+    EventEnvelope,
+    WebhookVerificationError,
+    WebhookVerifier,
+)
+
+SECRET = "topsecret"
 
 
-def test_sign_and_verify_roundtrip() -> None:
-    verifier = WebhookVerifier("topsecret")
-    body = b'{"event_id":"abc","job_id":"job1","status":"SUCCEEDED"}'
-    sig = verifier.sign(body)
+def _sign(body: bytes, secret: str = SECRET) -> str:
+    return "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+
+
+def _envelope_body() -> bytes:
+    return json.dumps(
+        {
+            "event_id": "e1",
+            "event_type": EVENT_TYPE_EXTRACTION_COMPLETED,
+            "version": "1.0.0",
+            "occurred_at": "2026-05-26T00:00:00Z",
+            "extraction": {
+                "id": "ext_1",
+                "status": "succeeded",
+                "submitted_at": "2026-05-26T00:00:00Z",
+            },
+        }
+    ).encode()
+
+
+# ---------------------------------------------------------------------------
+# Round-trip
+# ---------------------------------------------------------------------------
+
+
+def test_sign_and_verify_round_trip() -> None:
+    body = _envelope_body()
+    sig = WebhookVerifier(SECRET).sign(body)
     assert sig.startswith("sha256=")
-    # round-trips with the scheme prefix
-    verified = verifier.verify(body, sig)
-    assert verified is body
-    # and also accepts a bare hex digest (some proxies strip the scheme)
+    env = WebhookVerifier(SECRET).verify(body, sig)
+    assert isinstance(env, EventEnvelope)
+    assert env.event_type == EVENT_TYPE_EXTRACTION_COMPLETED
+    assert env.extraction.id == "ext_1"
+
+
+def test_verify_accepts_bare_hex() -> None:
+    body = _envelope_body()
+    sig = _sign(body)
     bare = sig.split("=", 1)[1]
-    assert verifier.verify(body, bare) is body
+    env = WebhookVerifier(SECRET).verify(body, bare)
+    assert isinstance(env, EventEnvelope)
+
+
+def test_sign_is_deterministic() -> None:
+    body = _envelope_body()
+    a = WebhookVerifier(SECRET).sign(body)
+    b = WebhookVerifier(SECRET).sign(body)
+    assert a == b
+
+
+# ---------------------------------------------------------------------------
+# Failure modes
+# ---------------------------------------------------------------------------
 
 
 def test_verify_missing_header_raises() -> None:
-    verifier = WebhookVerifier("topsecret")
     with pytest.raises(WebhookVerificationError, match="signature header missing"):
-        verifier.verify(b"{}", "")
+        WebhookVerifier(SECRET).verify(_envelope_body(), "")
 
 
-def test_verify_bad_scheme_raises() -> None:
-    verifier = WebhookVerifier("topsecret")
+def test_verify_wrong_scheme_raises() -> None:
     with pytest.raises(WebhookVerificationError, match="unsupported signature scheme"):
-        verifier.verify(b"{}", "md5=deadbeef")
+        WebhookVerifier(SECRET).verify(_envelope_body(), "md5=deadbeef")
 
 
 def test_verify_digest_mismatch_raises() -> None:
-    verifier = WebhookVerifier("topsecret")
     with pytest.raises(WebhookVerificationError, match="signature mismatch"):
-        verifier.verify(b"{}", "sha256=" + "00" * 32)
+        WebhookVerifier(SECRET).verify(_envelope_body(), "sha256=" + "00" * 32)
+
+
+def test_verify_tampered_body_raises() -> None:
+    body = _envelope_body()
+    sig = _sign(body)
+    tampered = body.replace(b'"succeeded"', b'"failed"   ')
+    with pytest.raises(WebhookVerificationError):
+        WebhookVerifier(SECRET).verify(tampered, sig)
+
+
+def test_verify_wrong_secret_raises() -> None:
+    body = _envelope_body()
+    sig = _sign(body, secret="someoneelses")
+    with pytest.raises(WebhookVerificationError):
+        WebhookVerifier(SECRET).verify(body, sig)
+
+
+# ---------------------------------------------------------------------------
+# Verifier construction
+# ---------------------------------------------------------------------------
 
 
 def test_empty_secret_rejected() -> None:
     with pytest.raises(ValueError):
         WebhookVerifier("")
-
-
-def test_signing_is_deterministic() -> None:
-    # Two verifiers with the same secret must produce the same digest
-    # for the same body. Acts as a regression for any future change to
-    # ``sign``.
-    a = WebhookVerifier("s")
-    b = WebhookVerifier("s")
-    assert a.sign(b"hello") == b.sign(b"hello")
