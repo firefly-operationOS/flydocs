@@ -616,7 +616,7 @@ writes the whole cache without reading anything. We believe this is
 the expected Anthropic-side accounting for high-fanout, low-repetition
 workloads -- cache pays off when the same prefix is replayed many
 times within the 5-minute TTL, e.g. batch reprocessing of the same
-expediente against multiple DocSpec variations. The toggle is there
+expediente against multiple `document_types[]` variations. The toggle is there
 so callers with that pattern can stay on while one-shot consumers
 can flip it off.
 

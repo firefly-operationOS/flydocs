@@ -26,18 +26,20 @@ Pick the entry point that matches what you're trying to do:
    async job + transformation).
 4. [**api-reference.md**](api-reference.md) — every endpoint, header,
    query param, DTO, and error code. Includes the full
-   `ExtractionRequest` / `ExtractionResult` shapes, the bbox-refine
-   sub-state on async jobs, the webhook envelope, and the RFC 7807
-   error catalogue.
-5. [**standard-validators.md**](standard-validators.md) — what each
-   built-in `StandardValidator` does and which `params` it accepts.
+   `ExtractionRequest` / `ExtractionResult` shapes, the
+   `post_processing.bbox_refinement` sub-state on async extractions,
+   the unified `EventEnvelope`, and the RFC 7807 error catalogue.
+5. [**validators.md**](validators.md) — what each built-in validator
+   does and which `params` it accepts.
+6. [**migration-v0-to-v1.md**](migration-v0-to-v1.md) — if you have a
+   v0 integration to migrate, this is the only doc you need.
 
 ### "I'm integrating with the async / EDA surface"
 
-1. [**api-reference.md** § 3 (Async extraction)](api-reference.md#3-async-extraction--post-apiv1jobs) — submit, list, poll status, fetch result (incl. `wait_for_bboxes` long-poll), cancel, webhook envelope, `Idempotency-Key`.
-2. [**api-reference.md** § 4 (Common DTO building blocks)](api-reference.md#4-common-dto-building-blocks) — typed EDA event envelopes, `JobStatus` + `BboxRefineStatus` enums, `Transformation` union.
+1. [**api-reference.md** § 3 (Async extractions)](api-reference.md#3-async-extractions--post-apiv1extractions) — submit, list, poll state, fetch result (incl. `wait_for_bboxes` long-poll), cancel, the unified `EventEnvelope`, `Idempotency-Key`.
+2. [**api-reference.md** § 5 (Common DTO building blocks)](api-reference.md#5-common-dto-building-blocks) — `ExtractionStatus` + `PostProcessingStatus` enums, `Transformation` union, `EventEnvelope` shape.
 3. [**deployment.md** § 1 (Topology)](deployment.md#1-topology) — how the API + worker + Postgres outbox fit together.
-4. [**pipeline.md** § Bbox refinement: sync vs. async](pipeline.md#bbox-refinement-sync-vs-async) — why async jobs skip inline `bbox_refine` and the second-stage `BboxRefineWorker` runs out-of-band.
+4. [**pipeline.md** § Bbox refinement: sync vs. async](pipeline.md#bbox-refinement-sync-vs-async) — why async extractions skip inline `bbox_refine` and the second-stage `BboxRefineWorker` runs out-of-band.
 
 ### "I'm operating / deploying the service"
 
@@ -66,8 +68,8 @@ Pick the entry point that matches what you're trying to do:
 2. [**transformations.md**](transformations.md) — how to add a new
    declarative `Transformation` type (entity resolution / LLM / your
    own discriminator).
-3. [**standard-validators.md**](standard-validators.md) — adding a
-   new built-in `StandardValidator`.
+3. [**validators.md**](validators.md) — adding a new built-in
+   validator.
 4. [**rule-engine.md**](rule-engine.md) — designing business rules,
    the DAG evaluator, level-batching to amortise LLM cost.
 5. [**prompts.md**](prompts.md) — adding / editing YAML prompt
@@ -86,7 +88,8 @@ Pick the entry point that matches what you're trying to do:
 | [pipeline.md](pipeline.md)                                     | You're touching the orchestrator, adding a new stage, or chasing a slow request.           |
 | [api-reference.md](api-reference.md)                           | You're integrating with the HTTP API.                                                      |
 | [transformations.md](transformations.md)                       | You want to dedupe, normalise, or run free-form LLM transformations on extracted data.     |
-| [standard-validators.md](standard-validators.md)               | You want to know what built-in validators are bundled and their `params`.                  |
+| [validators.md](validators.md)                                 | You want to know what built-in validators are bundled and their `params`.                  |
+| [migration-v0-to-v1.md](migration-v0-to-v1.md)                 | You're migrating a v0 integration to v1.                                                   |
 | [rule-engine.md](rule-engine.md)                               | You're designing business rules or want to understand the DAG evaluator.                   |
 | [prompts.md](prompts.md)                                       | You're editing or adding YAML prompt templates.                                            |
 | [docling.md](docling.md)                                       | You want layout-aware OCR or a Markdown text-anchor in the extract prompt (Docling extra). |
@@ -106,14 +109,14 @@ Where to read about each topic that spans multiple documents:
 | Bounding boxes (LLM + grounded) | [pipeline.md § bbox_refine](pipeline.md), [api-reference.md § `BoundingBox`](api-reference.md#boundingbox)   | [pipeline.md § Bbox refinement: sync vs. async](pipeline.md#bbox-refinement-sync-vs-async), [docling.md](docling.md) |
 | Layout-aware OCR + text anchor | [docling.md](docling.md)                                                                                    | [pipeline.md § bbox_refine](pipeline.md), [deployment.md § Docling image variant](deployment.md)          |
 | Provider-agnostic LLM calls     | [pipeline.md § 7c (Pricing & prompt caching)](pipeline.md#7c-pricing--prompt-caching)                       | [deployment.md § 2 (Environment)](deployment.md#2-environment)                                            |
-| Prompt caching (Anthropic-only) | [pipeline.md § 7c](pipeline.md#7c-pricing--prompt-caching)                                                  | [api-reference.md § `usage` block](api-reference.md#usage-block)                                          |
-| EDA / typed event envelopes     | [api-reference.md § EDA event envelopes](api-reference.md#eda-event-envelopes-audit--webhook-payload)       | [overview.md § Async path](overview.md), [deployment.md § 1 (Topology)](deployment.md#1-topology)          |
-| Webhooks (HMAC + retry)         | [api-reference.md § Webhook](api-reference.md#webhook)                                                      | [deployment.md § 2 (Environment) → `FLYDOCS_WEBHOOK_*`](deployment.md#2-environment)                  |
+| Prompt caching (Anthropic-only) | [pipeline.md § 7c](pipeline.md#7c-pricing--prompt-caching)                                                  | [api-reference.md § `pipeline.usage` block](api-reference.md#pipelineusage-block)                         |
+| EDA / typed event envelopes     | [api-reference.md § 4 (Events & webhooks)](api-reference.md#4-events--webhooks)                             | [overview.md § Async path](overview.md), [deployment.md § 1 (Topology)](deployment.md#1-topology)          |
+| Webhooks (HMAC + retry)         | [api-reference.md § 4.3 (Webhook delivery)](api-reference.md#43-webhook-delivery)                           | [deployment.md § 2 (Environment) → `FLYDOCS_WEBHOOK_*`](deployment.md#2-environment)                  |
 | Health probes                   | [deployment.md § 5 (Health + readiness)](deployment.md#5-health--readiness)                                 | [api-reference.md § 1 (Surface at a glance)](api-reference.md#1-surface-at-a-glance)                      |
 | W3C trace context               | [deployment.md § 5](deployment.md#5-health--readiness)                                                      | [api-reference.md § Request headers honoured](api-reference.md#request-headers-honoured)                  |
-| Cost telemetry                  | [api-reference.md § `usage` block](api-reference.md#usage-block), [pipeline.md § 7](pipeline.md#7-outbound-call-logging--cost-telemetry) | [README.md § What you get back](../README.md#what-you-get-back)                                           |
-| Authentication                  | [api-reference.md § 5 (Authentication)](api-reference.md#5-authentication)                                  | [deployment.md § 8 (Security)](deployment.md#8-security)                                                  |
-| Error codes (RFC 7807)          | [api-reference.md § 6 (Error codes)](api-reference.md#6-error-codes)                                        | [troubleshooting.md](troubleshooting.md)                                                                  |
+| Cost telemetry                  | [api-reference.md § `pipeline.usage` block](api-reference.md#pipelineusage-block), [pipeline.md § 7](pipeline.md#7-outbound-call-logging--cost-telemetry) | [README.md § What you get back](../README.md#what-you-get-back)                                           |
+| Authentication                  | [api-reference.md § 7 (Authentication)](api-reference.md#7-authentication)                                  | [deployment.md § 8 (Security)](deployment.md#8-security)                                                  |
+| Error codes (RFC 7807)          | [api-reference.md § 8 (Error codes)](api-reference.md#8-error-codes)                                        | [troubleshooting.md](troubleshooting.md)                                                                  |
 
 ---
 
