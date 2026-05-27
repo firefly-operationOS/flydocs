@@ -89,7 +89,9 @@ def upgrade() -> None:
         op.execute("ALTER TABLE extractions DROP CONSTRAINT IF EXISTS ck_extraction_jobs_status")
         op.execute("ALTER TABLE extractions DROP CONSTRAINT IF EXISTS ck_extractions_status")
         op.execute("ALTER TABLE extractions DROP CONSTRAINT IF EXISTS ck_extraction_jobs_bbox_refine_status")
-        op.execute("ALTER TABLE extractions DROP CONSTRAINT IF EXISTS ck_extractions_post_processing_bbox_status")
+        op.execute(
+            "ALTER TABLE extractions DROP CONSTRAINT IF EXISTS ck_extractions_post_processing_bbox_status"
+        )
         op.create_check_constraint(
             "ck_extractions_status",
             "extractions",
@@ -122,7 +124,9 @@ def downgrade() -> None:
     # Reverse constraint changes first.
     if bind.dialect.name == "postgresql":
         op.execute("ALTER TABLE extractions DROP CONSTRAINT IF EXISTS ck_extractions_status")
-        op.execute("ALTER TABLE extractions DROP CONSTRAINT IF EXISTS ck_extractions_post_processing_bbox_status")
+        op.execute(
+            "ALTER TABLE extractions DROP CONSTRAINT IF EXISTS ck_extractions_post_processing_bbox_status"
+        )
 
     # Rename the columns back.
     with op.batch_alter_table("extractions") as batch:
