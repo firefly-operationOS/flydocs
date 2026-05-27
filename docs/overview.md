@@ -151,7 +151,7 @@ PipelineOrchestrator  ← builds a fireflyframework-agentic PipelineEngine DAG
       ├──▶ load           DocumentLoader: sniff media_type + page count
       ├──▶ split?         DocumentSplitter (LLM): pages per docType
       ├──▶ extract        MultimodalExtractor (LLM): fields + bbox
-      ├──▶ validate?      FieldValidator: pure-Python, regex/enum/range + StandardValidators
+      ├──▶ validate?      FieldValidator: pure-Python, regex/enum/range + built-in validators
       ├──▶ visual?        VisualAuthenticityChecker (LLM): caller-defined yes/no checks
       ├──▶ content?       ContentAuthenticityChecker (LLM): integrity audit
       ├──▶ judge?         Judge (LLM): re-grade every extracted value
