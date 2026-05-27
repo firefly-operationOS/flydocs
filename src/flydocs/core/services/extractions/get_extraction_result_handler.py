@@ -54,16 +54,12 @@ class ExtractionNotReady(RuntimeError):
 
 @query_handler
 @service
-class GetExtractionResultHandler(
-    QueryHandler[GetExtractionResultQuery, ExtractionResultEnvelope | None]
-):
+class GetExtractionResultHandler(QueryHandler[GetExtractionResultQuery, ExtractionResultEnvelope | None]):
     def __init__(self, repository: ExtractionRepository) -> None:
         super().__init__()
         self._repository = repository
 
-    async def do_handle(
-        self, query: GetExtractionResultQuery
-    ) -> ExtractionResultEnvelope | None:
+    async def do_handle(self, query: GetExtractionResultQuery) -> ExtractionResultEnvelope | None:
         row = await self._repository.get(query.extraction_id)
         if row is None:
             return None
@@ -85,9 +81,7 @@ class GetExtractionResultHandler(
                 raise ExtractionNotReady(row.id, status)
             raise ExtractionNotReady(row.id, status)
         if not row.result_json:
-            raise RuntimeError(
-                f"Extraction {row.id} has status {status.value} but no result_json"
-            )
+            raise RuntimeError(f"Extraction {row.id} has status {status.value} but no result_json")
         return ExtractionResultEnvelope(
             id=row.id,
             result=ExtractionResult.model_validate(row.result_json),

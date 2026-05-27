@@ -49,9 +49,7 @@ def _doc(doc_type: str = "passport", *, with_visual: bool = False) -> DocumentTy
 
 def _request(*, document_types=None, rules=None, options=None) -> ExtractionRequest:
     return ExtractionRequest(
-        files=[
-            FileInput(filename="x.pdf", content_base64=_DUMMY_B64, content_type="application/pdf")
-        ],
+        files=[FileInput(filename="x.pdf", content_base64=_DUMMY_B64, content_type="application/pdf")],
         document_types=document_types or [_doc()],
         rules=rules or [],
         options=options or ExtractionOptions(),
@@ -126,9 +124,7 @@ def test_rule_unknown_validator(validator: RequestValidator) -> None:
         RuleSpec(
             id="r1",
             predicate="x",
-            parents=[
-                RuleValidatorParent(kind="validator", document_type="passport", validator="missing")
-            ],
+            parents=[RuleValidatorParent(kind="validator", document_type="passport", validator="missing")],
         )
     ]
     report = validator.validate(_request(document_types=[_doc()], rules=rules))
@@ -142,9 +138,7 @@ def test_rule_validator_parent_ok_when_declared(validator: RequestValidator) -> 
             id="r1",
             predicate="x",
             parents=[
-                RuleValidatorParent(
-                    kind="validator", document_type="passport", validator="photo_present"
-                )
+                RuleValidatorParent(kind="validator", document_type="passport", validator="photo_present")
             ],
         )
     ]

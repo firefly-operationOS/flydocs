@@ -13,7 +13,7 @@ from typing import Any
 from pyfly.web import controller_advice, exception_handler
 
 from flydocs.core.services.binary import BinaryNormalizationError
-from flydocs.core.services.extract.extract_handler import ExtractionTimedOut
+from flydocs.core.services.extract.extract_handler import ExtractionTimedOutError
 from flydocs.core.services.extractions.cancel_extraction_handler import (
     ExtractionNotCancellable,
 )
@@ -40,9 +40,9 @@ class ExceptionAdvice:
         )
         return problem.model_dump(exclude_none=True)
 
-    @exception_handler(ExtractionTimedOut)
-    async def extraction_timed_out(self, exc: ExtractionTimedOut) -> dict[str, Any]:
-        """Map ``ExtractionTimedOut`` (sync ceiling exceeded) to HTTP 408.
+    @exception_handler(ExtractionTimedOutError)
+    async def extraction_timed_out(self, exc: ExtractionTimedOutError) -> dict[str, Any]:
+        """Map ``ExtractionTimedOutError`` (sync ceiling exceeded) to HTTP 408.
 
         The handler raises this when the in-process orchestrator exceeds
         ``FLYDOCS_SYNC_TIMEOUT_S``. Callers expecting long-running
@@ -59,9 +59,7 @@ class ExceptionAdvice:
         return problem.model_dump(exclude_none=True)
 
     @exception_handler(ExtractionNotCancellable)
-    async def extraction_not_cancellable(
-        self, exc: ExtractionNotCancellable
-    ) -> dict[str, Any]:
+    async def extraction_not_cancellable(self, exc: ExtractionNotCancellable) -> dict[str, Any]:
         problem = ProblemDetails(
             type="https://flydocs.dev/problems/not-cancellable",
             title="Extraction cannot be cancelled",

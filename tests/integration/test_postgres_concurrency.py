@@ -69,9 +69,7 @@ async def test_postgres_atomic_claim_single_winner(pg_repo: ExtractionRepository
     seeded = await _seed(pg_repo)
 
     n = 8
-    results = await asyncio.gather(
-        *(pg_repo.mark_running(seeded.id, lease_seconds=300) for _ in range(n))
-    )
+    results = await asyncio.gather(*(pg_repo.mark_running(seeded.id, lease_seconds=300) for _ in range(n)))
     winners = [r for r in results if r is not None]
     assert len(winners) == 1, f"expected 1 winner, got {len(winners)} (lost-update?!)"
     assert winners[0].attempts == 1

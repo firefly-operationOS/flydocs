@@ -61,3 +61,15 @@ Every existing integration (curl, SDK, webhook receiver, EDA consumer) needs to 
 - Renamed: `docs/standard-validators.md` → `docs/validators.md` (content rewritten).
 - New: `docs/migration-v0-to-v1.md`.
 - Sweep-updated: `docs/pipeline.md`, `docs/rule-engine.md`, `docs/transformations.md`, `docs/concurrency.md`, `docs/overview.md`, `docs/architecture.md`, `docs/deployment.md`, `docs/troubleshooting.md`, `docs/cicd.md`, `docs/docling.md`, `QUICKSTART.md`, `README.md`, `CLAUDE.md`, `sdks/README.md`.
+
+### Fixed (post-merge polish from the live KYB smoke run)
+
+These five fixes were committed to the v1 branch after the live end-to-end
+test against the real Anthropic API (`claude-sonnet-4-6`) on two Spanish
+notarial PDFs (incorporation deed + shareholders agreement):
+
+- **`/api/v1/extract` sync timeout returns HTTP 408 instead of 400.** A new `ExtractionTimedOut(RuntimeError)` is raised by the handler so it propagates through the pyfly CQRS bus to the controller (which previously wrapped `asyncio.TimeoutError`, an `OSError` subclass, as a generic `COMMAND_PROCESSING_ERROR` at HTTP 400). The new `@exception_handler(ExtractionTimedOut)` advice emits the canonical 408 `timeout` problem-detail with `extensions.timeout_s`.
+- **`bbox-worker` EDA destination realigned.** docker-compose pinned the bbox subscriber to the v0 topic `flydocs.bbox.refine`. The v1 main worker publishes to `flydocs.extractions.post_processing` per the renamed event-type. Without this fix async jobs with `bbox_refine=true` would hang at `post_processing.bbox_refinement.status=pending` indefinitely.
+- **Alembic `migrations/env.py`** still imported `from flydocs.models.entities.extraction_job` after the v1 entity rename → fatal at API container startup when `RUN_MIGRATIONS=true` (the default).
+- **`src/flydocs/resources/prompts/transform.yaml`** used legacy `id:` / `system:` / `user:` keys; the catalogue's loader expects `name:` / `system_template:` / `user_template:` (with a `required_variables` declaration). The mismatch crashed `PromptCatalog.from_resources()` at startup.
+- **`scripts/kyb_real_test.py`** committed as the canonical live smoke runner. Run against the docker stack (`docker compose up -d` + `ANTHROPIC_API_KEY` in `.env`) to validate sync (`POST /api/v1/extract`) and async (`POST /api/v1/extractions`) end-to-end with multi-file, multi-document-type, recursive `Field`, judge, `bbox_refine` post-processing, six cross-document rules, and `validators` / `visual_checks` declarations. Verified live: sync 72s/175k tokens/$0.60; async 271s/772k tokens/$2.59; all six KYB rules resolve correctly (including a `partial` shareholders-reconciliation verdict that the deed and pacto don't share the same party set).

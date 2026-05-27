@@ -218,13 +218,9 @@ class ExtractionsController:
         id returns ``404``.
         """
         try:
-            cancelled = await self._commands.send(
-                CancelExtractionCommand(extraction_id=extraction_id)
-            )
+            cancelled = await self._commands.send(CancelExtractionCommand(extraction_id=extraction_id))
         except ExtractionNotCancellable as exc:
-            raise _http_problem(
-                409, "not_cancellable", "Extraction cannot be cancelled", str(exc)
-            ) from exc
+            raise _http_problem(409, "not_cancellable", "Extraction cannot be cancelled", str(exc)) from exc
         if cancelled is None:
             raise ResourceNotFoundException(
                 f"Extraction {extraction_id!r} not found",

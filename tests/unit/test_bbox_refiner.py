@@ -128,9 +128,7 @@ async def test_recurses_into_array_field_rows(refiner: BboxRefiner) -> None:
     pdf = _make_pdf(["Items list", "Apple 100", "Banana 200"])
     apple_qty = ExtractedField(name="qty", value=100, pages=[1], bbox=_llm_bbox())
     apple_name = ExtractedField(name="name", value="Apple", pages=[1], bbox=_llm_bbox())
-    apple_row = ExtractedField(
-        name="row", value=[apple_name, apple_qty], pages=[1], bbox=_llm_bbox()
-    )
+    apple_row = ExtractedField(name="row", value=[apple_name, apple_qty], pages=[1], bbox=_llm_bbox())
     items = ExtractedField(name="items", value=[apple_row], pages=[1], bbox=_llm_bbox())
     group = ExtractedFieldGroup(name="invoice", fields=[items])
     counters = await refiner.refine(

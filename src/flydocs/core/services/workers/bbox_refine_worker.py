@@ -115,9 +115,7 @@ class BboxRefineWorker:
     async def run_forever(self) -> None:
         # Subscribe before start() -- the EDA adapters only spin up the
         # consumer loop when at least one handler is registered.
-        self._publisher.subscribe(
-            EVENT_TYPE_EXTRACTION_POST_PROCESSING_REQUESTED, self._on_event
-        )
+        self._publisher.subscribe(EVENT_TYPE_EXTRACTION_POST_PROCESSING_REQUESTED, self._on_event)
         await self._publisher.start()
         logger.info(
             "BboxRefineWorker %s started (adapter=%s, destination=%s, event_type=%s)",
@@ -150,9 +148,7 @@ class BboxRefineWorker:
     async def _process(self, extraction_id: str) -> None:
         row = await self._repository.get(extraction_id)
         if row is None:
-            logger.warning(
-                "EDA delivered unknown extraction %s -- dropping", extraction_id
-            )
+            logger.warning("EDA delivered unknown extraction %s -- dropping", extraction_id)
             return
         # Atomic claim: precondition matches pending (first delivery) or
         # stale running (previous claimant crashed past its lease).
@@ -288,9 +284,7 @@ class BboxRefineWorker:
             if entry.get("content_base64")
         ]
         if not sources:
-            raise ValueError(
-                f"extraction {row.id} has no decodable file bytes in schema_json"
-            )
+            raise ValueError(f"extraction {row.id} has no decodable file bytes in schema_json")
 
         normalised: list[NormalisedBinary] = []
         for raw_bytes, media_type, name in sources:
@@ -335,9 +329,7 @@ class BboxRefineWorker:
             await asyncio.sleep(delay_s)
             row = await self._repository.get(extraction_id)
             if row is None:
-                logger.warning(
-                    "Delayed republish: extraction %s vanished", extraction_id
-                )
+                logger.warning("Delayed republish: extraction %s vanished", extraction_id)
                 return
             envelope = EventEnvelope(
                 event_type=EVENT_TYPE_EXTRACTION_POST_PROCESSING_REQUESTED,

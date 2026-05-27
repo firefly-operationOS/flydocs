@@ -71,9 +71,7 @@ class _StubRepo:
 @pytest.mark.asyncio
 async def test_returns_result_for_succeeded() -> None:
     handler = GetExtractionResultHandler(repository=_StubRepo(_StubExtraction()))  # type: ignore[arg-type]
-    out = await handler.do_handle(
-        GetExtractionResultQuery(extraction_id="ext_TEST0000000000000000000000A")
-    )
+    out = await handler.do_handle(GetExtractionResultQuery(extraction_id="ext_TEST0000000000000000000000A"))
     assert out is not None
     assert out.id == "ext_TEST0000000000000000000000A"
 
@@ -83,9 +81,7 @@ async def test_returns_result_when_bbox_leg_pending() -> None:
     """The main pipeline is succeeded; the bbox leg is additive post-processing."""
     ext = _StubExtraction(post_processing_bbox_status=PostProcessingStatus.PENDING.value)
     handler = GetExtractionResultHandler(repository=_StubRepo(ext))  # type: ignore[arg-type]
-    out = await handler.do_handle(
-        GetExtractionResultQuery(extraction_id="ext_TEST0000000000000000000000A")
-    )
+    out = await handler.do_handle(GetExtractionResultQuery(extraction_id="ext_TEST0000000000000000000000A"))
     assert out is not None
     assert out.id == "ext_TEST0000000000000000000000A"
 
@@ -94,9 +90,7 @@ async def test_returns_result_when_bbox_leg_pending() -> None:
 async def test_returns_result_when_bbox_leg_running() -> None:
     ext = _StubExtraction(post_processing_bbox_status=PostProcessingStatus.RUNNING.value)
     handler = GetExtractionResultHandler(repository=_StubRepo(ext))  # type: ignore[arg-type]
-    out = await handler.do_handle(
-        GetExtractionResultQuery(extraction_id="ext_TEST0000000000000000000000A")
-    )
+    out = await handler.do_handle(GetExtractionResultQuery(extraction_id="ext_TEST0000000000000000000000A"))
     assert out is not None
 
 
@@ -105,9 +99,7 @@ async def test_raises_not_ready_for_queued() -> None:
     ext = _StubExtraction(status=ExtractionStatus.QUEUED.value, result_json=None)
     handler = GetExtractionResultHandler(repository=_StubRepo(ext))  # type: ignore[arg-type]
     with pytest.raises(ExtractionNotReady) as ei:
-        await handler.do_handle(
-            GetExtractionResultQuery(extraction_id="ext_TEST0000000000000000000000A")
-        )
+        await handler.do_handle(GetExtractionResultQuery(extraction_id="ext_TEST0000000000000000000000A"))
     assert ei.value.status == ExtractionStatus.QUEUED
 
 
@@ -116,9 +108,7 @@ async def test_raises_not_ready_for_failed() -> None:
     ext = _StubExtraction(status=ExtractionStatus.FAILED.value, result_json=None)
     handler = GetExtractionResultHandler(repository=_StubRepo(ext))  # type: ignore[arg-type]
     with pytest.raises(ExtractionNotReady) as ei:
-        await handler.do_handle(
-            GetExtractionResultQuery(extraction_id="ext_TEST0000000000000000000000A")
-        )
+        await handler.do_handle(GetExtractionResultQuery(extraction_id="ext_TEST0000000000000000000000A"))
     assert ei.value.status == ExtractionStatus.FAILED
 
 

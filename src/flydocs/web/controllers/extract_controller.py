@@ -17,7 +17,7 @@ from pyfly.web import Body, Valid, post_mapping, request_mapping
 
 from flydocs.config import IDPSettings
 from flydocs.core.services.extract import ExtractCommand
-from flydocs.core.services.extract.extract_handler import ExtractionTimedOut
+from flydocs.core.services.extract.extract_handler import ExtractionTimedOutError
 from flydocs.core.services.validation import RequestValidator, ValidationReport
 from flydocs.interfaces.dtos.extract import ExtractionRequest, ExtractionResult
 
@@ -121,7 +121,7 @@ class ExtractController:
         _enforce_semantic_validation(request, self._validator)
         try:
             return await self._commands.send(ExtractCommand(request=request))
-        except ExtractionTimedOut as exc:
+        except ExtractionTimedOutError as exc:
             raise _http_problem(408, "timeout", "Extraction timed out", str(exc)) from exc
         except TimeoutError as exc:
             raise _http_problem(408, "timeout", "Extraction timed out", str(exc)) from exc

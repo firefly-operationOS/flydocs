@@ -131,9 +131,7 @@ class _Repo:
         self.ext.post_processing_bbox_status = "succeeded"
         return self.ext
 
-    async def fail_bbox_refinement(
-        self, ext_id: str, *, code: str, message: str
-    ) -> _Ext | None:
+    async def fail_bbox_refinement(self, ext_id: str, *, code: str, message: str) -> _Ext | None:
         self.calls.append("fail_bbox_refinement")
         if self.finalise_returns_none:
             return None

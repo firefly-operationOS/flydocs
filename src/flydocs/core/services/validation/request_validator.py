@@ -134,8 +134,7 @@ class RequestValidator:
                         severity="error",
                         code="empty_field_groups",
                         message=(
-                            f"DocumentTypeSpec {doc_type!r} declares no field_groups -- "
-                            "nothing to extract."
+                            f"DocumentTypeSpec {doc_type!r} declares no field_groups -- nothing to extract."
                         ),
                         path=f"document_types[{d_index}].field_groups",
                     )
@@ -191,8 +190,7 @@ class RequestValidator:
         # Catalog what's declared so rule parents can be resolved.
         doc_index = {doc.id: doc for doc in request.document_types}
         fields_per_doc: dict[str, set[str]] = {
-            dt: {f.name for g in d.field_groups for f in g.fields}
-            for dt, d in doc_index.items()
+            dt: {f.name for g in d.field_groups for f in g.fields} for dt, d in doc_index.items()
         }
         validators_per_doc: dict[str, set[str]] = {
             dt: {v.name for v in d.visual_checks} for dt, d in doc_index.items()
@@ -308,9 +306,7 @@ class RequestValidator:
         rule_ids = {r.id for r in request.rules}
         sorter: TopologicalSorter[str] = TopologicalSorter()
         for rule in request.rules:
-            parents = [
-                p.rule for p in rule.parents if isinstance(p, RuleRuleParent) and p.rule in rule_ids
-            ]
+            parents = [p.rule for p in rule.parents if isinstance(p, RuleRuleParent) and p.rule in rule_ids]
             sorter.add(rule.id, *parents)
         try:
             sorter.prepare()

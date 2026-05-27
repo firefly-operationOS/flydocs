@@ -165,14 +165,10 @@ async def test_multi_file_idempotency_hash_includes_every_file() -> None:
         for i in range(2)
     ]
     await handler_a.do_handle(
-        SubmitExtractionCommand(
-            request=SubmitExtractionRequest(files=files, document_types=[_doc_spec()])
-        )
+        SubmitExtractionCommand(request=SubmitExtractionRequest(files=files, document_types=[_doc_spec()]))
     )
     await handler_b.do_handle(
-        SubmitExtractionCommand(
-            request=SubmitExtractionRequest(files=files, document_types=[_doc_spec()])
-        )
+        SubmitExtractionCommand(request=SubmitExtractionRequest(files=files, document_types=[_doc_spec()]))
     )
     assert captured_a["ext"].content_sha256 == captured_b["ext"].content_sha256
 
@@ -239,9 +235,7 @@ async def test_concurrent_idempotent_submit_resolves_winning_row() -> None:
         ],
         document_types=[_doc_spec()],
     )
-    response = await handler.do_handle(
-        SubmitExtractionCommand(request=request, idempotency_key="dupe-key")
-    )
+    response = await handler.do_handle(SubmitExtractionCommand(request=request, idempotency_key="dupe-key"))
 
     assert response.id == "ext_WIN00000000000000000000000"
     assert response.status is ExtractionStatus.QUEUED

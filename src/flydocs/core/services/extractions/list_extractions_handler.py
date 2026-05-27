@@ -48,8 +48,7 @@ class ListExtractionsHandler(QueryHandler[ListExtractionsQuery, ExtractionListRe
     async def do_handle(self, query: ListExtractionsQuery) -> ExtractionListResponse:
         rows, total = await self._repository.list_extractions(
             statuses=[s.value for s in query.statuses] or None,
-            post_processing_bbox_statuses=[s.value for s in query.post_processing_statuses]
-            or None,
+            post_processing_bbox_statuses=[s.value for s in query.post_processing_statuses] or None,
             created_after=query.created_after,
             created_before=query.created_before,
             idempotency_key=query.idempotency_key,
@@ -57,9 +56,7 @@ class ListExtractionsHandler(QueryHandler[ListExtractionsQuery, ExtractionListRe
             offset=query.offset,
         )
         items = [row_to_extraction(r) for r in rows]
-        return ExtractionListResponse(
-            items=items, total=total, limit=query.limit, offset=query.offset
-        )
+        return ExtractionListResponse(items=items, total=total, limit=query.limit, offset=query.offset)
 
 
 __all__ = ["ListExtractionsHandler", "ListExtractionsQuery"]

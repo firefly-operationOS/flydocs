@@ -92,10 +92,7 @@ async def test_passes_filters_through_and_maps_rows() -> None:
     assert response.items[1].status is ExtractionStatus.SUCCEEDED
     # The second row carries a post_processing block with pending status.
     assert response.items[1].post_processing is not None
-    assert (
-        response.items[1].post_processing.bbox_refinement.status
-        is PostProcessingStatus.PENDING
-    )
+    assert response.items[1].post_processing.bbox_refinement.status is PostProcessingStatus.PENDING
 
 
 @pytest.mark.asyncio

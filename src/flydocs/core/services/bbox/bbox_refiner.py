@@ -106,8 +106,7 @@ class BboxRefiner:
         already_grounded_ids = {
             str(idx)
             for idx, field in enumerate(leaves)
-            if field.bbox is not None
-            and field.bbox.source in (BboxSource.PDF_TEXT, BboxSource.OCR)
+            if field.bbox is not None and field.bbox.source in (BboxSource.PDF_TEXT, BboxSource.OCR)
         }
         residual_targets = [t for t in targets if t[0] not in already_grounded_ids]
         if residual_targets:

@@ -195,9 +195,7 @@ def _render(result, request) -> str:
         out.append(f"pages         : {doc.pages}")
         out.append(f"confidence    : {doc.confidence:.2f}")
         out.append("")
-        out.append(
-            f"{'FIELD':25s} {'VALUE':40s} {'CONF':>5s} {'PAGE':>4s} {'JUDGE':10s} {'VALID':6s}"
-        )
+        out.append(f"{'FIELD':25s} {'VALUE':40s} {'CONF':>5s} {'PAGE':>4s} {'JUDGE':10s} {'VALID':6s}")
         for group in doc.field_groups:
             out.append(f"  [group] {group.name}")
             for f in group.fields:
@@ -225,9 +223,7 @@ def _render(result, request) -> str:
             out.append("VISUAL AUTHENTICITY")
             for v in doc.authenticity.visual:
                 badge = "PASS" if v.passed else "FAIL"
-                out.append(
-                    f"  - {v.name:30s} {badge:5s} conf={v.confidence:.2f} -- {(v.notes or '')[:60]}"
-                )
+                out.append(f"  - {v.name:30s} {badge:5s} conf={v.confidence:.2f} -- {(v.notes or '')[:60]}")
             out.append("")
 
     if result.rule_results:

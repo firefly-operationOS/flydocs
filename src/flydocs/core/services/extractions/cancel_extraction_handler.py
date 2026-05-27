@@ -53,9 +53,7 @@ class CancelExtractionHandler(CommandHandler[CancelExtractionCommand, Extraction
         row = await self._repository.get(command.extraction_id)
         if row is None:
             return None
-        raise ExtractionNotCancellable(
-            f"Extraction {row.id!r} cannot be cancelled in status {row.status}"
-        )
+        raise ExtractionNotCancellable(f"Extraction {row.id!r} cannot be cancelled in status {row.status}")
 
 
 __all__ = [

@@ -92,9 +92,7 @@ class VisualAuthenticityChecker:
             raw = raw_by_name.get(spec.name)
             if raw is None:
                 outcomes.append(
-                    VisualCheckResult(
-                        name=spec.name, passed=False, confidence=0.0, notes="Not evaluated"
-                    )
+                    VisualCheckResult(name=spec.name, passed=False, confidence=0.0, notes="Not evaluated")
                 )
                 continue
             outcomes.append(

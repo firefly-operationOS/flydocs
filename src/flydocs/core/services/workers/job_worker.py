@@ -171,9 +171,7 @@ class ExtractionWorker:
         # (or stale-RUNNING) extraction. ``None`` means another worker
         # beat us to it or the row was cancelled between our ``get``
         # and this claim -- both are silent no-ops.
-        claimed = await self._repository.mark_running(
-            row.id, lease_seconds=self._settings.job_run_lease_s
-        )
+        claimed = await self._repository.mark_running(row.id, lease_seconds=self._settings.job_run_lease_s)
         if claimed is None:
             logger.info(
                 "Extraction %s could not be claimed -- already owned by another worker or "
@@ -301,9 +299,7 @@ class ExtractionWorker:
             )
 
             if terminal:
-                failed = await self._repository.mark_failed(
-                    row.id, code=error_code, message=str(exc)
-                )
+                failed = await self._repository.mark_failed(row.id, code=error_code, message=str(exc))
                 if failed is None:
                     logger.info(
                         "Extraction %s no longer in RUNNING -- another worker handled the "

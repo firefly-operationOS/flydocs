@@ -41,9 +41,7 @@ def test_good_bbox_for_plausible_text_line() -> None:
 
 
 def test_suspicious_when_bbox_covers_almost_full_page() -> None:
-    field = ExtractedField(
-        name="title", value="Some title", bbox=_bbox(0.01, 0.01, 0.99, 0.99)
-    )
+    field = ExtractedField(name="title", value="Some title", bbox=_bbox(0.01, 0.01, 0.99, 0.99))
     _validate(field)
     assert field.bbox is not None
     assert field.bbox.quality is BboxQuality.SUSPICIOUS

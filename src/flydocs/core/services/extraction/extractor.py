@@ -261,9 +261,7 @@ class MultimodalExtractor:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _suspicious_empty_arrays(
-        doc: DocumentTypeSpec, groups: list[ExtractedFieldGroup]
-    ) -> list[str]:
+    def _suspicious_empty_arrays(doc: DocumentTypeSpec, groups: list[ExtractedFieldGroup]) -> list[str]:
         """Names of array fields that look like a structured-output
         empty-default rather than a legitimately empty result.
 
@@ -315,9 +313,7 @@ class MultimodalExtractor:
             if retry_group is None:
                 merged.append(orig_group)
                 continue
-            retry_fields_by_name: dict[str, ExtractedField] = {
-                f.name: f for f in retry_group.fields
-            }
+            retry_fields_by_name: dict[str, ExtractedField] = {f.name: f for f in retry_group.fields}
             new_fields: list[ExtractedField] = []
             for orig_field in orig_group.fields:
                 if orig_field.name in empty_arrays and orig_field.name in retry_fields_by_name:
@@ -391,16 +387,10 @@ class MultimodalExtractor:
         raw = group.model_dump(mode="json", exclude_none=True)
         raw["description"] = self._compress(raw.get("description"), self._SCHEMA_GROUP_DESC_MAX)
         for field in raw.get("fields", []) or []:
-            field["description"] = self._compress(
-                field.get("description"), self._SCHEMA_FIELD_DESC_MAX
-            )
+            field["description"] = self._compress(field.get("description"), self._SCHEMA_FIELD_DESC_MAX)
             items = field.get("items")
             if isinstance(items, dict):
-                items["description"] = self._compress(
-                    items.get("description"), self._SCHEMA_ITEM_DESC_MAX
-                )
+                items["description"] = self._compress(items.get("description"), self._SCHEMA_ITEM_DESC_MAX)
                 for sub in items.get("fields", []) or []:
-                    sub["description"] = self._compress(
-                        sub.get("description"), self._SCHEMA_ITEM_DESC_MAX
-                    )
+                    sub["description"] = self._compress(sub.get("description"), self._SCHEMA_ITEM_DESC_MAX)
         return raw

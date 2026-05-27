@@ -17,7 +17,7 @@ from flydocs.interfaces.dtos.extract import ExtractionResult
 logger = logging.getLogger(__name__)
 
 
-class ExtractionTimedOut(RuntimeError):
+class ExtractionTimedOutError(RuntimeError):
     """Raised when sync extraction exceeds ``FLYDOCS_SYNC_TIMEOUT_S``.
 
     Subclasses :class:`RuntimeError` so the pyfly CQRS bus lets it
@@ -48,4 +48,4 @@ class ExtractHandler(CommandHandler[ExtractCommand, ExtractionResult]):
             )
         except TimeoutError as exc:
             logger.warning("Sync extraction timed out after %ds", self._settings.sync_timeout_s)
-            raise ExtractionTimedOut(self._settings.sync_timeout_s) from exc
+            raise ExtractionTimedOutError(self._settings.sync_timeout_s) from exc

@@ -99,14 +99,10 @@ class _StubRepo:
     async def get(self, ext_id: str) -> _StubExtraction | None:
         return self.ext if self.ext.id == ext_id else None
 
-    async def claim_bbox_refinement(
-        self, ext_id: str, *, lease_seconds: int
-    ) -> _StubExtraction | None:
+    async def claim_bbox_refinement(self, ext_id: str, *, lease_seconds: int) -> _StubExtraction | None:
         # Production semantics: claim only when main is succeeded AND the
         # sub-status is pending (or stale running).
-        self.calls.append(
-            ("claim_bbox_refinement", {"ext_id": ext_id, "lease_seconds": lease_seconds})
-        )
+        self.calls.append(("claim_bbox_refinement", {"ext_id": ext_id, "lease_seconds": lease_seconds}))
         if self.ext.status != ExtractionStatus.SUCCEEDED.value:
             return None
         if self.ext.post_processing_bbox_status not in ("pending", "running"):
@@ -123,9 +119,7 @@ class _StubRepo:
         self.calls.append(("complete_bbox_refinement", {"ext_id": ext_id}))
         return self.ext
 
-    async def fail_bbox_refinement(
-        self, ext_id: str, *, code: str, message: str
-    ) -> _StubExtraction | None:
+    async def fail_bbox_refinement(self, ext_id: str, *, code: str, message: str) -> _StubExtraction | None:
         self.ext.post_processing_bbox_status = "failed"
         self.calls.append(("fail_bbox_refinement", {"code": code, "message": message}))
         return self.ext
