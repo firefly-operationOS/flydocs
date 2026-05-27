@@ -21,11 +21,7 @@ dependencies = [
 
     # GenAI metaframework -- FireflyAgent with multimodal content (BinaryContent/ImageUrl)
     # over pydantic-ai. Pulls in the OpenAI / Anthropic / Bedrock providers via pydantic-ai-slim.
-    # Upper-cap excludes 26.5.21 which pulls a pydantic-ai version line whose
-    # transitive ``mistralai>=2.0.0`` constraint only has pre-release builds
-    # available on PyPI today. Bump the upper bound once mistralai 2.x lands
-    # as a stable release.
-    "fireflyframework-agentic[rest,security,redis]>=26.5.11,<26.5.21",
+    "fireflyframework-agentic[rest,security,redis]>=26.5.11",
 
     # Document handling.
     #
@@ -124,6 +120,26 @@ docling = [
 [build-system]
 requires = ["hatchling>=1.18"]
 build-backend = "hatchling.build"
+
+[tool.uv]
+# fireflyframework-agentic@main (26.5.21) pulls a pydantic-ai version line
+# whose transitive ``pydantic-ai-slim[mistral]`` brings in
+# ``mistralai>=2.0.0``. mistralai 2.x exists today only as pre-release
+# builds on PyPI (2.4.0rc2), and the resolver refuses to mix stable +
+# pre-release without explicit opt-in. Override the transitive constraint
+# to keep ``mistralai`` on the stable 1.x line — flydocs never touches
+# the mistral provider, the [mistral] extra is dragged in by
+# pydantic-ai's own deps. Drop this override once pydantic-ai 1.x line
+# is yanked or mistralai 2.x reaches stable.
+#
+# Also override ``opentelemetry-api`` because mistralai 1.x's transitive
+# dep on opentelemetry-semantic-conventions 0.60b1 (which pins
+# opentelemetry-api==1.39.1) collides with pyfly[observability]'s
+# opentelemetry-api>=1.41.1. We pick the newer one (pyfly is the
+# heavier user of the API).
+override-dependencies = [
+    "mistralai>=1.0.0,<2.0.0",
+]
 
 [tool.uv.sources]
 # Sibling-repo path sources -- mirror what flydesk-agent does so both
