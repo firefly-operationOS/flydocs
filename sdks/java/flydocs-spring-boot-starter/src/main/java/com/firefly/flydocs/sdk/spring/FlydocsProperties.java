@@ -23,17 +23,15 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 /**
  * Configuration properties for the flydocs SDK starter.
  *
- * <p>All knobs are optional except {@link #baseUrl}; the starter's
- * auto-configuration refuses to wire the client beans without it. Set
- * via {@code application.yaml}:</p>
+ * <p>{@link #baseUrl} is required; everything else has a sane default.</p>
  *
  * <pre>{@code
  * flydocs:
- *   base-url: http://localhost:8400
+ *   base-url: https://flydocs.example.com
+ *   api-key: ${FLYDOCS_API_KEY}
  *   timeout: 60s
- *   max-attempts: 3
  *   webhook:
- *     hmac-secret: ${FLYDOCS_WEBHOOK_HMAC_SECRET}
+ *     secret: ${FLYDOCS_WEBHOOK_SECRET}
  * }</pre>
  */
 @ConfigurationProperties(prefix = "flydocs")
@@ -45,6 +43,13 @@ public class FlydocsProperties {
      */
     @Nullable
     private String baseUrl;
+
+    /**
+     * API key sent as {@code Authorization: Bearer <key>} on every request.
+     * Leave unset for unauthenticated local development.
+     */
+    @Nullable
+    private String apiKey;
 
     /**
      * Per-call HTTP response timeout (start of request to last byte
@@ -72,16 +77,13 @@ public class FlydocsProperties {
     private Duration pendingAcquireTimeout = Duration.ofSeconds(45);
 
     /**
-     * Maximum response body the client buffers in memory. Default 64
-     * MiB; large enough for the biggest extraction-result payload the
-     * service emits today.
+     * Maximum response body the client buffers in memory. Default 64 MiB.
      */
     private int maxInMemorySize = 64 * 1024 * 1024;
 
     /**
      * Optional caller identifier added as the {@code X-Tenant-Id}
-     * header on every request. Leave unset if your service propagates
-     * tenant information through some other mechanism.
+     * header on every request.
      */
     @Nullable
     private String tenantId;
@@ -95,6 +97,15 @@ public class FlydocsProperties {
 
     public void setBaseUrl(@Nullable String baseUrl) {
         this.baseUrl = baseUrl;
+    }
+
+    @Nullable
+    public String getApiKey() {
+        return apiKey;
+    }
+
+    public void setApiKey(@Nullable String apiKey) {
+        this.apiKey = apiKey;
     }
 
     public Duration getTimeout() {
@@ -161,20 +172,21 @@ public class FlydocsProperties {
     /** Nested webhook settings. */
     public static class Webhook {
         /**
-         * HMAC-SHA256 secret used to verify inbound webhook
-         * signatures. When set, the starter publishes a
-         * {@code WebhookVerifier} bean.
+         * HMAC-SHA256 secret used to verify inbound webhook signatures.
+         * When set, the starter publishes a {@link com.firefly.flydocs.sdk.webhook.WebhookVerifier}
+         * bean and registers a {@link FlydocsWebhookArgumentResolver} so
+         * {@code @FlydocsWebhook} parameters resolve correctly.
          */
         @Nullable
-        private String hmacSecret;
+        private String secret;
 
         @Nullable
-        public String getHmacSecret() {
-            return hmacSecret;
+        public String getSecret() {
+            return secret;
         }
 
-        public void setHmacSecret(@Nullable String hmacSecret) {
-            this.hmacSecret = hmacSecret;
+        public void setSecret(@Nullable String secret) {
+            this.secret = secret;
         }
     }
 }

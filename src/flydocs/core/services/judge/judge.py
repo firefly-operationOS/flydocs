@@ -21,7 +21,7 @@ from fireflyframework_agentic.types import BinaryContent
 from pydantic import BaseModel, Field
 
 from flydocs.core.observability import DEFAULT_MIDDLEWARE, timed_agent_run
-from flydocs.interfaces.dtos.doc import DocSpec
+from flydocs.interfaces.dtos.document_type import DocumentTypeSpec
 from flydocs.interfaces.dtos.field import (
     ExtractedField,
     ExtractedFieldGroup,
@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 
 class _RawJudgeField(BaseModel):
-    fieldName: str
+    name: str
     status: JudgeStatus = JudgeStatus.UNCERTAIN
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     evidence: str = ""
@@ -43,8 +43,8 @@ class _RawJudgeField(BaseModel):
 
 
 class _RawJudgeGroup(BaseModel):
-    fieldGroupName: str
-    fieldGroupFields: list[_RawJudgeField] = Field(default_factory=list)
+    name: str
+    fields: list[_RawJudgeField] = Field(default_factory=list)
 
 
 class _JudgeOutput(BaseModel):
@@ -71,7 +71,7 @@ class Judge:
         *,
         document_bytes: bytes,
         media_type: str,
-        doc: DocSpec,
+        doc: DocumentTypeSpec,
         extracted_groups: list[ExtractedFieldGroup],
         intention: str,
         model: str | None = None,
@@ -86,7 +86,7 @@ class Judge:
         )
         prompt = self._template.render(
             intention=intention,
-            documentType=doc.docType.documentType,
+            documentType=doc.id,
             extracted_fields_json=extracted_fields_json,
         )
         agent: FireflyAgent[Any, _JudgeOutput] = FireflyAgent(
@@ -105,13 +105,13 @@ class Judge:
         ]
         run_result = await timed_agent_run(agent, content, op="judge", model=model or self._model)
         judge_by_group: dict[str, dict[str, _RawJudgeField]] = {
-            g.fieldGroupName: {f.fieldName: f for f in g.fieldGroupFields} for g in run_result.output.fields
+            g.name: {f.name: f for f in g.fields} for g in run_result.output.fields
         }
 
         for group in extracted_groups:
-            field_map = judge_by_group.get(group.fieldGroupName, {})
-            for field in group.fieldGroupFields:
-                self._apply(field, field_map.get(field.fieldName))
+            field_map = judge_by_group.get(group.name, {})
+            for field in group.fields:
+                self._apply(field, field_map.get(field.name))
         return extracted_groups
 
     def _apply(self, field: ExtractedField, raw: _RawJudgeField | None) -> None:
@@ -124,11 +124,11 @@ class Judge:
             notes=raw.notes,
             flag_for_review=raw.flag_for_review,
         )
-        if raw.items and isinstance(field.fieldValueFound, list):
-            for row in field.fieldValueFound:
-                if not isinstance(row, ExtractedField) or not isinstance(row.fieldValueFound, list):
+        if raw.items and isinstance(field.value, list):
+            for row in field.value:
+                if not isinstance(row, ExtractedField) or not isinstance(row.value, list):
                     continue
-                raw_items = {r.fieldName: r for r in raw.items}
-                for sub_field in row.fieldValueFound:
+                raw_items = {r.name: r for r in raw.items}
+                for sub_field in row.value:
                     if isinstance(sub_field, ExtractedField):
-                        self._apply(sub_field, raw_items.get(sub_field.fieldName))
+                        self._apply(sub_field, raw_items.get(sub_field.name))

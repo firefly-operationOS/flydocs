@@ -34,18 +34,18 @@ Then in your project's `pom.xml`:
 <dependency>
   <groupId>com.firefly.flydocs</groupId>
   <artifactId>flydocs-sdk</artifactId>
-  <version>26.05.02</version>
+  <version>26.6.0</version>
 </dependency>
 
-<!-- ...OR Spring Boot starter (recommended on Boot 3.5.x) -->
+<!-- ...OR Spring Boot starter (recommended on Boot 3.x) -->
 <dependency>
   <groupId>com.firefly.flydocs</groupId>
   <artifactId>flydocs-spring-boot-starter</artifactId>
-  <version>26.05.02</version>
+  <version>26.6.0</version>
 </dependency>
 ```
 
-Requires **Java 25** and pairs with **Spring Boot 3.5.x** managed dependencies
+Requires **Java 25** and pairs with **Spring Boot 3.x** managed dependencies
 (the plain SDK works fine outside Spring too — the only transitive runtime
 requirement is `spring-webflux` + Jackson). The starter wires
 `FlydocsClient` / `FlydocsClientAsync` (and an optional `WebhookVerifier`)
@@ -72,49 +72,47 @@ import java.time.Duration;
 
 public class Quickstart {
 
-    public static void main(String[] args) {
-        // 1. Describe what you want extracted. The DocSpec carries the field
-        //    schema; the FieldGroup bundles related fields under one name.
-        DocSpec invoice = DocSpec.builder("invoice")
+    public static void main(String[] args) throws Exception {
+        // 1. Describe what you want extracted. The DocumentTypeSpec carries
+        //    the field schema; FieldGroup bundles related fields under one name.
+        DocumentTypeSpec invoice = DocumentTypeSpec.builder("invoice")
                 .addFieldGroup("totals",
-                        FieldSpec.required("total_amount", FieldType.NUMBER),
-                        FieldSpec.required("currency",     FieldType.STRING))
+                        Field.required("total_amount", FieldType.NUMBER),
+                        Field.required("currency",     FieldType.STRING))
                 .build();
 
-        // 2. Build the request — one or more files + one or more DocSpecs.
+        // 2. Build the request — one or more files + one or more DocumentTypeSpecs.
         ExtractionRequest request = ExtractionRequest.builder()
-                .addDocument(DocumentInput.ofPath(Path.of("invoice.pdf")))
-                .addDocSpec(invoice)
+                .addFile(FileInput.ofPath(Path.of("invoice.pdf")))
+                .addDocumentType(invoice)
                 .build();
 
         // 3. Call the service. FlydocsClientAsync is the primary integration
         //    surface; it's reactive (Project Reactor) and non-blocking.
-        FlydocsClientAsync flydocs = FlydocsClientAsync.builder()
+        try (FlydocsClientAsync flydocs = FlydocsClientAsync.builder()
                 .baseUrl("http://localhost:8400")
-                .build();
+                .build()) {
 
-        ExtractionResult result = flydocs.extract(request)
-                .block(Duration.ofSeconds(60));
+            ExtractionResult result = flydocs.extract(request)
+                    .block(Duration.ofSeconds(60));
 
-        // 4. Read the response. ExtractionResult's per-document shape is
-        //    intentionally typed as List<Map<String,Object>> so the SDK
-        //    keeps working when the service adds new attributes without a
-        //    coordinated release. Pull values by key for now; switch to
-        //    your own typed mapping when the schema is settled.
-        System.out.printf("model=%s   latency=%dms%n",
-                result.model(), result.latencyMs());
-        for (var doc : result.documents()) {
-            System.out.printf("  doc[type=%s] keys=%s%n",
-                    doc.getOrDefault("document_type", "?"),
-                    doc.keySet());
+            // 4. Read the response. Every shape is now strongly typed.
+            System.out.printf("id=%s   status=%s   model=%s   latency=%dms%n",
+                    result.id(), result.status(),
+                    result.pipeline().model(),
+                    result.pipeline().latencyMs());
+            for (Document doc : result.documents()) {
+                System.out.printf("  doc[type=%s] pages=%s groups=%d%n",
+                        doc.type(), doc.pages(), doc.fieldGroups().size());
+            }
         }
     }
 }
 ```
 
 ```
-model=anthropic:claude-sonnet-4-6   latency=412ms
-  doc[type=invoice] keys=[document_type, pages, fields, source_file]
+id=ext_01HEM2ZZ7M0Q8   status=success   model=anthropic:claude-sonnet-4-6   latency=412ms
+  doc[type=invoice] pages=[1] groups=1
 ```
 
 That's it — you've extracted structured data from a document.
@@ -123,17 +121,18 @@ That's it — you've extracted structured data from a document.
 
 ## Quickstart — Spring Boot starter
 
-If you're on Boot 3.5.x, swap the plain SDK for the starter and let
+If you're on Boot 3.x, swap the plain SDK for the starter and let
 the autoconfig wire everything from properties:
 
 ```yaml
 # application.yaml
 flydocs:
   base-url: http://localhost:8400
+  api-key: ${FLYDOCS_API_KEY}                  # optional, Authorization: Bearer
   timeout: 60s
   max-attempts: 3                              # retry transient 5xx
   webhook:
-    hmac-secret: ${FLYDOCS_WEBHOOK_HMAC_SECRET}  # optional
+    secret: ${FLYDOCS_WEBHOOK_SECRET}          # optional
 ```
 
 ```java
@@ -150,8 +149,9 @@ class Controller {
 ```
 
 The starter publishes `FlydocsClientAsync`, `FlydocsClient`, and (when the
-HMAC secret is set) `WebhookVerifier`. Both clients are `AutoCloseable`
-and Spring releases the Netty pool on context shutdown.
+webhook secret is set) `WebhookVerifier` + a `@FlydocsWebhook` argument
+resolver. Both clients are `AutoCloseable` and Spring releases the Netty
+pool on context shutdown.
 
 ---
 
@@ -159,7 +159,7 @@ and Spring releases the Netty pool on context shutdown.
 
 - **[TUTORIAL.md](./TUTORIAL.md)** — the full payload composition reference:
   every field, every option, every variant, with constraints and worked
-  examples (typed schemas, rules, transformations, async jobs with
+  examples (typed schemas, rules, transformations, async extractions with
   `waitForCompletion`, webhook verification, error handling).
 - **[`flydocs-examples/`](./flydocs-examples/)** — six runnable example
   classes, 1:1 with the Python SDK's examples.
@@ -179,6 +179,6 @@ FlydocsClient flydocs = FlydocsClient.builder()
 ExtractionResult result = flydocs.extract(request);
 ```
 
-`FlydocsClient` mirrors `FlydocsClientAsync` method-for-method, just without
-the reactive plumbing. Prefer the async client whenever you can — it composes
-cleanly with timeouts, retries, and `waitForCompletion` polling.
+`FlydocsClient` mirrors `FlydocsClientAsync` method-for-method (including
+`extractions().create(...)`, `extractions().get(...)`, …), just without
+the reactive plumbing.

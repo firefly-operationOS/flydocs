@@ -2,9 +2,9 @@
 """Slice a PDF document by 1-indexed page range, returning a new PDF blob.
 
 Used by the orchestrator after the :class:`DocumentSplitter` has mapped
-each requested ``DocSpec`` to its corresponding page range, so the
-downstream extractor / authenticity / judge nodes receive only the
-relevant pages.
+each requested :class:`DocumentTypeSpec` to its corresponding page
+range, so the downstream extractor / authenticity / judge nodes receive
+only the relevant pages.
 
 For non-PDF documents this helper is a no-op (the bytes are returned
 unchanged), because the splitter never reports a page range for them.

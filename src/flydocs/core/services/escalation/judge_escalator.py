@@ -158,13 +158,17 @@ class JudgeEscalator:
         return info
 
     def _resolve_threshold(self, request: ExtractionRequest) -> float:
-        t = request.options.escalation_threshold
+        cfg = request.options.escalation
+        t = cfg.threshold if cfg is not None else None
         if t is None:
             t = self._default_threshold
         return max(0.0, min(1.0, float(t)))
 
     def _resolve_model(self, request: ExtractionRequest) -> str | None:
-        return request.options.escalation_model or self._default_model
+        cfg = request.options.escalation
+        if cfg is not None and cfg.model:
+            return cfg.model
+        return self._default_model
 
 
 def _count_failures(per_doc_extracted: dict[str, list[ExtractedFieldGroup]]) -> tuple[int, int]:
@@ -183,13 +187,13 @@ def _count_failures(per_doc_extracted: dict[str, list[ExtractedFieldGroup]]) -> 
     total = 0
     for groups in per_doc_extracted.values():
         for group in groups:
-            for field in group.fieldGroupFields:
+            for field in group.fields:
                 judge = field.judge
                 if judge is None or not judge.status:
                     continue
                 # JudgeStatus may be Enum or str depending on rebuild.
                 status_value = getattr(judge.status, "value", judge.status)
                 total += 1
-                if status_value == "FAIL" or judge.flag_for_review:
+                if status_value == "fail" or judge.flag_for_review:
                     fail += 1
     return fail, total

@@ -1,5 +1,14 @@
 """A FastAPI app that receives flydocs webhooks and verifies them.
 
+What it shows:
+  * Verifying an incoming HMAC-signed body with :class:`WebhookVerifier`.
+  * Parsing the typed :class:`EventEnvelope` returned by ``verifier.verify``.
+  * Switching on the four v1 event types
+    (``extraction.submitted`` / ``extraction.completed`` /
+    ``extraction.post_processing.requested`` /
+    ``extraction.post_processing.completed``).
+  * Reading the v1 ``Extraction`` + nested ``ExtractionResult`` shape.
+
 Run it::
 
     FLYDOCS_WEBHOOK_HMAC_SECRET=topsecret \
@@ -16,8 +25,11 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from flydocs_sdk import (
-    JobStatus,
-    JobWebhookPayload,
+    EVENT_TYPE_EXTRACTION_COMPLETED,
+    EVENT_TYPE_EXTRACTION_POST_PROCESSING_COMPLETED,
+    EVENT_TYPE_EXTRACTION_POST_PROCESSING_REQUESTED,
+    EVENT_TYPE_EXTRACTION_SUBMITTED,
+    ExtractionStatus,
     WebhookVerificationError,
     WebhookVerifier,
 )
@@ -33,16 +45,25 @@ async def on_webhook(request: Request) -> JSONResponse:
     body = await request.body()
     signature = request.headers.get("X-Flydocs-Signature", "")
     try:
-        verifier.verify(body, signature)
+        envelope = verifier.verify(body, signature)
     except WebhookVerificationError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
 
-    payload = JobWebhookPayload.model_validate_json(body)
-    if payload.status == JobStatus.SUCCEEDED and payload.result is not None:
-        for doc in payload.result.documents:
-            # persist extracted fields, kick off downstream work, ...
-            print(f"  {doc.get('document_type')}: {len(doc.get('fields', []))} field groups")
-    elif payload.status == JobStatus.FAILED:
-        print(f"job {payload.job_id} failed: {payload.error_code} {payload.error_message}")
+    ext = envelope.extraction
+    if envelope.event_type == EVENT_TYPE_EXTRACTION_SUBMITTED:
+        print(f"submitted: {ext.id}")
+    elif envelope.event_type == EVENT_TYPE_EXTRACTION_COMPLETED:
+        if ext.status == ExtractionStatus.SUCCEEDED and envelope.result is not None:
+            for doc in envelope.result.documents:
+                groups = doc.field_groups
+                print(f"  succeeded {ext.id}: {doc.type} -> {len(groups)} field groups")
+        elif ext.status == ExtractionStatus.FAILED and ext.error is not None:
+            print(f"  failed {ext.id}: {ext.error.code} {ext.error.message}")
+        elif ext.status == ExtractionStatus.CANCELLED:
+            print(f"  cancelled {ext.id}")
+    elif envelope.event_type == EVENT_TYPE_EXTRACTION_POST_PROCESSING_REQUESTED:
+        print(f"post-processing requested for {ext.id}")
+    elif envelope.event_type == EVENT_TYPE_EXTRACTION_POST_PROCESSING_COMPLETED:
+        print(f"post-processing completed for {ext.id}")
 
     return JSONResponse({"ok": True})

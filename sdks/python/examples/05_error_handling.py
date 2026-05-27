@@ -1,10 +1,20 @@
-"""Branching on RFC 7807 ``code`` for graceful fallback.
+"""Branching on RFC 7807 ``code`` for graceful fallback (v1 codes).
 
-Tries the sync extraction path first, falls back to the async job
-queue when the service signals an extraction timeout, and surfaces
-semantic validation errors in a way the caller can act on.
+What it shows:
+  * Catching :class:`FlydocsHttpError` and branching on the v1 ``code``
+    field (``timeout`` instead of v0 ``extraction_timeout``,
+    ``file_too_large`` instead of v0 ``document_too_large``, ...).
+  * Falling back from the sync ``extract`` endpoint to the async
+    ``extractions.create`` queue when the pipeline hits the sync timeout.
+  * Surfacing the ``validation_failed`` 422 body so callers can show
+    the validator's findings in their UI.
+  * Distinguishing transport timeouts (:class:`FlydocsTimeoutError`)
+    from server-side ``timeout`` problem-details.
 
-    uv run python sdks/python/examples/05_error_handling.py path/to/document.pdf
+Run from the repo root::
+
+    PYTHONPATH=sdks/python/examples \
+        uv run python sdks/python/examples/05_error_handling.py path/to/document.pdf
 """
 
 from __future__ import annotations
@@ -13,43 +23,49 @@ import asyncio
 import sys
 from pathlib import Path
 
-from examples_helpers import INVOICE_DOC_SPEC  # type: ignore[import-not-found]
+from examples_helpers import INVOICE_DOCUMENT_TYPE  # type: ignore[import-not-found]
 
 from flydocs_sdk import (
-    AsyncFlydocsClient,
-    DocumentInput,
+    AsyncClient,
     ExtractionRequest,
+    ExtractionStatus,
+    FileInput,
     FlydocsClientError,
-    FlydocsHTTPError,
+    FlydocsHttpError,
     FlydocsTimeoutError,
-    SubmitJobRequest,
+    SubmitExtractionRequest,
 )
 
 
 async def main(path: Path) -> int:
     req = ExtractionRequest(
-        documents=[DocumentInput.from_path(path)],
-        docs=[INVOICE_DOC_SPEC],
+        files=[FileInput.from_path(path)],
+        document_types=[INVOICE_DOCUMENT_TYPE],
     )
-    async with AsyncFlydocsClient("http://localhost:8400") as flydocs:
+    async with AsyncClient("http://localhost:8400") as flydocs:
         try:
             result = await flydocs.extract(req)
-            print(f"extracted in sync: latency={result.latency_ms}ms")
+            print(f"extracted in sync: latency={result.pipeline.latency_ms}ms")
             return 0
-        except FlydocsHTTPError as exc:
-            if exc.code == "extraction_timeout":
+        except FlydocsHttpError as exc:
+            if exc.code == "timeout":
                 print("sync ceiling exceeded; falling back to async")
-                submit = await flydocs.submit_job(SubmitJobRequest(**req.model_dump()))
-                final = await flydocs.wait_for_completion(submit.job_id, timeout=600.0)
-                print(f"async result: {final.status} {final.error_message or ''}")
-                return 0 if str(final.status).startswith("SUCCE") else 1
-            if exc.code == "document_too_large":
+                submit_payload = SubmitExtractionRequest(**req.model_dump())
+                ext = await flydocs.extractions.create(submit_payload)
+                final = await flydocs.wait_for_completion(ext.id, timeout=600.0)
+                err = final.error
+                print(f"async result: {final.status.value} {(err.message if err else '')}".rstrip())
+                return 0 if final.status == ExtractionStatus.SUCCEEDED else 1
+            if exc.code == "file_too_large":
                 print(f"413: {exc.detail}")
                 return 2
-            if exc.code == "invalid_request":
-                print("422 invalid_request:")
+            if exc.code in ("validation_failed", "invalid_request"):
+                print(f"422 {exc.code}:")
                 for issue in exc.payload.get("errors", []):
                     print(f"  - {issue}")
+                return 2
+            if exc.code == "invalid_base64":
+                print(f"422 invalid_base64: {exc.detail}")
                 return 2
             print(f"HTTP {exc.status_code} {exc.code}: {exc.detail}")
             return 1

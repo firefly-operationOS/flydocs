@@ -19,39 +19,38 @@ package com.firefly.flydocs.sdk;
 import com.firefly.flydocs.sdk.error.FlydocsClientException;
 import com.firefly.flydocs.sdk.error.FlydocsHttpException;
 import com.firefly.flydocs.sdk.error.FlydocsTimeoutException;
+import com.firefly.flydocs.sdk.model.Extraction;
+import com.firefly.flydocs.sdk.model.ExtractionListQuery;
+import com.firefly.flydocs.sdk.model.ExtractionListResponse;
 import com.firefly.flydocs.sdk.model.ExtractionRequest;
 import com.firefly.flydocs.sdk.model.ExtractionResult;
-import com.firefly.flydocs.sdk.model.JobListResponse;
-import com.firefly.flydocs.sdk.model.JobResult;
-import com.firefly.flydocs.sdk.model.JobStatusResponse;
-import com.firefly.flydocs.sdk.model.SubmitJobRequest;
-import com.firefly.flydocs.sdk.model.SubmitJobResponse;
+import com.firefly.flydocs.sdk.model.ExtractionResultEnvelope;
+import com.firefly.flydocs.sdk.model.ExtractionStatus;
+import com.firefly.flydocs.sdk.model.PostProcessingStatus;
+import com.firefly.flydocs.sdk.model.SubmitExtractionRequest;
 import com.firefly.flydocs.sdk.model.VersionInfo;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import java.time.Duration;
-import java.time.OffsetDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.jspecify.annotations.Nullable;
 import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.reactive.ReactorClientHttpConnector;
 import org.springframework.web.reactive.function.client.ExchangeStrategies;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.util.UriBuilder;
-import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.netty.http.client.HttpClient;
 import reactor.netty.resources.ConnectionProvider;
 import reactor.util.retry.Retry;
 
 /**
- * Reactive (non-blocking) client for the flydocs HTTP API.
+ * Reactive (non-blocking) client for the flydocs v1 HTTP API.
  *
  * <p>Built on Spring {@link WebClient} + Reactor Netty. Construct once
  * per application and inject; the client is thread-safe and re-uses
@@ -65,10 +64,13 @@ import reactor.util.retry.Retry;
  *
  * flydocs.extract(request)
  *        .subscribe(result -> ...);
+ *
+ * // Async extractions:
+ * flydocs.extractions().create(submitReq, "idem-key").subscribe(...);
  * }</pre>
  */
 public class FlydocsClientAsync implements AutoCloseable {
-    private static final String USER_AGENT = "flydocs-sdk-java/26.05.02";
+    private static final String USER_AGENT = "flydocs-sdk-java/26.6.0";
     /** Default timeout when the caller does not override. */
     public static final Duration DEFAULT_TIMEOUT = Duration.ofSeconds(60);
 
@@ -80,15 +82,13 @@ public class FlydocsClientAsync implements AutoCloseable {
     private final int maxAttempts;
     @Nullable
     private final Duration retryMinBackoff;
+    private final Extractions extractions;
 
     private FlydocsClientAsync(Builder b) {
         this.timeout = b.timeout == null ? DEFAULT_TIMEOUT : b.timeout;
         this.mapper = b.objectMapper != null ? b.objectMapper : defaultMapper();
         this.maxAttempts = Math.max(1, b.maxAttempts);
         this.retryMinBackoff = b.retryMinBackoff;
-        // Own the connection provider so close() can release it on a
-        // shutdown. Bound the pool to keep the SDK well-behaved when
-        // dropped into a service that may have many client instances.
         this.ownedConnectionProvider = ConnectionProvider.builder("flydocs-sdk")
                 .maxConnections(b.maxConnections)
                 .pendingAcquireTimeout(b.pendingAcquireTimeout)
@@ -100,12 +100,12 @@ public class FlydocsClientAsync implements AutoCloseable {
                 .clientConnector(new ReactorClientHttpConnector(nettyClient))
                 .defaultHeader(HttpHeaders.ACCEPT, MediaType.APPLICATION_JSON_VALUE)
                 .defaultHeader(HttpHeaders.USER_AGENT, USER_AGENT)
-                // Single source of truth for codec sizing -- the prior
-                // ``.codecs(...)`` + ``.exchangeStrategies(...)`` pair
-                // was redundant; exchangeStrategies wins.
                 .exchangeStrategies(ExchangeStrategies.builder()
                         .codecs(c -> c.defaultCodecs().maxInMemorySize(b.maxInMemorySize))
                         .build());
+        if (b.apiKey != null && !b.apiKey.isEmpty()) {
+            wb.defaultHeader(HttpHeaders.AUTHORIZATION, "Bearer " + b.apiKey);
+        }
         if (b.defaultHeaders != null) {
             b.defaultHeaders.forEach((k, v) -> {
                 if (v != null && !v.isEmpty()) {
@@ -114,18 +114,14 @@ public class FlydocsClientAsync implements AutoCloseable {
             });
         }
         this.http = wb.build();
+        this.extractions = new Extractions();
     }
 
     public static Builder builder() {
         return new Builder();
     }
 
-    /**
-     * Release the underlying Netty connection pool. Idempotent. Call
-     * during application shutdown if you constructed the client
-     * yourself; the Spring Boot starter wires this via the bean
-     * destroy method.
-     */
+    /** Release the underlying Netty connection pool. Idempotent. */
     @Override
     public void close() {
         if (this.ownedConnectionProvider != null) {
@@ -195,129 +191,151 @@ public class FlydocsClientAsync implements AutoCloseable {
     }
 
     // ------------------------------------------------------------------
-    // Async-job lifecycle
+    // Async extractions sub-resource
     // ------------------------------------------------------------------
 
-    /** {@code POST /api/v1/jobs} — enqueue. Returns 202 + initial {@code QUEUED} status. */
-    public Mono<SubmitJobResponse> submitJob(SubmitJobRequest request) {
-        return submitJob(request, null, null);
-    }
-
-    public Mono<SubmitJobResponse> submitJob(
-            SubmitJobRequest request,
-            @Nullable String idempotencyKey,
-            @Nullable String correlationId) {
-        return requestJson(
-                "POST",
-                uri -> uri.path("/api/v1/jobs").build(),
-                request,
-                idempotencyKey,
-                correlationId,
-                SubmitJobResponse.class);
-    }
-
-    /** {@code GET /api/v1/jobs/{id}} */
-    public Mono<JobStatusResponse> getJob(String jobId) {
-        return requestJson(
-                "GET",
-                uri -> uri.path("/api/v1/jobs/{id}").build(jobId),
-                null,
-                null,
-                null,
-                JobStatusResponse.class);
+    /** Returns the {@link Extractions} handle covering the async lifecycle endpoints. */
+    public Extractions extractions() {
+        return this.extractions;
     }
 
     /**
-     * Poll {@code GET /api/v1/jobs/{id}} until the job reaches a terminal
-     * status (SUCCEEDED, PARTIAL_SUCCEEDED, FAILED, CANCELLED), then
-     * emit the final {@link JobStatusResponse}.
+     * Sub-resource handle for {@code /api/v1/extractions/…} endpoints.
      *
-     * <p>Errors with {@link java.util.concurrent.TimeoutException} when
-     * the deadline elapses before the job finishes. Inspect
-     * {@link JobStatusResponse#status()} on success to decide what to
-     * do next — the helper does not treat FAILED/CANCELLED as errors,
-     * they're the caller's branching decision.</p>
-     *
-     * <p>Implementation note: this uses Reactor's
-     * {@code repeatWhenEmpty} so the polling chain is bounded by a
-     * single timeout subscriber. No recursive {@code Mono} construction;
-     * no nested timeouts.</p>
+     * <pre>{@code
+     * Extraction queued = client.extractions().create(req, "idem-key").block();
+     * Extraction current = client.extractions().get(id).block();
+     * ExtractionResultEnvelope e = client.extractions().getResult(id, true, Duration.ofSeconds(60)).block();
+     * Extraction cancelled = client.extractions().cancel(id).block();
+     * ExtractionListResponse page = client.extractions().list(query).block();
+     * }</pre>
      */
-    public Mono<JobStatusResponse> waitForCompletion(
-            String jobId, Duration pollInterval, Duration timeout) {
-        return Mono.defer(() -> getJob(jobId))
-                .flatMap(s -> s.isTerminal() ? Mono.just(s) : Mono.<JobStatusResponse>empty())
-                .repeatWhenEmpty(Integer.MAX_VALUE, attempts -> attempts.delayElements(pollInterval))
-                .timeout(timeout);
+    public final class Extractions {
+
+        private Extractions() {
+            // package-private factory
+        }
+
+        /** {@code POST /api/v1/extractions} — enqueue. Returns 202 + initial {@code queued} {@link Extraction}. */
+        public Mono<Extraction> create(SubmitExtractionRequest request) {
+            return create(request, null, null);
+        }
+
+        /** {@link #create(SubmitExtractionRequest)} with idempotency. */
+        public Mono<Extraction> create(SubmitExtractionRequest request, @Nullable String idempotencyKey) {
+            return create(request, idempotencyKey, null);
+        }
+
+        public Mono<Extraction> create(
+                SubmitExtractionRequest request,
+                @Nullable String idempotencyKey,
+                @Nullable String correlationId) {
+            return requestJson(
+                    "POST",
+                    uri -> uri.path("/api/v1/extractions").build(),
+                    request,
+                    idempotencyKey,
+                    correlationId,
+                    Extraction.class);
+        }
+
+        /** {@code GET /api/v1/extractions/{id}} */
+        public Mono<Extraction> get(String id) {
+            return requestJson(
+                    "GET",
+                    uri -> uri.path("/api/v1/extractions/{id}").build(id),
+                    null,
+                    null,
+                    null,
+                    Extraction.class);
+        }
+
+        /**
+         * Poll {@code GET /api/v1/extractions/{id}} until the extraction reaches
+         * a terminal status (succeeded, failed, cancelled), then emit the final
+         * {@link Extraction}. Errors with {@link java.util.concurrent.TimeoutException}
+         * when the deadline elapses while the worker is still mid-flight.
+         */
+        public Mono<Extraction> waitForCompletion(
+                String id, Duration pollInterval, Duration timeout) {
+            return Mono.defer(() -> get(id))
+                    .flatMap(s -> s.isTerminal() ? Mono.just(s) : Mono.<Extraction>empty())
+                    .repeatWhenEmpty(Integer.MAX_VALUE, attempts -> attempts.delayElements(pollInterval))
+                    .timeout(timeout);
+        }
+
+        /** Default poll (2s) and timeout (10m). */
+        public Mono<Extraction> waitForCompletion(String id) {
+            return waitForCompletion(id, Duration.ofSeconds(2), Duration.ofMinutes(10));
+        }
+
+        /** {@code DELETE /api/v1/extractions/{id}} — only valid while {@code status==queued}. */
+        public Mono<Extraction> cancel(String id) {
+            return requestJson(
+                    "DELETE",
+                    uri -> uri.path("/api/v1/extractions/{id}").build(id),
+                    null,
+                    null,
+                    null,
+                    Extraction.class);
+        }
+
+        /** {@code GET /api/v1/extractions/{id}/result}, optionally long-polling for grounded bboxes. */
+        public Mono<ExtractionResultEnvelope> getResult(String id, boolean waitForBboxes, Duration timeout) {
+            return requestJson(
+                    "GET",
+                    uri -> uri.path("/api/v1/extractions/{id}/result")
+                            .queryParam("wait_for_bboxes", waitForBboxes)
+                            .queryParam("timeout", timeout.toSeconds())
+                            .build(id),
+                    null,
+                    null,
+                    null,
+                    ExtractionResultEnvelope.class);
+        }
+
+        public Mono<ExtractionResultEnvelope> getResult(String id) {
+            return getResult(id, false, Duration.ofSeconds(60));
+        }
+
+        /** {@code GET /api/v1/extractions} — paginated, filterable. */
+        public Mono<ExtractionListResponse> list(ExtractionListQuery query) {
+            return requestJson(
+                    "GET",
+                    uri -> buildListUri(uri, query),
+                    null,
+                    null,
+                    null,
+                    ExtractionListResponse.class);
+        }
+
+        public Mono<ExtractionListResponse> list() {
+            return list(ExtractionListQuery.defaults());
+        }
     }
 
-    /** Same as {@link #waitForCompletion(String, Duration, Duration)} with default poll (2s) and timeout (10m). */
-    public Mono<JobStatusResponse> waitForCompletion(String jobId) {
-        return waitForCompletion(jobId, Duration.ofSeconds(2), Duration.ofMinutes(10));
-    }
-
-    /** {@code DELETE /api/v1/jobs/{id}} */
-    public Mono<JobStatusResponse> cancelJob(String jobId) {
-        return requestJson(
-                "DELETE",
-                uri -> uri.path("/api/v1/jobs/{id}").build(jobId),
-                null,
-                null,
-                null,
-                JobStatusResponse.class);
-    }
-
-    /** {@code GET /api/v1/jobs/{id}/result}, optionally long-polling for grounded bboxes. */
-    public Mono<JobResult> getJobResult(String jobId, boolean waitForBboxes, Duration timeout) {
-        return requestJson(
-                "GET",
-                uri -> uri.path("/api/v1/jobs/{id}/result")
-                        .queryParam("wait_for_bboxes", waitForBboxes)
-                        .queryParam("timeout", timeout.toSeconds())
-                        .build(jobId),
-                null,
-                null,
-                null,
-                JobResult.class);
-    }
-
-    public Mono<JobResult> getJobResult(String jobId) {
-        return getJobResult(jobId, false, Duration.ofSeconds(60));
-    }
-
-    /** {@code GET /api/v1/jobs} — paginated, filterable. Filters are joined with comma for CSV decoding. */
-    public Mono<JobListResponse> listJobs(JobListFilter filter) {
-        return requestJson(
-                "GET",
-                uri -> {
-                    UriBuilder b = uri.path("/api/v1/jobs");
-                    if (filter.status() != null && !filter.status().isEmpty()) {
-                        b.queryParam("status", String.join(",", filter.status()));
-                    }
-                    if (filter.bboxRefineStatus() != null && !filter.bboxRefineStatus().isEmpty()) {
-                        b.queryParam("bbox_refine_status", String.join(",", filter.bboxRefineStatus()));
-                    }
-                    if (filter.idempotencyKey() != null) {
-                        b.queryParam("idempotency_key", filter.idempotencyKey());
-                    }
-                    if (filter.createdAfter() != null) {
-                        b.queryParam("created_after", filter.createdAfter().toString());
-                    }
-                    if (filter.createdBefore() != null) {
-                        b.queryParam("created_before", filter.createdBefore().toString());
-                    }
-                    return b.queryParam("limit", filter.limit())
-                            .queryParam("offset", filter.offset())
-                            .build();
-                },
-                null,
-                null,
-                null,
-                JobListResponse.class);
-    }
-
-    public Mono<JobListResponse> listJobs() {
-        return listJobs(JobListFilter.defaults());
+    private static java.net.URI buildListUri(UriBuilder builder, ExtractionListQuery q) {
+        UriBuilder b = builder.path("/api/v1/extractions");
+        if (q.statuses() != null && !q.statuses().isEmpty()) {
+            List<String> wires = q.statuses().stream().map(ExtractionStatus::wire).toList();
+            b.queryParam("status", String.join(",", wires));
+        }
+        if (q.postProcessingStatuses() != null && !q.postProcessingStatuses().isEmpty()) {
+            List<String> wires = q.postProcessingStatuses().stream().map(PostProcessingStatus::wire).toList();
+            b.queryParam("post_processing_status", String.join(",", wires));
+        }
+        if (q.idempotencyKey() != null) {
+            b.queryParam("idempotency_key", q.idempotencyKey());
+        }
+        if (q.createdAfter() != null) {
+            b.queryParam("created_after", q.createdAfter().toString());
+        }
+        if (q.createdBefore() != null) {
+            b.queryParam("created_before", q.createdBefore().toString());
+        }
+        return b.queryParam("limit", q.limit())
+                .queryParam("offset", q.offset())
+                .build();
     }
 
     // ------------------------------------------------------------------
@@ -387,19 +405,7 @@ public class FlydocsClientAsync implements AutoCloseable {
         return exchange;
     }
 
-    /**
-     * Decide whether a thrown exception is worth retrying. Transient
-     * = the service has a fighting chance of succeeding on a re-issue:
-     * 5xx (the service had a hiccup) and our own
-     * {@link FlydocsTimeoutException} (we never heard back).
-     *
-     * <p>4xx is NEVER retried -- a bad request stays bad on retry, and
-     * a 409 ``job_not_cancellable`` is intentional state.
-     * {@link FlydocsClientException} covers transport failures we have
-     * already mapped to a non-Netty type; we treat those as transient
-     * too so a flaky network on the first connect doesn't surface as a
-     * hard failure.</p>
-     */
+    /** 5xx + own-timeout + transport are retryable; 4xx is intentional state. */
     private static boolean isTransient(Throwable t) {
         if (t instanceof FlydocsHttpException http) {
             int s = http.statusCode();
@@ -438,7 +444,8 @@ public class FlydocsClientAsync implements AutoCloseable {
         @Nullable Map<String, Object> payload = null;
         try {
             payload = mapper.readValue(body, new TypeReference<Map<String, Object>>() {});
-            // flydocs emits ``code`` either at the top level OR nested under ``detail``.
+            // flydocs RFC 7807 puts ``code`` at the top level; v0 sometimes
+            // nested it under ``detail``. Try both.
             Object nested = payload.get("detail");
             List<Map<String, Object>> sources = new java.util.ArrayList<>();
             sources.add(payload);
@@ -451,8 +458,7 @@ public class FlydocsClientAsync implements AutoCloseable {
                 if (detail == null && src.get("detail") instanceof String s) detail = s;
             }
         } catch (Exception ignored) {
-            // Body wasn't JSON — fall back to raw text. Either way we
-            // raise a typed HTTP exception, never a decode error.
+            // body wasn't JSON; surface as typed HTTP exception anyway.
         }
         return new FlydocsHttpException(status, code, title, detail, payload, raw);
     }
@@ -490,6 +496,7 @@ public class FlydocsClientAsync implements AutoCloseable {
 
     public static final class Builder {
         private @Nullable String baseUrl;
+        private @Nullable String apiKey;
         private @Nullable Duration timeout;
         private @Nullable Map<String, String> defaultHeaders;
         private @Nullable ObjectMapper objectMapper;
@@ -501,6 +508,12 @@ public class FlydocsClientAsync implements AutoCloseable {
 
         public Builder baseUrl(String baseUrl) {
             this.baseUrl = baseUrl;
+            return this;
+        }
+
+        /** Set the API key. When non-empty, the SDK adds {@code Authorization: Bearer <key>} on every request. */
+        public Builder apiKey(@Nullable String apiKey) {
+            this.apiKey = apiKey;
             return this;
         }
 
@@ -522,51 +535,26 @@ public class FlydocsClientAsync implements AutoCloseable {
             return this;
         }
 
-        /**
-         * Maximum number of HTTP attempts per request (including the
-         * first). ``1`` (default) disables retries. Set to 2-3 to
-         * opportunistically retry transient 5xx and timeouts with
-         * exponential backoff; the SDK never retries 4xx.
-         */
         public Builder maxAttempts(int maxAttempts) {
             this.maxAttempts = maxAttempts;
             return this;
         }
 
-        /**
-         * Initial backoff between retries (exponentially extended on
-         * each subsequent retry, with jitter). Default 200 ms when
-         * retries are enabled.
-         */
         public Builder retryMinBackoff(Duration backoff) {
             this.retryMinBackoff = backoff;
             return this;
         }
 
-        /**
-         * Maximum simultaneous HTTP connections the underlying Netty
-         * pool will open. Default 50; lower if your runtime is
-         * memory-constrained.
-         */
         public Builder maxConnections(int maxConnections) {
             this.maxConnections = maxConnections;
             return this;
         }
 
-        /**
-         * How long a request waits for a free connection before
-         * failing with a {@link FlydocsClientException}. Default 45 s.
-         */
         public Builder pendingAcquireTimeout(Duration timeout) {
             this.pendingAcquireTimeout = timeout;
             return this;
         }
 
-        /**
-         * Maximum response body the client is willing to buffer in
-         * memory before failing. Default 64 MiB -- generous enough for
-         * the largest documented extraction result the service emits.
-         */
         public Builder maxInMemorySize(int bytes) {
             this.maxInMemorySize = bytes;
             return this;
@@ -577,21 +565,6 @@ public class FlydocsClientAsync implements AutoCloseable {
                 throw new IllegalArgumentException("baseUrl is required");
             }
             return new FlydocsClientAsync(this);
-        }
-    }
-
-    /** Filter record for {@link #listJobs(JobListFilter)}. */
-    public record JobListFilter(
-            @Nullable List<String> status,
-            @Nullable List<String> bboxRefineStatus,
-            @Nullable String idempotencyKey,
-            @Nullable OffsetDateTime createdAfter,
-            @Nullable OffsetDateTime createdBefore,
-            int limit,
-            int offset) {
-
-        public static JobListFilter defaults() {
-            return new JobListFilter(null, null, null, null, null, 50, 0);
         }
     }
 }

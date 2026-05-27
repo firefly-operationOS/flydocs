@@ -25,28 +25,28 @@ from flydocs.interfaces.dtos.transformation import EntityResolutionTransformatio
 def _row(values: dict[str, str]) -> ExtractedField:
     """Build one persona row from a flat dict of sub-field values."""
     return ExtractedField(
-        fieldName="row",
-        fieldValueFound=[ExtractedField(fieldName=k, fieldValueFound=v) for k, v in values.items()],
+        name="row",
+        value=[ExtractedField(name=k, value=v) for k, v in values.items()],
     )
 
 
 def _personas_group(rows: list[ExtractedField]) -> ExtractedFieldGroup:
     return ExtractedFieldGroup(
-        fieldGroupName="personas",
-        fieldGroupFields=[ExtractedField(fieldName="personas", fieldValueFound=rows)],
+        name="personas",
+        fields=[ExtractedField(name="personas", value=rows)],
     )
 
 
 def _row_names(group: ExtractedFieldGroup) -> list[str]:
     """Pull the ``nombre`` value out of each row for assertions."""
     out: list[str] = []
-    for f in group.fieldGroupFields:
-        if not isinstance(f.fieldValueFound, list):
+    for f in group.fields:
+        if not isinstance(f.value, list):
             continue
-        for row in f.fieldValueFound:
-            for sub in row.fieldValueFound or []:
-                if sub.fieldName == "nombre":
-                    out.append(sub.fieldValueFound)  # type: ignore[arg-type]
+        for row in f.value:
+            for sub in row.value or []:
+                if sub.name == "nombre":
+                    out.append(sub.value)  # type: ignore[arg-type]
                     break
     return out
 
@@ -124,7 +124,7 @@ def test_output_group_preserves_original() -> None:
     EntityResolutionTransformer().apply(t, groups)
 
     assert len(groups) == 2
-    assert {g.fieldGroupName for g in groups} == {"personas", "personas_normalized"}
+    assert {g.name for g in groups} == {"personas", "personas_normalized"}
     assert len(_row_names(groups[0])) == 2  # original untouched
     assert len(_row_names(groups[1])) == 1  # dedupe applied
 

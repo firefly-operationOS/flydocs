@@ -27,18 +27,18 @@ from collections.abc import AsyncIterator, Iterator
 import pytest
 import pytest_asyncio
 
-from flydocs_sdk import AsyncFlydocsClient, FlydocsClient
+from flydocs_sdk import AsyncClient, Client
 
-BASE_URL = "http://flydocs.test"
+BASE_URL = "https://flydocs.test"
 
 
 @pytest_asyncio.fixture
-async def async_client() -> AsyncIterator[AsyncFlydocsClient]:
-    async with AsyncFlydocsClient(BASE_URL) as client:
+async def async_client() -> AsyncIterator[AsyncClient]:
+    async with AsyncClient(BASE_URL) as client:
         yield client
 
 
 @pytest.fixture
-def sync_client() -> Iterator[FlydocsClient]:
-    with FlydocsClient(BASE_URL) as client:
+def sync_client() -> Iterator[Client]:
+    with Client(BASE_URL) as client:
         yield client

@@ -3,6 +3,11 @@
 flydocs ships two GitHub Actions workflows: one PR gate and one
 multi-arch image publisher. Both live under `.github/workflows/`.
 
+> **What this doc covers:** PR gate, multi-arch publish, supply-chain
+> attestations, package visibility, local pre-commit hooks. **When to
+> read it:** while wiring CI or releasing a new version. **Where else
+> to look:** [`deployment.md`](deployment.md) for deploy-time concerns.
+
 ```
 .github/workflows/
 ├── pr-gate.yaml          ← runs on every pull request

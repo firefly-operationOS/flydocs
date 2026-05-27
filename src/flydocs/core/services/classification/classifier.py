@@ -1,11 +1,11 @@
 # Copyright 2026 Firefly Software Solutions Inc
-"""``DocumentClassifier`` -- pick which DocSpec a file matches.
+"""``DocumentClassifier`` -- pick which DocumentTypeSpec a file matches.
 
-Used in multi-file mode when the caller didn't pin a
-``document_type`` on a :class:`DocumentInput`. One LLM call per
-unclassified file -- the model sees the file bytes (multimodal) plus
-the list of candidate DocSpecs and returns the best match (or
-``"unmatched"`` when none fit).
+Used in multi-file mode when the caller didn't pin an ``expected_type``
+on a :class:`FileInput`. One LLM call per unclassified file -- the
+model sees the file bytes (multimodal) plus the list of candidate
+document types and returns the best match (or ``"unmatched"`` when none
+fit).
 
 The service mirrors the design of :class:`MultimodalExtractor` /
 :class:`DocumentSplitter`: prompt template injected through the
@@ -28,7 +28,7 @@ from fireflyframework_agentic.types import BinaryContent
 from pydantic import BaseModel, Field
 
 from flydocs.core.observability import DEFAULT_MIDDLEWARE, timed_agent_run
-from flydocs.interfaces.dtos.doc import DocSpec
+from flydocs.interfaces.dtos.document_type import DocumentTypeSpec
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +47,7 @@ class _ClassifierOutput(BaseModel):
 class ClassificationResult:
     """One classifier verdict for a single input file."""
 
-    document_type: str  # canonical docType from candidates, or ``unmatched``
+    document_type: str  # canonical id from candidates, or ``unmatched``
     confidence: float = 0.0
     description: str = ""
     notes: str = ""
@@ -55,7 +55,7 @@ class ClassificationResult:
 
 
 class DocumentClassifier:
-    """Assign one DocSpec docType to one input file."""
+    """Assign one DocumentTypeSpec id to one input file."""
 
     def __init__(
         self,
@@ -74,7 +74,7 @@ class DocumentClassifier:
         document_bytes: bytes,
         media_type: str,
         filename: str,
-        candidates: list[DocSpec],
+        candidates: list[DocumentTypeSpec],
         intention: str,
         model: str | None = None,
     ) -> ClassificationResult:
@@ -82,13 +82,13 @@ class DocumentClassifier:
         if not candidates:
             return ClassificationResult(document_type=UNMATCHED, matched=False, notes="no candidates")
 
-        known: set[str] = {c.docType.documentType for c in candidates}
+        known: set[str] = {c.id for c in candidates}
         targets_json = json.dumps(
             [
                 {
-                    "documentType": c.docType.documentType,
-                    "description": c.docType.description,
-                    "country": c.docType.country,
+                    "id": c.id,
+                    "description": c.description,
+                    "country": c.country,
                 }
                 for c in candidates
             ],

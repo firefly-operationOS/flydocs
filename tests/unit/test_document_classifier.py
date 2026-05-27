@@ -27,8 +27,8 @@ from flydocs.core.services.classification import (
     DocumentClassifier,
 )
 from flydocs.core.services.classification import classifier as classifier_module
-from flydocs.interfaces.dtos.doc import DocSpec, DocType, ValidatorsSpec
-from flydocs.interfaces.dtos.field import FieldGroup, FieldSpec
+from flydocs.interfaces.dtos.document_type import DocumentTypeSpec
+from flydocs.interfaces.dtos.field import Field, FieldGroup
 from flydocs.interfaces.enums.field_type import FieldType
 
 
@@ -41,18 +41,19 @@ def _template() -> PromptTemplate:
     )
 
 
-def _passport_spec() -> DocSpec:
-    return DocSpec(
-        docType=DocType(documentType="passport", description="x", country="ES"),
-        fieldGroups=[
+def _passport_spec() -> DocumentTypeSpec:
+    return DocumentTypeSpec(
+        id="passport",
+        description="x",
+        country="ES",
+        field_groups=[
             FieldGroup(
-                fieldGroupName="g",
-                fieldGroupFields=[
-                    FieldSpec(fieldName="a", fieldType=FieldType.STRING),
+                name="g",
+                fields=[
+                    Field(name="a", type=FieldType.STRING),
                 ],
             )
         ],
-        validators=ValidatorsSpec(),
     )
 
 

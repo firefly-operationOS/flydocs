@@ -44,16 +44,19 @@ class _FakeLlmTransformer:
     calls: list[list[str]] = field(default_factory=list)
 
     async def apply(self, t, groups):
-        target = next((g for g in groups if g.fieldGroupName == t.target_group), None)
+        target = next((g for g in groups if g.name == t.target_group), None)
         names: list[str] = []
         if target is not None:
-            arr = next((f for f in target.fieldGroupFields if isinstance(f.fieldValueFound, list)), None)
+            arr = next(
+                (f for f in target.fields if isinstance(f.value, list)),
+                None,
+            )
             if arr is not None:
-                for row in arr.fieldValueFound or []:
+                for row in arr.value or []:
                     if isinstance(row, ExtractedField):
-                        for sub in row.fieldValueFound or []:
-                            if isinstance(sub, ExtractedField) and sub.fieldName == "nombre":
-                                names.append(str(sub.fieldValueFound))
+                        for sub in row.value or []:
+                            if isinstance(sub, ExtractedField) and sub.name == "nombre":
+                                names.append(str(sub.value))
                                 break
         self.calls.append(names)
         # Echo the input shape back unchanged; mutate the target group.
@@ -69,20 +72,20 @@ def _row(**values: str) -> ExtractedField:
 
 def _personas(rows: list[ExtractedField]) -> ExtractedFieldGroup:
     return ExtractedFieldGroup(
-        fieldGroupName="personas",
-        fieldGroupFields=[ExtractedField(name="personas", value=rows)],
+        name="personas",
+        fields=[ExtractedField(name="personas", value=rows)],
     )
 
 
 def _row_names(group: ExtractedFieldGroup) -> list[str]:
     out: list[str] = []
-    for f in group.fieldGroupFields:
-        if not isinstance(f.fieldValueFound, list):
+    for f in group.fields:
+        if not isinstance(f.value, list):
             continue
-        for row in f.fieldValueFound:
-            for sub in row.fieldValueFound or []:
-                if sub.fieldName == "nombre":
-                    out.append(str(sub.fieldValueFound))
+        for row in f.value:
+            for sub in row.value or []:
+                if sub.name == "nombre":
+                    out.append(str(sub.value))
                     break
     return out
 

@@ -41,15 +41,16 @@ class IDPSettings(BaseSettings):
     # Postgres for persistence — no extra broker is required.
     eda_adapter: str = Field(default="postgres", description="memory | postgres | redis | kafka")
     redis_url: str = "redis://localhost:6379/0"
-    jobs_topic: str = "flydocs.jobs"
-    jobs_event_type: str = "IDPJobSubmitted"
-    jobs_completed_event_type: str = "IDPJobCompleted"
-    # Second-stage destination for the out-of-band bbox refiner. Triggered
-    # by ``JobWorker`` after main extraction succeeds AND
+    # Main extraction topic. Workers subscribe to the
+    # ``extraction.submitted`` event type (declared as a constant in
+    # ``flydocs.interfaces.dtos.event``); the destination here is the
+    # broker channel the bus publishes / drains on.
+    jobs_topic: str = "flydocs.extractions"
+    # Post-processing topic for the out-of-band bbox refiner. Triggered
+    # by the ``ExtractionWorker`` after main extraction succeeds AND
     # ``options.stages.bbox_refine == true``. Consumed by
     # ``BboxRefineWorker``.
-    bbox_refine_topic: str = "flydocs.bbox.refine"
-    bbox_refine_event_type: str = "IDPBboxRefineRequested"
+    bbox_refine_topic: str = "flydocs.extractions.post_processing"
     # Retry budget + timeout for the bbox refine leg, independent of the
     # main extraction. Refinement is CPU-bound (PyMuPDF / OCR) so the
     # default ceiling is generous.
@@ -111,13 +112,15 @@ class IDPSettings(BaseSettings):
     bbox_refine_lease_s: int = 660
     # ----- Reaper -----------------------------------------------------
     # The reaper runs alongside each worker (one task per process) and
-    # republishes events for jobs stuck in non-terminal states. It is
-    # the only path that revives orphans:
-    #   * RUNNING whose claimant crashed past its lease;
-    #   * QUEUED whose submit handler crashed between row INSERT and
+    # republishes events for extractions stuck in non-terminal states.
+    # It is the only path that revives orphans:
+    #   * ``running`` whose claimant crashed past its lease;
+    #   * ``queued`` whose submit handler crashed between row INSERT and
     #     outbox PUBLISH (or whose worker died during ``_delayed_publish``);
-    #   * PARTIAL_SUCCEEDED whose bbox-refine event was never published;
-    #   * REFINING_BBOXES whose bbox claimant crashed past its lease.
+    #   * ``succeeded`` with ``post_processing_bbox_status == pending``
+    #     whose bbox-refine event was never published;
+    #   * ``succeeded`` with ``post_processing_bbox_status == running``
+    #     whose bbox claimant crashed past its lease.
     # Each republish is deduped at claim time by the atomic ``mark_*``
     # transitions, so running multiple replicas of the reaper is safe
     # (it just wastes a few outbox INSERTs per stale job).

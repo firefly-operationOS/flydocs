@@ -12,8 +12,8 @@ orchestrator) is healthy.
 Exercises:
 
 - multimodal extraction with bounding boxes,
-- pure-Python field validation including :class:`StandardValidator`
-  checks (NIF / NIE),
+- pure-Python field validation including built-in validator checks
+  (NIF / NIE),
 - visual-authenticity LLM check,
 - LLM judge re-evaluation,
 - the business :class:`RuleEngine` with cross-field predicates.
@@ -33,18 +33,18 @@ from pathlib import Path
 
 import pytest
 
-from flydocs.interfaces.dtos.doc import DocSpec, DocType, ValidatorsSpec, VisualValidatorSpec
+from flydocs.interfaces.dtos.document_type import DocumentTypeSpec, VisualCheck
 from flydocs.interfaces.dtos.extract import (
-    DocumentInput,
     ExtractionOptions,
     ExtractionRequest,
+    FileInput,
     StageToggles,
 )
-from flydocs.interfaces.dtos.field import FieldGroup, FieldSpec
+from flydocs.interfaces.dtos.field import Field, FieldGroup
 from flydocs.interfaces.dtos.rule import RuleFieldParent, RuleOutputSpec, RuleSpec
-from flydocs.interfaces.dtos.standard_validator import StandardValidatorSpec
+from flydocs.interfaces.dtos.validator import ValidatorSpec
 from flydocs.interfaces.enums.field_type import FieldType
-from flydocs.interfaces.enums.standard_validator import StandardValidatorType
+from flydocs.interfaces.enums.validator import ValidatorType
 
 PDF_PATH = Path.home() / "Downloads" / "escritura_poderes_2025.pdf"
 MODEL = os.environ.get("FLYDOCS_TEST_MODEL", "anthropic:claude-opus-4-7")
@@ -56,59 +56,59 @@ MODEL = os.environ.get("FLYDOCS_TEST_MODEL", "anthropic:claude-opus-4-7")
 
 _DOC_TYPE = "escritura_poderes"
 
-_FIELD_SPECS = [
-    FieldSpec(
-        fieldName="numero_protocolo",
-        fieldDescription="Número de protocolo notarial.",
-        fieldType=FieldType.STRING,
+_FIELDS = [
+    Field(
+        name="numero_protocolo",
+        description="Número de protocolo notarial.",
+        type=FieldType.STRING,
     ),
-    FieldSpec(
-        fieldName="fecha",
-        fieldDescription="Fecha del otorgamiento en formato ISO YYYY-MM-DD.",
-        fieldType=FieldType.STRING,
-        standard_validators=[StandardValidatorSpec(type=StandardValidatorType.DATE)],
+    Field(
+        name="fecha",
+        description="Fecha del otorgamiento en formato ISO YYYY-MM-DD.",
+        type=FieldType.STRING,
+        validators=[ValidatorSpec(name=ValidatorType.DATE)],
     ),
-    FieldSpec(
-        fieldName="notario",
-        fieldDescription="Nombre completo del notario que autoriza.",
-        fieldType=FieldType.STRING,
+    Field(
+        name="notario",
+        description="Nombre completo del notario que autoriza.",
+        type=FieldType.STRING,
     ),
-    FieldSpec(
-        fieldName="otorgante_nombre",
-        fieldDescription="Nombre completo del otorgante (poderdante).",
-        fieldType=FieldType.STRING,
+    Field(
+        name="otorgante_nombre",
+        description="Nombre completo del otorgante (poderdante).",
+        type=FieldType.STRING,
     ),
-    FieldSpec(
-        fieldName="otorgante_dni_nie",
-        fieldDescription="DNI o NIE del otorgante (8 dígitos + letra, o letra + 7 dígitos + letra).",
-        fieldType=FieldType.STRING,
-        standard_validators=[
-            StandardValidatorSpec(type=StandardValidatorType.NIF, severity="warning"),
-            StandardValidatorSpec(type=StandardValidatorType.NIE, severity="warning"),
+    Field(
+        name="otorgante_dni_nie",
+        description="DNI o NIE del otorgante (8 dígitos + letra, o letra + 7 dígitos + letra).",
+        type=FieldType.STRING,
+        validators=[
+            ValidatorSpec(name=ValidatorType.NIF, severity="warning"),
+            ValidatorSpec(name=ValidatorType.NIE, severity="warning"),
         ],
     ),
-    FieldSpec(
-        fieldName="apoderado_nombre",
-        fieldDescription="Nombre completo del apoderado.",
-        fieldType=FieldType.STRING,
+    Field(
+        name="apoderado_nombre",
+        description="Nombre completo del apoderado.",
+        type=FieldType.STRING,
     ),
-    FieldSpec(
-        fieldName="apoderado_dni_nie",
-        fieldDescription="DNI o NIE del apoderado.",
-        fieldType=FieldType.STRING,
-        standard_validators=[
-            StandardValidatorSpec(type=StandardValidatorType.NIF, severity="warning"),
-            StandardValidatorSpec(type=StandardValidatorType.NIE, severity="warning"),
+    Field(
+        name="apoderado_dni_nie",
+        description="DNI o NIE del apoderado.",
+        type=FieldType.STRING,
+        validators=[
+            ValidatorSpec(name=ValidatorType.NIF, severity="warning"),
+            ValidatorSpec(name=ValidatorType.NIE, severity="warning"),
         ],
     ),
 ]
 
-_VISUAL_VALIDATORS = [
-    VisualValidatorSpec(
+_VISUAL_CHECKS = [
+    VisualCheck(
         name="firma_notario",
         description="The notary's handwritten signature is present.",
     ),
-    VisualValidatorSpec(
+    VisualCheck(
         name="sello_notarial",
         description="The notary's official stamp / seal is present.",
     ),
@@ -124,9 +124,9 @@ _RULES = [
         ),
         parents=[
             RuleFieldParent(
-                parentType="field",
-                documentType=_DOC_TYPE,
-                fieldNames=[
+                kind="field",
+                document_type=_DOC_TYPE,
+                fields=[
                     "otorgante_nombre",
                     "apoderado_nombre",
                     "otorgante_dni_nie",
@@ -145,9 +145,9 @@ _RULES = [
         ),
         parents=[
             RuleFieldParent(
-                parentType="field",
-                documentType=_DOC_TYPE,
-                fieldNames=["otorgante_nombre", "apoderado_nombre"],
+                kind="field",
+                document_type=_DOC_TYPE,
+                fields=["otorgante_nombre", "apoderado_nombre"],
             ),
         ],
         output=RuleOutputSpec(type="boolean", valid_outputs=["true", "false"]),
@@ -160,9 +160,9 @@ _RULES = [
         ),
         parents=[
             RuleFieldParent(
-                parentType="field",
-                documentType=_DOC_TYPE,
-                fieldNames=["fecha"],
+                kind="field",
+                document_type=_DOC_TYPE,
+                fields=["fecha"],
             ),
         ],
         output=RuleOutputSpec(type="boolean", valid_outputs=["true", "false"]),
@@ -178,35 +178,35 @@ _RULES = [
 def _render(result, request) -> str:
     out: list[str] = []
     out.append("=" * 70)
-    out.append(f"  flydocs -- real Claude run ({result.model})")
+    out.append(f"  flydocs -- real Claude run ({result.pipeline.model})")
     out.append("=" * 70)
     out.append("")
     primary = result.files[0]
     out.append(f"document      : {primary.filename} ({primary.media_type})")
     out.append(f"pages         : {primary.page_count}")
     out.append(f"bytes         : {primary.bytes:,}")
-    out.append(f"latency_ms    : {result.latency_ms:,}")
-    out.append(f"request_id    : {result.request_id}")
+    out.append(f"latency_ms    : {result.pipeline.latency_ms:,}")
+    out.append(f"id            : {result.id}")
     out.append("")
 
     for doc in result.documents:
         out.append("-" * 70)
-        out.append(f"document_type : {doc.document_type}")
+        out.append(f"document_type : {doc.type}")
         out.append(f"pages         : {doc.pages}")
         out.append(f"confidence    : {doc.confidence:.2f}")
         out.append("")
         out.append(f"{'FIELD':25s} {'VALUE':40s} {'CONF':>5s} {'PAGE':>4s} {'JUDGE':10s} {'VALID':6s}")
-        for group in doc.fields:
-            out.append(f"  [group] {group.fieldGroupName}")
-            for f in group.fieldGroupFields:
-                value = f.fieldValueFound if f.fieldValueFound is not None else "—"
+        for group in doc.field_groups:
+            out.append(f"  [group] {group.name}")
+            for f in group.fields:
+                value = f.value if f.value is not None else "—"
                 value_s = str(value)[:38]
-                pages_s = ",".join(str(p) for p in f.pagesFound) or "—"
+                pages_s = ",".join(str(p) for p in f.pages) or "—"
                 judge_s = f.judge.status.value if f.judge else "—"
-                fv = f.field_validation
+                fv = f.validation
                 valid_s = "OK" if fv.valid else "BAD"
                 out.append(
-                    f"  {f.fieldName:25s} {value_s:40s} {f.confidence:.2f}  "
+                    f"  {f.name:25s} {value_s:40s} {f.confidence:.2f}  "
                     f"{pages_s:>4s} {judge_s:10s} {valid_s:6s}"
                 )
                 if fv.errors:
@@ -223,19 +223,20 @@ def _render(result, request) -> str:
             out.append("VISUAL AUTHENTICITY")
             for v in doc.authenticity.visual:
                 badge = "PASS" if v.passed else "FAIL"
-                out.append(f"  - {v.name:30s} {badge:5s} conf={v.confidence:.2f} -- {v.notes[:60]}")
+                out.append(f"  - {v.name:30s} {badge:5s} conf={v.confidence:.2f} -- {(v.notes or '')[:60]}")
             out.append("")
 
     if result.rule_results:
         out.append("-" * 70)
         out.append("BUSINESS RULES")
         for r in result.rule_results:
-            out.append(f"  - {r.rule_id:25s} -> {r.output:10s} {r.summary[:80]}")
+            summary = r.summary or ""
+            out.append(f"  - {r.rule_id:25s} -> {r.output:10s} {summary[:80]}")
         out.append("")
 
-    if result.pipeline_errors:
+    if result.pipeline.errors:
         out.append("PIPELINE ERRORS:")
-        out.append(json.dumps(result.pipeline_errors, indent=2))
+        out.append(json.dumps([e.model_dump() for e in result.pipeline.errors], indent=2))
     out.append("=" * 70)
     return "\n".join(out)
 
@@ -259,20 +260,18 @@ def test_real_claude_extraction_with_rules() -> None:
         pytest.skip(f"Sample PDF {PDF_PATH} not found locally.")
 
     pdf_bytes = PDF_PATH.read_bytes()
-    doc_spec = DocSpec(
-        docType=DocType(
-            documentType=_DOC_TYPE,
-            description="Escritura notarial de poderes (Spanish notarial power of attorney)",
-            country="ES",
-        ),
-        fieldGroups=[
+    doc_spec = DocumentTypeSpec(
+        id=_DOC_TYPE,
+        description="Escritura notarial de poderes (Spanish notarial power of attorney)",
+        country="ES",
+        field_groups=[
             FieldGroup(
-                fieldGroupName="otorgamiento",
-                fieldGroupDesc="Datos del otorgamiento",
-                fieldGroupFields=_FIELD_SPECS,
+                name="otorgamiento",
+                description="Datos del otorgamiento",
+                fields=_FIELDS,
             )
         ],
-        validators=ValidatorsSpec(visual=_VISUAL_VALIDATORS),
+        visual_checks=_VISUAL_CHECKS,
     )
 
     request = ExtractionRequest(
@@ -281,14 +280,14 @@ def test_real_claude_extraction_with_rules() -> None:
             "Extract the canonical fields, verify the notary's signature is "
             "present, and evaluate whether the document is complete and recent."
         ),
-        documents=[
-            DocumentInput(
+        files=[
+            FileInput(
                 filename=PDF_PATH.name,
                 content_base64=base64.b64encode(pdf_bytes).decode("ascii"),
                 content_type="application/pdf",
             )
         ],
-        docs=[doc_spec],
+        document_types=[doc_spec],
         rules=_RULES,
         options=ExtractionOptions(
             model=MODEL,
@@ -314,39 +313,43 @@ def test_real_claude_extraction_with_rules() -> None:
     assert result.files[0].page_count >= 1
     assert len(result.documents) == 1
     doc = result.documents[0]
-    assert doc.document_type == _DOC_TYPE
+    assert doc.type == _DOC_TYPE
     assert doc.missing is False
 
-    fields = doc.fields[0].fieldGroupFields
-    expected_names = {fs.fieldName for fs in _FIELD_SPECS}
-    assert {f.fieldName for f in fields} == expected_names
+    fields = doc.field_groups[0].fields
+    expected_names = {f.name for f in _FIELDS}
+    assert {f.name for f in fields} == expected_names
 
-    located = [f for f in fields if f.fieldValueFound is not None]
+    located = [f for f in fields if f.value is not None]
     assert len(located) >= 4, "Expected most fields located"
 
     # Every located field must carry a non-empty bbox AND a page.
     for f in located:
-        assert f.pagesFound, f"Located field {f.fieldName!r} has no pages"
-        assert all(p >= 1 for p in f.pagesFound)
+        assert f.pages, f"Located field {f.name!r} has no pages"
+        assert all(p >= 1 for p in f.pages)
+        assert f.bbox is not None
         assert f.bbox.xmax > f.bbox.xmin and f.bbox.ymax > f.bbox.ymin, (
-            f"Located field {f.fieldName!r} has degenerate bbox"
+            f"Located field {f.name!r} has degenerate bbox"
         )
 
     # Judge must have stamped a verdict on every located field.
     for f in located:
-        assert f.judge.status.value in {"PASS", "FAIL", "UNCERTAIN"}
+        assert f.judge.status.value in {"pass", "fail", "uncertain"}
 
-    # Visual authenticity must have one outcome per requested validator.
-    assert len(doc.authenticity.visual) == len(_VISUAL_VALIDATORS)
+    # Visual authenticity must have one outcome per requested check.
+    assert len(doc.authenticity.visual) == len(_VISUAL_CHECKS)
     by_name = {v.name: v for v in doc.authenticity.visual}
-    assert set(by_name.keys()) == {v.name for v in _VISUAL_VALIDATORS}
+    assert set(by_name.keys()) == {v.name for v in _VISUAL_CHECKS}
 
     # Rule engine must have evaluated every rule.
     assert len(result.rule_results) == len(_RULES)
     by_rule = {r.rule_id: r for r in result.rule_results}
     assert set(by_rule.keys()) == {r.id for r in _RULES}
     for r in result.rule_results:
-        assert r.output in {"true", "false", "unknown", ""} or r.output.lower() in {"true", "false"}
+        assert r.output in {"true", "false", "unknown", ""} or r.output.lower() in {
+            "true",
+            "false",
+        }
 
 
 async def _run_via_di(request: ExtractionRequest):

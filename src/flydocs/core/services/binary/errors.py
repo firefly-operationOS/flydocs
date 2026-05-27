@@ -32,7 +32,7 @@ class UnsupportedBinaryError(BinaryNormalizationError):
     The caller needs to convert client-side or pick a different file.
     """
 
-    code = "unsupported_binary"
+    code = "unsupported_file"
 
 
 class EncryptedPdfError(BinaryNormalizationError):

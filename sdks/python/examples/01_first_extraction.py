@@ -1,4 +1,9 @@
-"""Hello, flydocs — the smallest async-first runnable example.
+"""Hello, flydocs -- the smallest async-first runnable example (v1 contract).
+
+What it shows:
+  * Build a typed :class:`DocumentTypeSpec` for a single document type.
+  * Submit one file via the v1 ``files`` / ``document_types`` keys.
+  * Walk the new response shape (``documents[*].field_groups[*].fields``).
 
 Run from the repo root, with a flydocs service reachable at
 ``http://localhost:8400`` (e.g. via ``task docker:up:test``)::
@@ -13,44 +18,45 @@ import sys
 from pathlib import Path
 
 from flydocs_sdk import (
-    AsyncFlydocsClient,
-    DocSpec,
-    DocumentInput,
+    AsyncClient,
+    DocumentTypeSpec,
     ExtractionRequest,
+    Field,
     FieldGroup,
-    FieldSpec,
     FieldType,
+    FileInput,
 )
 
 
 async def main(path: Path) -> int:
-    invoice = DocSpec(
-        doc_type={"documentType": "invoice"},
+    invoice = DocumentTypeSpec(
+        id="invoice",
         field_groups=[
-            FieldGroup.of(
-                "totals",
-                FieldSpec(field_name="total_amount", field_type=FieldType.NUMBER, required=True),
-                FieldSpec(field_name="currency", field_type=FieldType.STRING, required=True),
-            )
+            FieldGroup(
+                name="totals",
+                fields=[
+                    Field(name="total_amount", type=FieldType.NUMBER, required=True),
+                    Field(name="currency", type=FieldType.STRING, required=True),
+                ],
+            ),
         ],
     )
 
-    async with AsyncFlydocsClient("http://localhost:8400") as flydocs:
+    async with AsyncClient("http://localhost:8400") as flydocs:
         result = await flydocs.extract(
             ExtractionRequest(
-                documents=[DocumentInput.from_path(path)],
-                docs=[invoice],
+                files=[FileInput.from_path(path)],
+                document_types=[invoice],
             )
         )
 
-    print(f"model={result.model}   latency={result.latency_ms}ms")
+    # In v1, model + latency live under ``pipeline``.
+    print(f"id={result.id}   model={result.pipeline.model}   latency={result.pipeline.latency_ms}ms")
     for doc in result.documents:
-        for group in doc["fields"]:
-            for field in group["fieldGroupFields"]:
-                print(
-                    f"  {field['name']:>15} = {field.get('value')!r:>20}   "
-                    f"conf={field.get('confidence', 0):.2f}"
-                )
+        for group in doc.field_groups:
+            for field in group.fields:
+                value = field.value if field.value is not None else "<missing>"
+                print(f"  {field.name:>15} = {value!r:>20}   conf={field.confidence:.2f}")
     return 0
 
 

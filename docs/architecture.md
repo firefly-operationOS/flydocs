@@ -5,6 +5,14 @@ give you enough of a mental model that you can find any line of code
 from a runtime symptom — and trust the framework to handle the
 plumbing you don't see.
 
+> **What this doc covers:** boot sequence, DI mechanisms, CQRS layer,
+> pipeline runtime, web layer, observability stack, layout invariants.
+> **When to read it:** the second day on the codebase, or while
+> tracing a runtime symptom back to source. **Where else to look:**
+> - First-day tour: [`overview.md`](overview.md).
+> - Stage DAG details: [`pipeline.md`](pipeline.md).
+> - HTTP shape: [`api-reference.md`](api-reference.md).
+
 ---
 
 ## 1. Two frameworks, one application
@@ -167,8 +175,8 @@ class ExtractCommand(Command[ExtractionResult]):
     request: ExtractionRequest
 
 @dataclass(frozen=True)
-class GetJobQuery(Query[JobStatusResponse | None]):
-    job_id: str
+class GetExtractionQuery(Query[Extraction | None]):
+    extraction_id: str
 ```
 
 The handler's class declaration carries the same Generic args
@@ -208,10 +216,10 @@ Each step reads/writes shared state in `context.metadata`. The engine:
 - groups concurrent failures into the context so the orchestrator can
   decide whether to keep running or short-circuit.
 
-Per-doc fan-out (one document, multiple `DocSpec`s — multi-doc files
-with a splitter pass) is implemented with `asyncio.gather` _inside_ the
-stage. The pipeline itself stays a flat chain; concurrency is a stage
-concern.
+Per-doc fan-out (one document, multiple `document_types[]` — multi-doc
+files with a splitter pass) is implemented with `asyncio.gather`
+_inside_ the stage. The pipeline itself stays a flat chain;
+concurrency is a stage concern.
 
 ---
 
@@ -258,7 +266,7 @@ Controllers return plain DTOs; FastAPI serialises them. No manual
 observability stack in already-configured:
 
 - **Structured logs** (structlog JSON). The pipeline stamps a
-  `request_id` on every line.
+  `correlation_id` on every line.
 - **OpenTelemetry traces**. Configure the exporter via standard
   `OTEL_EXPORTER_OTLP_*` env vars.
 - **Prometheus metrics** at `/actuator/metrics` — CQRS handler latency
@@ -266,8 +274,8 @@ observability stack in already-configured:
 - **Actuator endpoints**: `/actuator/health`, `/actuator/health/liveness`,
   `/actuator/health/readiness`, `/actuator/info`.
 
-Logs, traces, and metrics share a `request_id`, so correlating an API
-log line to a worker log line is just a grep.
+Logs, traces, and metrics share a `correlation_id`, so correlating an
+API log line to a worker log line is just a grep.
 
 ---
 
@@ -284,4 +292,4 @@ subtle bugs at boot.
 | `core/configuration.py` is the **single** place where extra `@bean`s live.    | All wiring in one file — easier to audit the graph.                                  |
 | Commands and queries are frozen dataclasses.                                  | Pyfly introspects Generic args for bus routing; frozen makes equality free.          |
 | Bbox stays normalised to `[0, 1]`.                                            | The `clamp_bbox` helper is the single enforcement point.                             |
-| Document bytes never hit the DB.                                              | Job rows store base64 only because the worker re-renders the request — keep it that way unless you wire blob storage. |
+| Document bytes never hit the DB.                                              | `extractions` rows store base64 only because the worker re-renders the request — keep it that way unless you wire blob storage. |

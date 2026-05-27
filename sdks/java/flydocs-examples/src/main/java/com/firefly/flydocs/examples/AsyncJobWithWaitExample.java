@@ -17,20 +17,20 @@
 package com.firefly.flydocs.examples;
 
 import com.firefly.flydocs.sdk.FlydocsClientAsync;
-import com.firefly.flydocs.sdk.model.DocumentInput;
-import com.firefly.flydocs.sdk.model.JobResult;
-import com.firefly.flydocs.sdk.model.JobStatus;
-import com.firefly.flydocs.sdk.model.SubmitJobRequest;
-import com.firefly.flydocs.sdk.model.SubmitJobResponse;
+import com.firefly.flydocs.sdk.model.Extraction;
+import com.firefly.flydocs.sdk.model.ExtractionResultEnvelope;
+import com.firefly.flydocs.sdk.model.ExtractionStatus;
+import com.firefly.flydocs.sdk.model.FileInput;
+import com.firefly.flydocs.sdk.model.SubmitExtractionRequest;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
 
 /**
- * 03 — Submit an async job, wait for it, fetch the result.
+ * 03 — Submit an async extraction, wait for it, fetch the result.
  *
  * <p>Reactive end-to-end: a single chained {@code Mono} pipeline that
- * submits the job, polls until terminal via {@code waitForCompletion},
+ * submits the extraction, polls until terminal via {@code waitForCompletion},
  * branches on status, and reads the result. Mirrors
  * {@code sdks/python/examples/03_async_job_with_wait.py}.</p>
  *
@@ -49,34 +49,33 @@ public final class AsyncJobWithWaitExample {
         }
         Path pdf = Path.of(args[0]);
 
-        SubmitJobRequest submitReq = SubmitJobRequest.builder()
-                .addDocument(DocumentInput.ofPath(pdf))
-                .addDocSpec(ExampleHelpers.invoiceDocSpec())
+        SubmitExtractionRequest submitReq = SubmitExtractionRequest.builder()
+                .addFile(FileInput.ofPath(pdf))
+                .addDocumentType(ExampleHelpers.invoiceDocumentType())
                 .build();
 
         try (FlydocsClientAsync flydocs = FlydocsClientAsync.builder()
                 .baseUrl(ExampleHelpers.defaultBaseUrl())
-                .maxAttempts(3)                  // retry transient 5xx on the submit
+                .maxAttempts(3)
                 .build()) {
 
-            JobResult finalResult = flydocs.submitJob(submitReq)
-                    .doOnNext(r -> System.out.printf("queued %s%n", r.jobId()))
-                    .map(SubmitJobResponse::jobId)
-                    .flatMap(id -> flydocs.waitForCompletion(
+            ExtractionResultEnvelope finalResult = flydocs.extractions().create(submitReq)
+                    .doOnNext(r -> System.out.printf("queued %s%n", r.id()))
+                    .map(Extraction::id)
+                    .flatMap(id -> flydocs.extractions().waitForCompletion(
                             id, Duration.ofSeconds(2), Duration.ofMinutes(10)))
                     .flatMap(status -> {
                         System.out.printf("terminal status=%s attempts=%d%n",
                                 status.status(), status.attempts());
-                        if (status.status() != JobStatus.SUCCEEDED
-                                && status.status() != JobStatus.PARTIAL_SUCCEEDED) {
+                        if (status.status() != ExtractionStatus.SUCCEEDED) {
                             return reactor.core.publisher.Mono.empty();
                         }
-                        return flydocs.getJobResult(status.jobId());
+                        return flydocs.extractions().getResult(status.id());
                     })
                     .block();
 
             if (finalResult == null) {
-                System.out.println("no result available (job did not succeed)");
+                System.out.println("no result available (extraction did not succeed)");
                 return;
             }
             System.out.printf("got result with %d documents%n",

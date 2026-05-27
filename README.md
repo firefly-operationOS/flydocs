@@ -22,6 +22,8 @@ independent of any particular product or vertical.
 ---
 
 > **In a hurry?** &nbsp;Jump to the [**5-minute Quickstart →**](QUICKSTART.md) &nbsp;·&nbsp; SDK paths: [Python](sdks/python/QUICKSTART.md) · [Java / Spring Boot](sdks/java/QUICKSTART.md) &nbsp;·&nbsp; Compose payloads: [**Payload reference →**](docs/payload-reference.md)
+>
+> **Coming from v0?** &nbsp;Every old key → new key is in [**docs/migration-v0-to-v1.md**](docs/migration-v0-to-v1.md), with side-by-side worked examples.
 
 ---
 
@@ -57,33 +59,34 @@ object containing, for every document you asked about:
 
 | Layer                          | What it tells you                                                                              |
 | ------------------------------ | ---------------------------------------------------------------------------------------------- |
-| **Fields**                     | The extracted value, page number, normalised bounding box (with a geometric quality verdict, a `source` discriminator — `llm` / `pdf_text` / `ocr` — and a `refinement_confidence`), model confidence, and free-text notes. Array fields nest recursively (rows of sub-fields). |
-| **Field validation**           | Per-field PASS / FAIL plus the verdict of every built-in `StandardValidator` (IBAN, BIC, NIF/NIE/CIF, VAT, SSN, Luhn, phone (E.164), country / language / postal code, lat/lon, IPv4/IPv6, URI/URL/email/domain/slug, UUID, JSON, hex color, date / time / datetime / ISO 8601, currency code, amount, passport). Each spec carries a `severity` (`error` flips the field invalid; `warning` records the finding but keeps the field valid). |
-| **Visual authenticity**        | Yes/no verdicts on caller-defined visual validators (signature present, stamp present, photo present, …). |
+| **Fields**                     | The extracted value, page numbers, normalised bounding box (with a geometric quality verdict, a `source` discriminator — `llm` / `pdf_text` / `ocr` — and a `refinement_confidence`), model confidence, and free-text notes. Array and object fields nest recursively. |
+| **Field validation**           | Per-field pass / fail plus the verdict of every built-in `ValidatorSpec` (IBAN, BIC, NIF/NIE/CIF, VAT, SSN, Luhn, phone (E.164), country / language / postal code, lat/lon, IPv4/IPv6, URI/URL/email/domain/slug, UUID, JSON, hex color, date / time / datetime / ISO 8601, currency code, amount, passport). Each spec carries a `severity` (`error` flips the field invalid; `warning` records the finding but keeps the field valid). |
+| **Visual authenticity**        | Yes/no verdicts on caller-defined `visual_checks` (signature present, stamp present, photo present, …). |
 | **Content authenticity**       | Document-level integrity audit: date consistency, totals tally, expected boilerplate, tampering signals. |
-| **Judge**                      | A second LLM pass re-checks each extracted value against the document and stamps PASS / FAIL / UNCERTAIN with evidence and a `flag_for_review` bit. |
-| **Judge escalation**           | Optional re-run of `extract` + `judge` with a stronger `escalation_model` when the judge's first pass fails too many fields. The `escalation` block in the response audits the trigger (`primary_fail_rate`, `escalation_fail_rate`, `accepted`). |
-| **Post-extraction transforms** | Declarative entity resolution (dedupe people across documents by DNI + name variants) and free-form LLM transformations (closed-taxonomy normalisation, role mapping, …). Per-document outputs land in the affected `documents[].fields[]`; cross-document outputs land in `request_transformations[]`. |
+| **Judge**                      | A second LLM pass re-checks each extracted value against the document and stamps `pass` / `fail` / `uncertain` with evidence and a `flag_for_review` bit. |
+| **Judge escalation**           | Optional re-run of `extract` + `judge` with a stronger `escalation.model` when the judge's first pass fails too many fields. The `pipeline.escalation` block in the response audits the trigger (`primary_fail_rate`, `escalation_fail_rate`, `accepted`). |
+| **Post-extraction transforms** | Declarative entity resolution (dedupe people across documents by DNI + name variants) and free-form LLM transformations (closed-taxonomy normalisation, role mapping, …). Per-document outputs land in the affected `documents[].field_groups[]`; cross-document outputs land in `request_transformations[]`. |
 | **Business rules**             | Boolean / categorical decisions over fields, validator outcomes, and other rules' results — evaluated as a DAG with `graphlib.TopologicalSorter`, batched per level into one LLM call. _"Is this KYC-complete?"_, _"Escalate to manual review?"_, _"Approve / reject"_. |
-| **Multi-file summary**         | `files[]` carries one entry per input file (filename, MIME type, page count, byte size, final `document_type`, classifier verdict). Files that don't match any declared `DocSpec` show up in `additional_documents[]` instead of being dropped. |
-| **Pipeline errors**            | Non-fatal per-stage failures are surfaced in `pipeline_errors[]` (one entry per failed node with `code`, `message`, `node`) — the request still returns the partial result instead of failing the whole call. |
-| **Execution trace**            | `trace[]` lists every executed pipeline node in DAG order with `started_at`, `completed_at`, `latency_ms`, and `status` (`success` / `failed` / `skipped`) — drop-in latency breakdown for ops dashboards. |
-| **Audit trail**                | Request id, per-stage latencies, per-doc model used, structured `outbound_call` log lines for every LLM / webhook / queue call, W3C trace context (`traceparent`, `tracestate`, `X-Correlation-Id`, `X-Tenant-Id`) propagated end-to-end. |
-| **Cost telemetry**             | Aggregated `usage` block in every response: input/output tokens + estimated USD cost — sourced from `genai-prices`, which is **provider-agnostic** (Anthropic, OpenAI, Google, Mistral, …). Broken down by agent and by model. Plus a per-call `cost_usd` on every `outbound_call` log line. |
+| **Multi-file summary**         | `files[]` carries one entry per input file (filename, MIME type, page count, byte size, final `matched_type`, classifier verdict). Files that don't match any declared `document_type` show up in `discovered_documents[]` instead of being dropped. |
+| **Pipeline errors**            | Non-fatal per-stage failures are surfaced in `pipeline.errors[]` (one entry per failed node with `code`, `message`, `node`) — the request still returns with `status: "partial"` instead of failing the whole call. |
+| **Execution trace**            | `pipeline.trace[]` lists every executed pipeline node in DAG order with `started_at`, `completed_at`, `latency_ms`, and `status` (`success` / `failed` / `skipped`) — drop-in latency breakdown for ops dashboards. |
+| **Audit trail**                | Response `id` (`ext_…`), per-stage latencies, per-doc model used, structured `outbound_call` log lines for every LLM / webhook / queue call, W3C trace context (`traceparent`, `tracestate`, `X-Correlation-Id`, `X-Tenant-Id`) propagated end-to-end. |
+| **Cost telemetry**             | Aggregated `pipeline.usage` block in every response: input/output tokens + estimated USD cost — sourced from `genai-prices`, which is **provider-agnostic** (Anthropic, OpenAI, Google, Mistral, …). Broken down by agent and by model. Plus a per-call `cost_usd` on every `outbound_call` log line. |
 | **Prompt caching**             | Provider-aware across the full Anthropic + OpenAI + Google + Bedrock + Azure matrix. Anthropic / Bedrock-Anthropic: explicit `cache_control` on the system prompt + last user-message block (5-minute or 1-hour TTL). OpenAI / Azure-OpenAI: automatic caching for prompts ≥1024 tokens + a stable `prompt_cache_key` routing hint so concurrent requests from the same agent share cache-backend affinity. Google Gemini: caller-supplied `CachedContent` resource ids wired through to pydantic-ai. Cache writes / reads surface as `cache_creation_tokens` / `cache_read_tokens` on the response. Toggle the whole middleware with `FLYDOCS_PROMPT_CACHE=off`. |
 
-A single request always carries a non-empty `documents` list — a
+A single request always carries a non-empty `files[]` list — a
 single file is just a one-element list. Submit several entries to ship
-a multi-file pack at once: pin each file's `document_type` when you
+a multi-file pack at once: pin each file's `expected_type` when you
 know it, or let the LLM classifier decide. Each extracted document
 carries a `source_file` field so callers can map output back to the
 input file that produced it. The full multi-file shape is documented
 in [docs/api-reference.md § 2c](docs/api-reference.md#2c-multi-file--sub-document-discovery).
 
 The same call works **synchronously** (`POST /api/v1/extract`, blocks
-until done) or as a **queued job** with a webhook
-(`POST /api/v1/jobs`, returns 202 + a job id). Multi-file submission
-is supported on both surfaces.
+until done) or as an **async submission** with a webhook
+(`POST /api/v1/extractions`, returns 202 + an `ext_…` id). Multi-file
+submission is supported on both surfaces. Both endpoints accept
+`application/json` or `multipart/form-data`.
 
 ---
 
@@ -151,7 +154,7 @@ Everything else (Postgres URL, EDA adapter, timeouts, webhook secret,
 
 ```bash
 task dev:db              # docker compose up Postgres (and Redis if you switch adapter)
-task dev:migrate         # alembic upgrade head — creates extraction_jobs +
+task dev:migrate         # alembic upgrade head — creates extractions +
                          # the pyfly_eda_outbox / pyfly_eda_offsets tables
 ```
 
@@ -179,34 +182,34 @@ sending traffic.
 ```bash
 curl -s http://localhost:8400/api/v1/extract \
   -H 'content-type: application/json' \
-  -d @docs/examples/extract.json | jq '.documents[0].fields'
+  -d @docs/examples/extract.json | jq '.documents[0].field_groups'
 ```
 
 The endpoint blocks until the pipeline finishes (or hits
 `FLYDOCS_SYNC_TIMEOUT_S`, default 60 s). The response carries every
 extracted field with its bounding box, validation outcome, judge
-verdict, business-rule decisions, and a `usage` block with the USD
-cost. See [docs/api-reference.md](docs/api-reference.md) for the full
-shape.
+verdict, business-rule decisions, and a `pipeline.usage` block with
+the USD cost. See [docs/api-reference.md](docs/api-reference.md) for
+the full shape.
 
-### 6. Your first asynchronous, multi-file job with a transformation
+### 6. Your first async, multi-file extraction with a transformation
 
 Build a payload with two files, a deduper, and a webhook callback,
-then POST it. The submit returns immediately with a `202` + job id;
-the worker drives the same pipeline and posts the result to your
-`callback_url` when it finishes:
+then POST it. The submit returns immediately with a `202` + an
+`ext_…` id; the worker drives the same pipeline and posts the result
+to your `callback_url` when it finishes:
 
 ```bash
-curl -s http://localhost:8400/api/v1/jobs \
+curl -s http://localhost:8400/api/v1/extractions \
   -H 'content-type: application/json' \
   -H 'idempotency-key: '"$(uuidgen)" \
   -d '{
     "intention": "KYB pack: deed + DNI. Dedupe people across docs.",
-    "documents": [
+    "files": [
       {"filename": "deed.pdf", "content_base64": "JVBERi0xLjQK...",  "content_type": "application/pdf"},
       {"filename": "dni.jpg",  "content_base64": "/9j/4AAQ...",       "content_type": "image/jpeg"}
     ],
-    "docs":  [ /* one DocSpec per docType — see docs/api-reference.md § 4 */ ],
+    "document_types": [ /* one DocumentTypeSpec per id — see docs/api-reference.md § 5 */ ],
     "rules": [],
     "options": {
       "stages": {"classifier": true, "judge": true, "transform": true},
@@ -220,19 +223,19 @@ curl -s http://localhost:8400/api/v1/jobs \
   }'
 ```
 
-Poll status if you don't want to wait for the webhook:
+Poll state if you don't want to wait for the webhook:
 
 ```bash
-JOB_ID=01HEM2ZZ7M0Q8...
-curl -s http://localhost:8400/api/v1/jobs/$JOB_ID
-curl -s http://localhost:8400/api/v1/jobs/$JOB_ID/result | jq
+EXT_ID=ext_01HEM2ZZ7M0Q8...
+curl -s http://localhost:8400/api/v1/extractions/$EXT_ID
+curl -s http://localhost:8400/api/v1/extractions/$EXT_ID/result | jq
 ```
 
-The webhook payload mirrors the EDA event envelope (`event_id`,
-`event_type`, `occurred_at`, `correlation_id`, …) and carries the full
-`ExtractionResult` for terminal `SUCCEEDED` / `PARTIAL_SUCCEEDED`
-states. Signed with HMAC-SHA256 in `X-Flydocs-Signature` using
-`FLYDOCS_WEBHOOK_HMAC_SECRET`.
+The webhook payload is the unified `EventEnvelope` (`event_id`,
+`event_type: "extraction.completed"`, `occurred_at`, `correlation_id`,
+`extraction` snapshot, …) and carries the full `ExtractionResult`
+under `result` when `extraction.status == "succeeded"`. Signed with
+HMAC-SHA256 in `X-Flydocs-Signature` using `FLYDOCS_WEBHOOK_HMAC_SECRET`.
 
 ### 7. (Optional) Skip steps 3–4 with the full container stack
 
@@ -275,17 +278,17 @@ DAG for each call so the audit trail reflects exactly what executed.
                               │  per-stage timeouts + error capture
                               ▼
                        structured trace
-                       (request_id, latency_ms, pipeline_errors)
+                       (id, pipeline.latency_ms, pipeline.errors)
 ```
 
 The extractor and the geometric bbox check are the only mandatory
 stages. Everything else is a caller-chosen trade-off between cost,
 latency, and rigor. With `splitter` enabled, every file -- even a
 single uploaded PDF -- is split into its sub-documents and each is
-independently classified against the declared `DocSpec`s, so a pack
-that bundles a deed + an ID + a utility bill comes out as three
-separate routed documents without the caller having to know what's
-inside.
+independently classified against the declared `document_types[]`, so
+a pack that bundles a deed + an ID + a utility bill comes out as
+three separate routed documents without the caller having to know
+what's inside.
 
 The `bbox_refine` stage grounds the LLM's bounding boxes against the
 document's real text. PDF text layers go through PyMuPDF (sub-pixel
@@ -339,16 +342,16 @@ src/flydocs/
 │   ├── configuration.py     @configuration with every @bean
 │   └── services/
 │       ├── extract/         CQRS: sync extract command + handler
-│       ├── jobs/            CQRS: submit / get / cancel job
+│       ├── extractions/     CQRS: submit / get / list / cancel async extraction
 │       ├── extraction/      MultimodalExtractor + PromptCatalog
 │       ├── splitting/       LLM document splitter
-│       ├── validation/      Pure-Python FieldValidator + StandardValidators
+│       ├── validation/      Pure-Python FieldValidator + built-in validators
 │       ├── authenticity/    Visual + content audits
 │       ├── judge/           LLM judge / re-evaluator
 │       ├── rules/           DAG-based business rule engine
 │       ├── pipeline/        PipelineOrchestrator (fireflyframework-agentic PipelineEngine)
 │       ├── webhook/         Outbound webhook publisher with HMAC
-│       └── workers/         JobWorker (subscribes to fireflyframework-pyfly EDA)
+│       └── workers/         ExtractionWorker (subscribes to fireflyframework-pyfly EDA)
 ├── resources/
 │   └── prompts/             YAML prompt templates (one per LLM stage)
 └── web/
@@ -360,29 +363,29 @@ src/flydocs/
 
 ## Public API at a glance
 
-| Endpoint                                  | Purpose                                                |
-| ----------------------------------------- | ------------------------------------------------------ |
-| **Extraction**                            |                                                        |
-| `POST   /api/v1/extract`                  | Synchronous extraction. Blocks until the pipeline finishes. |
-| `POST   /api/v1/extract:validate`         | Dry-run the semantic validator on a payload (no LLM call, no DB write). |
-| **Jobs (async)**                          |                                                        |
-| `POST   /api/v1/jobs`                     | Submit a queued extraction. Returns `202` + job id.    |
-| `GET    /api/v1/jobs`                     | Filtered, paginated listing (`status`, `bbox_refine_status`, `idempotency_key`, `created_after` / `before`, `limit`, `offset`). |
-| `GET    /api/v1/jobs/{id}`                | Current status of a job (includes bbox-refine sub-state). |
-| `GET    /api/v1/jobs/{id}/result`         | Final `ExtractionResult`. Long-poll for grounded bboxes via `?wait_for_bboxes=true&timeout=…`. |
-| `DELETE /api/v1/jobs/{id}`                | Cancel a job that is still `QUEUED`.                   |
-| **Service metadata**                      |                                                        |
-| `GET    /api/v1/version`                  | Build + model + EDA-adapter info.                      |
-| `GET    /openapi.json`                    | Machine-readable OpenAPI 3.1 spec.                     |
-| `GET    /docs`                            | Swagger UI (OpenAPI 3.1).                              |
-| `GET    /admin`                           | PyFly Admin dashboard — beans, mappings, env, CQRS, traces, loggers, health. |
-| **Actuator (ops)**                        |                                                        |
-| `GET    /actuator/health`                 | Composite health (DB + EDA).                           |
-| `GET    /actuator/health/liveness`        | Kubernetes liveness probe.                             |
-| `GET    /actuator/health/readiness`       | Kubernetes readiness probe — `503` when `database_health` or `eda_health` is `DOWN`. |
-| `GET    /actuator/metrics`                | Prometheus metrics.                                    |
+| Endpoint                                     | Purpose                                                |
+| -------------------------------------------- | ------------------------------------------------------ |
+| **Sync extraction**                          |                                                        |
+| `POST   /api/v1/extract`                     | Synchronous extraction. Blocks until the pipeline finishes. |
+| `POST   /api/v1/extract:validate`            | Dry-run the semantic validator on a payload (no LLM call, no DB write). |
+| **Async extractions**                        |                                                        |
+| `POST   /api/v1/extractions`                 | Submit a queued extraction. Returns `202` + an `ext_…` id. |
+| `GET    /api/v1/extractions`                 | Filtered, paginated listing (`status`, `post_processing_status`, `idempotency_key`, `created_after` / `before`, `limit`, `offset`). |
+| `GET    /api/v1/extractions/{id}`            | Current state of an `Extraction` (incl. post-processing block). |
+| `GET    /api/v1/extractions/{id}/result`     | Final `ExtractionResult`. Long-poll for grounded bboxes via `?wait_for_bboxes=true&timeout=…`. |
+| `DELETE /api/v1/extractions/{id}`            | Cancel an extraction that is still `queued`.           |
+| **Service metadata**                         |                                                        |
+| `GET    /api/v1/version`                     | Build + model + EDA-adapter info.                      |
+| `GET    /openapi.json`                       | Machine-readable OpenAPI 3.1 spec.                     |
+| `GET    /docs`                               | Swagger UI (OpenAPI 3.1).                              |
+| `GET    /admin`                              | PyFly Admin dashboard — beans, mappings, env, CQRS, traces, loggers, health. |
+| **Actuator (ops)**                           |                                                        |
+| `GET    /actuator/health`                    | Composite health (DB + EDA).                           |
+| `GET    /actuator/health/liveness`           | Kubernetes liveness probe.                             |
+| `GET    /actuator/health/readiness`          | Kubernetes readiness probe — `503` when `database_health` or `eda_health` is `DOWN`. |
+| `GET    /actuator/metrics`                   | Prometheus metrics.                                    |
 
-Full request / response shapes in [docs/api-reference.md](docs/api-reference.md). Errors follow RFC 7807 (`application/problem+json`) — see the [error-code catalogue](docs/api-reference.md#6-error-codes).
+Full request / response shapes in [docs/api-reference.md](docs/api-reference.md). Errors follow RFC 7807 (`application/problem+json`) — see the [error-code catalogue](docs/api-reference.md#8-error-codes).
 
 ---
 
@@ -404,7 +407,7 @@ field. They run after extraction and never call the LLM:
 Each one accepts optional `params` (e.g. `{"country": "ES"}`) and a
 `severity` (`error` flips the field invalid; `warning` records the
 finding but keeps the field valid). See
-[docs/standard-validators.md](docs/standard-validators.md).
+[docs/validators.md](docs/validators.md).
 
 **Prompt catalog** — every LLM stage reads its system + user prompt
 from a YAML file under `src/flydocs/resources/prompts/`. The
@@ -424,8 +427,8 @@ Cycles are rejected before any LLM call is issued. See
   "id": "kyc_complete",
   "predicate": "All identity fields are populated AND nif is valid.",
   "parents": [
-    {"parentType": "field", "documentType": "passport",
-     "fieldNames": ["full_name", "nif"]}
+    {"kind": "field", "document_type": "passport",
+     "fields": ["full_name", "nif"]}
   ],
   "output": {"type": "boolean", "valid_outputs": ["true", "false"]}
 }
@@ -444,11 +447,12 @@ Cycles are rejected before any LLM call is issued. See
 | [docs/pipeline.md](docs/pipeline.md)           | You're touching the orchestrator or adding a new stage.                  |
 | [docs/api-reference.md](docs/api-reference.md) | You're integrating with the HTTP API.                                    |
 | [docs/transformations.md](docs/transformations.md) | You want to dedupe, normalise or run free-form LLM transformations on extracted data. |
-| [docs/standard-validators.md](docs/standard-validators.md) | You want to know what validators are built-in.               |
+| [docs/validators.md](docs/validators.md)       | You want to know what validators are built-in.                           |
 | [docs/rule-engine.md](docs/rule-engine.md)     | You're designing business rules.                                         |
 | [docs/prompts.md](docs/prompts.md)             | You're editing or adding YAML prompt templates.                          |
 | [docs/deployment.md](docs/deployment.md)       | You're shipping the service to a real environment.                       |
 | [docs/troubleshooting.md](docs/troubleshooting.md) | A real-world problem just blew up.                                   |
+| [docs/migration-v0-to-v1.md](docs/migration-v0-to-v1.md) | You're migrating a v0 integration to v1.                          |
 
 ---
 

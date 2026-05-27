@@ -4,6 +4,17 @@ This is the deep dive on `PipelineOrchestrator` and the stages it
 runs. Read it when you're touching the orchestrator, adding a new
 stage, or trying to understand why a stage didn't fire.
 
+> **What this doc covers:** the stage DAG, per-stage timeouts,
+> concurrency model, fallback policy, cost telemetry, and the
+> add-a-stage recipe. **When to read it:** while touching the
+> orchestrator or trying to understand which stages fired. **Where
+> else to look:**
+> - HTTP request/response shapes: [`api-reference.md`](api-reference.md) +
+>   [`payload-reference.md`](payload-reference.md).
+> - Validator catalogue: [`validators.md`](validators.md).
+> - Rule engine semantics: [`rule-engine.md`](rule-engine.md).
+> - Migrating from v0: [`migration-v0-to-v1.md`](migration-v0-to-v1.md).
+
 ---
 
 ## 1. What the orchestrator is
@@ -35,12 +46,12 @@ reflect exactly what executed.
 | ----: | ---------------------- | :--------: | ----------------------------------------------------------------------------------------------------------------------------------------- | --------------: |
 |     1 | `load`                 | yes        | Sniff media type and count pages on every input file. Pure Python.                                                                        | 20 s            |
 |     2 | `discover`             | no         | LLM enumerates every sub-document inside each unpinned, multi-page file. One segment per sub-document with a page range.                  | 180 s           |
-|     3 | `classify`             | no         | LLM assigns each segment a declared `DocSpec` (or `unmatched`). Per-segment fan-out via `asyncio.gather`.                                 | 180 s           |
-|     4 | `plan_tasks`           | yes        | Pure Python: build the flat `(segment, DocSpec)` task list every downstream stage iterates.                                               | 5 s             |
+|     3 | `classify`             | no         | LLM assigns each segment a declared `document_type` (or `unmatched`). Per-segment fan-out via `asyncio.gather`.                          | 180 s           |
+|     4 | `plan_tasks`           | yes        | Pure Python: build the flat `(segment, document_type)` task list every downstream stage iterates.                                         | 5 s             |
 |     5 | `extract`              | yes        | LLM produces fields + normalised bboxes for every task. Fanned out with `asyncio.gather`.                                                 | 600 s           |
 |     6 | `bbox_validation`      | yes        | Pure-Python geometric hallucination check: stamps every bbox with a `BboxQuality` verdict + continuous `quality_score`.                   | 5 s             |
 |     7 | `bbox_refine`          | no         | Replaces LLM-estimated coordinates with grounded ones via the hybrid matcher (rapidfuzz first, LLM only for residual). Pluggable OCR engine: ``tesseract`` (default), ``docling`` (layout-aware, see [docling.md](docling.md)), or ``none``. Skipped inline on async — see [bbox refinement](#bbox-refinement-sync-vs-async). | 300 s           |
-|     8 | `field_validation`     | no         | Pure-Python validation: regex / enum / range + every `StandardValidator` declared per field.                                              | 5 s             |
+|     8 | `field_validation`     | no         | Pure-Python validation: regex / enum / range + every `ValidatorSpec` declared on `Field.validators`. See [validators.md](validators.md). | 5 s             |
 |     9 | `visual_authenticity`  | no         | LLM evaluates caller-defined visual validators (signature present, stamp present, …).                                                     | 180 s           |
 |    10 | `content_authenticity` | no         | LLM audit: dates consistent, totals add up, expected boilerplate, tampering signals.                                                      | 180 s           |
 |    11 | `judge`                | no         | Second LLM pass re-grades every extracted value against the source.                                                                       | 300 s           |
@@ -56,13 +67,14 @@ Other short-circuits:
   at least one file is unpinned AND that file has more than one page.
   Pinned files are treated as a single segment of the pinned type.
 - `classify` runs per **segment**, not per file. Skipped for segments
-  whose doctype is already resolved (pin or single-declared-DocSpec
-  short-circuit), and as a whole when `stages.classifier` is off.
+  whose document type is already resolved (`expected_type` pin or
+  single-declared-document-type short-circuit), and as a whole when
+  `stages.classifier` is off.
 - `bbox_validation` is non-toggleable — it is pure geometry and runs
   on every request.
 - `bbox_refine` runs **inline only for sync** requests. On the async
-  path `JobWorker` skips it and delegates refinement to the dedicated
-  `BboxRefineWorker` (out-of-band, idempotent).
+  path `ExtractionWorker` skips it and delegates refinement to the
+  dedicated `BboxRefineWorker` (out-of-band, idempotent).
 - `judge_escalation` is silently skipped when `judge` is off.
 - `transform` is silently a no-op when `options.transformations` is
   empty even with the toggle on.
@@ -91,14 +103,15 @@ For sync requests (`POST /api/v1/extract`) the inline `bbox_refine`
 node is the only refinement path and grounded bboxes are present in
 the response when the call returns.
 
-For async requests (`POST /api/v1/jobs`), `JobWorker` mutates the
-request to set `stages.bbox_refine = False` before invoking the
-orchestrator, then publishes `IDPBboxRefineRequested` on success.
-The dedicated `BboxRefineWorker` picks up the event and grounds
-bboxes out-of-band; the job transitions
-`SUCCEEDED → PARTIAL_SUCCEEDED → SUCCEEDED` (or
-`REFINING_BBOXES → SUCCEEDED`). The refiner is idempotent — fields
-whose `bbox.source ∈ {pdf_text, ocr}` are skipped on re-run — so
+For async requests (`POST /api/v1/extractions`), `ExtractionWorker`
+mutates the request to set `stages.bbox_refine = False` before
+invoking the orchestrator, then publishes
+`extraction.post_processing.requested` on success. The dedicated
+`BboxRefineWorker` picks up the event and grounds bboxes out-of-band;
+the extraction's `extraction.status` stays `succeeded` while
+`post_processing.bbox_refinement.status` cycles `pending → running →
+succeeded | failed`. The refiner is idempotent — fields whose
+`bbox.source ∈ {pdf_text, ocr}` are skipped on re-run — so
 re-running the worker after a partial result is safe.
 
 ---
@@ -111,13 +124,13 @@ builder.add_node("load", CallableStep(self._step_load), timeout_seconds=20)
 
 # Discover runs when the splitter is on AND at least one file is unpinned.
 # Pinned files keep their single default segment (covers the whole file).
-needs_discover = stages.splitter and any(not f.document_type for f in files)
+needs_discover = stages.splitter and any(not f.expected_type for f in files)
 if needs_discover:
     builder.add_node("discover", CallableStep(self._step_discover), timeout_seconds=180)
 
 # Classify runs per segment when on. The step short-circuits internally
-# when there are no segments needing a doctype (everything pinned, or
-# only one declared DocSpec).
+# when there are no segments needing a document type (everything pinned,
+# or only one declared document_type).
 if stages.classifier:
     builder.add_node("classify", CallableStep(self._step_classifier), timeout_seconds=180)
 
@@ -132,7 +145,7 @@ if stages.field_validation:
 builder.add_node("assemble", CallableStep(self._step_assemble), timeout_seconds=5)
 builder.chain(*chain)        # linear order
 engine = builder.build()
-engine._event_handler = _LoggingEventHandler(str(request.request_id))
+engine._event_handler = _LoggingEventHandler(str(request.id))
 await engine.run(context=ctx)
 ```
 
@@ -157,16 +170,18 @@ Three properties fall out of this design:
 > pipeline context:
 >
 > - `files_data: list[_FileSlot]` -- one slot per input file.
-> - `tasks: list[_ExtractionTask]` -- one task per **(segment, DocSpec)**
->   pair, where a "segment" is a sub-document inside a file.
+> - `tasks: list[_ExtractionTask]` -- one task per **(segment,
+>   document_type)** pair, where a "segment" is a sub-document inside
+>   a file.
 >
 > A segment is produced by the `discover` stage (one segment per
 > sub-document the LLM identifies) or, when discovery is off /
 > short-circuited, a default segment that covers the whole file. Each
-> segment is then assigned a declared DocSpec by the `classify` stage
-> (or by a caller pin, or by the single-DocSpec short-circuit). A task
-> is produced for every segment that ends up with a resolved DocSpec;
-> the rest go to `result.additional_documents` as `unmatched`.
+> segment is then assigned a declared `document_type` by the
+> `classify` stage (or by a caller pin, or by the
+> single-document-type short-circuit). A task is produced for every
+> segment that ends up with a resolved document type; the rest go to
+> `result.discovered_documents` as `unmatched`.
 
 ### 4a. `load`
 
@@ -177,8 +192,8 @@ is one page from the extractor's point of view). Each file becomes a
 `_FileSlot` in `ctx.metadata["files_data"]` and is seeded with **one
 default segment** covering the whole file. The discover stage may
 later replace that with finer-grained segments. For pinned files the
-default segment's `resolved_doctype` is set from the pin so they skip
-classification.
+default segment's `resolved_document_type` is set from the
+`expected_type` pin so they skip classification.
 
 No LLM calls. Cheap.
 
@@ -191,10 +206,10 @@ The splitter is a pure **segmentation** service: it enumerates every
 distinct sub-document inside a file and returns one entry per
 sub-document with a contiguous page range, a free-text
 `provisional_type` hint, a description, and a segmentation
-`confidence`. It does NOT decide which declared DocSpec each segment
-matches -- that is the classifier's job.
+`confidence`. It does NOT decide which declared `document_type` each
+segment matches -- that is the classifier's job.
 
-The caller's declared DocSpecs are passed to the LLM as routing
+The caller's declared `document_types[]` are passed to the LLM as routing
 context (so it can recognise familiar layouts), not as a constraint:
 the splitter outputs what is actually in the file, even when no
 declared target matches.
@@ -202,7 +217,7 @@ declared target matches.
 The stage is skipped when:
 
 - `stages.splitter` is off, or
-- the file is pinned with a `document_type` (caller already told us
+- the file is pinned with an `expected_type` (caller already told us
   what it is), or
 - the file has a single page (one segment is always enough).
 
@@ -218,30 +233,31 @@ proceed.
 Each call sees the segment bytes (the file is sliced down to the
 segment's page range with `pypdf` for PDFs; for non-PDF inputs the
 whole file is sent) plus the JSON dump of every candidate
-`DocSpec.docType`. The LLM returns one of the declared `documentType`
-values or the literal `"unmatched"`. Any value outside the closed
-candidate set is coerced to `unmatched` defensively.
+`document_types[].id` (with `description` and `country`). The LLM
+returns one of the declared `id` values or the literal `"unmatched"`.
+Any value outside the closed candidate set is coerced to `unmatched`
+defensively.
 
 The per-segment verdict is surfaced on the corresponding
-`documents[]` or `additional_documents[]` entry. For single-segment
+`documents[]` or `discovered_documents[]` entry. For single-segment
 files we additionally roll the verdict up onto
 `result.files[i].classification` so the top-level summary is useful.
 
 The stage is skipped when:
 
 - `stages.classifier` is off, or
-- the segment already has a resolved doctype (caller pin, or the
-  single-declared-DocSpec short-circuit that auto-assigns the only
-  candidate without an LLM call).
+- the segment already has a resolved document type (`expected_type`
+  pin, or the single-declared-document-type short-circuit that
+  auto-assigns the only candidate without an LLM call).
 
 ### 4d. `plan_tasks`
 
 Pure-Python bookkeeping (no LLM). Walks the per-file segments and
-produces one `_ExtractionTask` per (segment, DocSpec) pair where the
-segment has a resolved doctype. PDF segments that don't cover the
-whole file get sliced down with `pypdf` so the extractor sees only
-the segment's pages. Unmatched segments are routed to
-`additional_documents` and never reach the extractor.
+produces one `_ExtractionTask` per (segment, `document_type`) pair
+where the segment has a resolved document type. PDF segments that
+don't cover the whole file get sliced down with `pypdf` so the
+extractor sees only the segment's pages. Unmatched segments are
+routed to `discovered_documents` and never reach the extractor.
 
 ### 4e. `extract`
 
@@ -250,7 +266,7 @@ out with `asyncio.gather`.
 
 For each call:
 
-1. Build a dynamic Pydantic model from the `DocSpec` field schema
+1. Build a dynamic Pydantic model from the `DocumentTypeSpec` field schema
    (`build_extraction_output_model`). This is what `pydantic-ai` uses
    to enforce structured output.
 2. Render the `flydocs/extract` prompt with the JSON schema, media
@@ -266,13 +282,13 @@ For each call:
 4. Call `FireflyAgent.run(content)` -- the document bytes go inline as
    multimodal content.
 5. Post-process the output with `normalise_doc` -- clamp every bbox to
-   `[0, 1]`, coerce types, populate `pagesFound`.
+   `[0, 1]`, coerce types, populate `pages`.
 
 Fallback: if the primary model fails (timeout, content policy, etc.)
 **and** `FLYDOCS_FALLBACK_MODEL` is set to a different model, the
 extractor retries on the fallback. The actual model used per task is
-reflected in `result.model` (when more than one model contributed,
-they're joined with a comma).
+reflected in `pipeline.model` on the response (when more than one
+model contributed, they're joined with a comma).
 
 ### 4f. `bbox_validation`
 
@@ -281,7 +297,7 @@ they're joined with a comma).
 Runs on **every** request immediately after extract. For each
 extracted field's `bbox`, the validator stamps:
 
-- `quality`: one of `good`, `poor`, `suspicious`, `invalid`, `empty`,
+- `quality`: one of `good`, `poor`, `suspicious`, `invalid`,
 - `quality_score`: continuous score in `[0, 1]` (area + aspect-ratio
   + margin-hugging components, weighted 0.5 / 0.3 / 0.2).
 
@@ -289,7 +305,7 @@ Heuristics, in priority order:
 
 | Verdict       | Trigger                                                                                                       | Default score |
 | ------------- | ------------------------------------------------------------------------------------------------------------- | ------------- |
-| `empty`       | `fieldValueFound is None` or zero-area placeholder `BoundingBox.empty()`.                                     | 0.0           |
+| `bbox is null`| `value is None`, so no bbox is produced.                                                                       | n/a           |
 | `invalid`     | Corners outside `[0, 1]`, `xmin >= xmax`, or `ymin >= ymax` (pydantic also rejects most of these at parse).   | 0.0           |
 | `suspicious`  | Area > 0.7 of the page, or covers > 0.9 horizontally / vertically. Classic LLM hallucination of a generic region. | 0.2           |
 | `poor`        | Area < 5e-5 (~5px×5px on a 1000px-wide render) or extreme aspect ratio (height/width > 30 or < 1/30).        | 0.4           |
@@ -328,18 +344,16 @@ semantic anchoring.
 For every extracted field, run:
 
 - **Type coercion** (string / number / integer / boolean / enum).
-- **Per-field regex** if `FieldSpec.regex` is set.
-- **Numeric range** if `FieldSpec.min` / `max` is set.
-- **Enum membership** if `FieldSpec.enum` is set.
-- **Every `StandardValidator`** declared in
-  `FieldSpec.standard_validators`. The registry maps
-  `StandardValidatorType` to a checker function; see
-  [standard-validators.md](standard-validators.md).
+- **Per-field regex** if `Field.pattern` is set.
+- **Numeric range** if `Field.minimum` / `maximum` is set.
+- **Enum membership** if `Field.enum` is set.
+- **Every `ValidatorSpec`** declared in `Field.validators`. The
+  registry maps `ValidatorType` to a checker function; see
+  [validators.md](validators.md).
 
-Errors are recorded on the field's `field_validation.errors[]`. By
-default a failure flips `field_validation.valid` to false; pass
-`{"severity": "warning"}` to record the error without flipping the
-flag.
+Errors are recorded on the field's `validation.errors[]`. By default
+a failure flips `validation.valid` to false; pass `{"severity":
+"warning"}` to record the error without flipping the flag.
 
 ### 4h. `visual_authenticity`
 
@@ -349,10 +363,10 @@ document.
 Inputs:
 
 - the document bytes (so the LLM can see the actual rendering),
-- the list of caller-defined visual validators (each is just a
+- the list of caller-defined `visual_checks` (each is just a
   `(name, description)` pair).
 
-Output: one `VisualValidationOutcome` per validator with `passed`,
+Output: one `VisualCheckResult` per check with `passed`,
 `confidence`, and `notes`.
 
 Use this for visible-only checks (presence of a signature, a stamp, a
@@ -367,7 +381,7 @@ intention.
 
 Output: a `ContentAuthenticity` aggregate with:
 
-- `overall_integrity_status`: `VALID` / `INVALID` / `UNCERTAIN`,
+- `overall_integrity_status`: `valid` / `invalid` / `uncertain`,
 - `checks[]`: each with `name`, `description`, `status`, `evidence`,
   `reasoning`.
 
@@ -383,34 +397,35 @@ The judge sees:
 - the document bytes (multimodal),
 - the JSON dump of the extraction result.
 
-For every field, it returns `status`, `confidence`, `evidence` (the
-exact quote / region it matched), `notes`, and `flag_for_review`. The
-service mutates the existing `ExtractedField`s in place by populating
-their `judge` attribute.
+For every field, it returns `status` (lowercase: `pass` / `fail` /
+`uncertain`), `confidence`, `evidence` (the exact quote / region it
+matched), `notes`, and `flag_for_review`. The service mutates the
+existing `ExtractedField`s in place by populating their `judge`
+attribute.
 
 The judge is **strict**: a value that's plausible but unsupported by
-the document gets `status=FAIL`. This is the cheapest defence against
+the document gets `status="fail"`. This is the cheapest defence against
 LLM hallucinations.
 
 ### 4k. `judge_escalation`
 
 `core/services/escalation/judge_escalator.py`. Implements the
 "cheap-by-default + escalate-on-uncertainty" policy: when the judge
-flags too many fields as `FAIL` or `flag_for_review`, the orchestrator
+flags too many fields as `fail` or `flag_for_review`, the orchestrator
 re-runs the extractor and the judge with a stronger model and keeps
 whichever result has the lower failure rate.
 
-- The trigger threshold is `options.escalation_threshold` (per-request)
+- The trigger threshold is `options.escalation.threshold` (per-request)
   or `FLYDOCS_ESCALATION_THRESHOLD` (default `0.0` = disabled).
-- The escalation model is `options.escalation_model` or
+- The escalation model is `options.escalation.model` or
   `FLYDOCS_ESCALATION_MODEL`. Same model as the primary disables
   the stage (no point re-running with the same engine).
 - The new run is per-doc fan-out via `asyncio.gather` — same shape as
   `extract`, so latency stays bounded.
-- The accepted/rejected outcome lands on `result.escalation`, an audit
-  block with `primary_model`, `escalation_model`, `primary_fail_rate`,
-  `escalation_fail_rate`, and `accepted` (true if the new fields
-  replaced the originals).
+- The accepted/rejected outcome lands on `pipeline.escalation`, an
+  audit block with `primary_model`, `escalation_model`,
+  `primary_fail_rate`, `escalation_fail_rate`, and `accepted` (true if
+  the new fields replaced the originals).
 
 Pattern in production: primary `claude-haiku` / `gpt-4o-mini`,
 escalation `claude-opus` / `gpt-4o`. The cheap model handles ~80% of
@@ -422,7 +437,7 @@ model misled the judge.
 `core/services/rules/rule_engine.py`. The business-rule DAG.
 
 - Nodes are rule ids (strings, hashable). Edges are rule-to-rule
-  dependencies declared via `RuleRuleParent`.
+  dependencies declared via `RuleRuleParent` (`kind: "rule"`).
 - `field` and `validator` parents are **context**, not edges — they
   declare which fields / validators the rule reads, so the engine
   scopes the prompt down to only the relevant data.
@@ -456,9 +471,9 @@ Three places where concurrency matters:
    `asyncio.wait_for(SYNC_TIMEOUT_S)` by `ExtractHandler` — the
    request returns 408 if the pipeline takes longer.
 
-For the async API (`POST /api/v1/jobs`), the ceiling is
+For the async API (`POST /api/v1/extractions`), the ceiling is
 `FLYDOCS_ASYNC_TIMEOUT_S` (default 300 s); failed attempts are
-re-queued up to `FLYDOCS_JOB_MAX_ATTEMPTS`.
+re-queued up to `FLYDOCS_EXTRACTION_MAX_ATTEMPTS`.
 
 ---
 
@@ -466,12 +481,12 @@ re-queued up to `FLYDOCS_JOB_MAX_ATTEMPTS`.
 
 A stage that raises does **not** abort the request. The orchestrator
 catches the exception, appends a structured entry to
-`pipeline_errors[]`, and continues:
+`pipeline.errors[]`, and continues:
 
 ```json
 {
   "node": "judge",
-  "code": "JUDGE_ERROR",
+  "code": "stage_timeout",
   "message": "llm provider timed out after 180s"
 }
 ```
@@ -496,8 +511,8 @@ external-call footprint with full per-call cost data:
 outbound_call target=anthropic op=split status=ok latency_ms=14418 model=anthropic:claude-opus-4-7 correlation_id=3d530f07-... in_tokens=48598 out_tokens=746 total_tokens=49344 cost_usd=0.784920
 outbound_call target=anthropic op=extract status=ok latency_ms=21352 model=anthropic:claude-opus-4-7 correlation_id=3d530f07-... in_tokens=12500 out_tokens=850 total_tokens=13350 cost_usd=0.251250
 outbound_call target=anthropic op=judge status=ok latency_ms=15162 model=anthropic:claude-opus-4-7 correlation_id=3d530f07-... in_tokens=11200 out_tokens=820 total_tokens=12020 cost_usd=0.229500
-outbound_call target=webhook op=deliver status=ok latency_ms=12 url=https://... attempt=1 http_status=200 job_id=39e0...
-outbound_call target=worker op=job.run status=ok latency_ms=42557 job_id=39e0... attempt=1
+outbound_call target=webhook op=deliver status=ok latency_ms=12 url=https://... attempt=1 http_status=200 extraction_id=ext_39e0...
+outbound_call target=worker op=extraction.run status=ok latency_ms=42557 extraction_id=ext_39e0... attempt=1
 ```
 
 Targets currently emitted:
@@ -509,8 +524,8 @@ Targets currently emitted:
   `in_tokens`, `out_tokens`, `total_tokens`, and the estimated
   `cost_usd` for each call.
 - `webhook` -- one line per delivery attempt (`op=deliver`).
-- `worker` -- one line per job start and per terminal outcome
-  (`op=job.run`).
+- `worker` -- one line per extraction start and per terminal outcome
+  (`op=extraction.run`).
 - `queue` -- one line per delayed re-publish during a retry.
 
 Use these for spend tracing (sum `cost_usd` by model or per request),
@@ -601,7 +616,7 @@ writes the whole cache without reading anything. We believe this is
 the expected Anthropic-side accounting for high-fanout, low-repetition
 workloads -- cache pays off when the same prefix is replayed many
 times within the 5-minute TTL, e.g. batch reprocessing of the same
-expediente against multiple DocSpec variations. The toggle is there
+expediente against multiple `document_types[]` variations. The toggle is there
 so callers with that pattern can stay on while one-shot consumers
 can flip it off.
 
@@ -609,18 +624,18 @@ can flip it off.
 
 ## 8. Retry policy (async)
 
-Async jobs that fail get classified into one of two buckets in
-`core/services/workers/job_worker.py`:
+Async extractions that fail get classified into one of two buckets in
+`core/services/workers/extraction_worker.py`:
 
 | Classification | Examples                                                                 | Worker action |
 | -------------- | ------------------------------------------------------------------------ | ------------- |
-| **permanent**  | `ValueError` from the validator, content-policy / moderation rejections, invalid API key, unsupported model | `mark_failed(code=PERMANENT_ERROR)` immediately. Webhook fires with the failure detail. |
+| **permanent**  | `ValueError` from the validator, content-policy / moderation rejections, invalid API key, unsupported model | `mark_failed(error={"code": "permanent_error", ...})` immediately. Webhook fires with the failure detail. |
 | **retryable**  | Timeouts, network errors, transient 5xx from the LLM provider, generic `RuntimeError` | Re-queue with exponential backoff: `min(retry_max_delay_s, retry_base_delay_s * 2^(attempt-1))` plus 20% jitter. |
 
 The `attempts` counter is persisted atomically by
-`ExtractionJobRepository.mark_running`. When `attempts ==
-FLYDOCS_JOB_MAX_ATTEMPTS`, the job goes to `FAILED` even if the
-last error was retryable.
+`ExtractionRepository.mark_running`. When `attempts ==
+FLYDOCS_EXTRACTION_MAX_ATTEMPTS`, the extraction goes to `failed` even
+if the last error was retryable.
 
 A delayed re-publish runs as a background `asyncio.create_task` so the
 worker keeps draining the stream while the failed message waits its
@@ -662,7 +677,7 @@ the right slice when a single source contains multiple target docs.
 | Pipeline never reached a stage                                   | Check `stages` in the request — many stages are opt-in.                                                                                |
 | Stage timed out at exactly its budget                             | The `timeout_seconds` triggered. Either bump the env var, switch to async, or drop the stage.                                          |
 | Field located but `bbox` is all zeros                            | Extractor returned `value=null` (so no bbox), or the LLM emitted a degenerate box and the post-processor zeroed it. Check `notes`.    |
-| `judge.status == "FAIL"` on a correct value                      | The judge is strict by design. Read `judge.evidence` and `judge.notes` to understand why — usually a layout the LLM couldn't anchor.   |
+| `judge.status == "fail"` on a correct value                      | The judge is strict by design. Read `judge.evidence` and `judge.notes` to understand why — usually a layout the LLM couldn't anchor.   |
 | Validator says NIF but the value is a NIE                        | Declare both validators with `severity: warning` (see [troubleshooting.md](troubleshooting.md)).                                       |
 | Rule output is outside `valid_outputs`                            | Engine flags the rule. Inspect `human_revision` for the LLM's reason and route to manual review.                                       |
-| `pipeline_errors` non-empty but request succeeded                | Expected — partial success. Caller decides whether to accept or re-submit with the failed stage disabled.                              |
+| `pipeline.errors` non-empty but request succeeded                | Expected — `status: "partial"`. Caller decides whether to accept or re-submit with the failed stage disabled.                          |

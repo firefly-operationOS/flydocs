@@ -1,10 +1,13 @@
 name: flydocs/transform
-version: 1.0.0
+version: "1.0.0"
 description: >-
   Post-extraction LLM transformation of an array field group. The caller's
   ``intention`` is the goal in one sentence; the LLM rewrites the rows of
   the target group in the same shape.
-
+required_variables:
+  - target_group
+  - intention
+  - rows_json
 system_template: |
   You are a deterministic post-extraction transformer. Given:
 

@@ -1,11 +1,10 @@
 # Copyright 2026 Firefly Software Solutions Inc
 """Pure-Python field validator -- evaluates pattern, format, enum,
-minimum, maximum, and every declared :class:`StandardValidatorSpec`
-against every extracted field. No LLM involvement.
+minimum, maximum, and every declared :class:`ValidatorSpec` against
+every extracted field. No LLM involvement.
 
 The verdict is attached directly to each :class:`ExtractedField` via
-its ``field_validation`` attribute, so consumers never need a parallel
-tree.
+its ``validation`` attribute, so consumers never need a parallel tree.
 """
 
 from __future__ import annotations
@@ -16,17 +15,16 @@ from typing import Any
 from urllib.parse import urlparse
 from uuid import UUID as PyUUID
 
-from flydocs.core.services.validation.standard_validator_registry import run_standard_validator
+from flydocs.core.services.validation.validator_registry import run_validator
 from flydocs.interfaces.dtos.field import (
     ExtractedField,
     ExtractedFieldGroup,
+    Field,
     FieldGroup,
-    FieldItem,
-    FieldSpec,
     FieldValidation,
     FieldValidationError,
 )
-from flydocs.interfaces.dtos.standard_validator import StandardValidatorSpec
+from flydocs.interfaces.dtos.validator import ValidatorSpec
 from flydocs.interfaces.enums.field_type import FieldType, StandardFormat
 from flydocs.interfaces.enums.status import ValidationRule
 
@@ -39,17 +37,17 @@ class FieldValidator:
         spec_groups: list[FieldGroup],
         extracted_groups: list[ExtractedFieldGroup],
     ) -> list[ExtractedFieldGroup]:
-        """Return *extracted_groups* with each field's ``field_validation`` populated."""
+        """Return *extracted_groups* with each field's ``validation`` populated."""
         if not spec_groups or not extracted_groups:
             return extracted_groups
-        by_group: dict[str, FieldGroup] = {g.fieldGroupName: g for g in spec_groups}
+        by_group: dict[str, FieldGroup] = {g.name: g for g in spec_groups}
         for group in extracted_groups:
-            spec_group = by_group.get(group.fieldGroupName)
+            spec_group = by_group.get(group.name)
             if spec_group is None:
                 continue
-            spec_by_name: dict[str, FieldSpec] = {s.fieldName: s for s in spec_group.fieldGroupFields}
-            for field in group.fieldGroupFields:
-                spec = spec_by_name.get(field.fieldName)
+            spec_by_name: dict[str, Field] = {s.name: s for s in spec_group.fields}
+            for field in group.fields:
+                spec = spec_by_name.get(field.name)
                 if spec is None:
                     continue
                 self._validate_field(spec, field)
@@ -57,53 +55,58 @@ class FieldValidator:
 
     # ----------------------------------------------------------- private
 
-    def _validate_field(self, spec: FieldSpec, field: ExtractedField) -> None:
-        if spec.fieldType == FieldType.ARRAY:
+    def _validate_field(self, spec: Field, field: ExtractedField) -> None:
+        if spec.type == FieldType.ARRAY:
             self._validate_array(spec, field)
             return
         errors = self._run_constraints(
-            field_type=spec.fieldType,
+            field_type=spec.type,
             pattern=spec.pattern,
             fmt=spec.format,
             enum=spec.enum,
             minimum=spec.minimum,
             maximum=spec.maximum,
-            standard_validators=spec.standard_validators,
-            value=field.fieldValueFound,
+            validators=spec.validators,
+            value=field.value,
         )
         # ``severity=warning`` validators record errors but don't flip ``valid``.
         hard_errors = [e for e in errors if not e.message.endswith("[warning]")]
-        field.field_validation = FieldValidation(valid=not hard_errors, errors=errors)
+        field.validation = FieldValidation(valid=not hard_errors, errors=errors)
 
-    def _validate_array(self, spec: FieldSpec, field: ExtractedField) -> None:
+    def _validate_array(self, spec: Field, field: ExtractedField) -> None:
         row_errors: list[FieldValidationError] = []
-        rows = field.fieldValueFound if isinstance(field.fieldValueFound, list) else []
-        item_specs: dict[str, FieldItem] = {item.fieldName: item for item in (spec.items or [])}
+        rows = field.value if isinstance(field.value, list) else []
+        items_spec = spec.items
+        # The recursive Field for an array element is typically ``type =
+        # object`` -- iterate its declared sub-fields.
+        sub_specs: dict[str, Field] = {}
+        if items_spec is not None and items_spec.fields:
+            sub_specs = {s.name: s for s in items_spec.fields}
         all_valid = True
         for row in rows:
-            if not isinstance(row, ExtractedField) or not isinstance(row.fieldValueFound, list):
+            if not isinstance(row, ExtractedField) or not isinstance(row.value, list):
                 continue
-            for sub_field in row.fieldValueFound:
+            for sub_field in row.value:
                 if not isinstance(sub_field, ExtractedField):
                     continue
-                item = item_specs.get(sub_field.fieldName)
-                if item is None:
+                sub_spec = sub_specs.get(sub_field.name)
+                if sub_spec is None:
                     continue
                 errors = self._run_constraints(
-                    field_type=item.fieldType,
-                    pattern=item.pattern,
-                    fmt=item.format,
-                    enum=item.enum,
-                    minimum=item.minimum,
-                    maximum=item.maximum,
-                    standard_validators=item.standard_validators,
-                    value=sub_field.fieldValueFound,
+                    field_type=sub_spec.type,
+                    pattern=sub_spec.pattern,
+                    fmt=sub_spec.format,
+                    enum=sub_spec.enum,
+                    minimum=sub_spec.minimum,
+                    maximum=sub_spec.maximum,
+                    validators=sub_spec.validators,
+                    value=sub_field.value,
                 )
                 hard_errors = [e for e in errors if not e.message.endswith("[warning]")]
-                sub_field.field_validation = FieldValidation(valid=not hard_errors, errors=errors)
+                sub_field.validation = FieldValidation(valid=not hard_errors, errors=errors)
                 if hard_errors:
                     all_valid = False
-        field.field_validation = FieldValidation(valid=all_valid, errors=row_errors)
+        field.validation = FieldValidation(valid=all_valid, errors=row_errors)
 
     def _run_constraints(
         self,
@@ -114,7 +117,7 @@ class FieldValidator:
         enum: list[Any] | None,
         minimum: float | None,
         maximum: float | None,
-        standard_validators: list[StandardValidatorSpec],
+        validators: list[ValidatorSpec],
         value: Any,
     ) -> list[FieldValidationError]:
         if value is None:
@@ -146,14 +149,14 @@ class FieldValidator:
             err = self._validate_maximum(maximum, value)
             if err is not None:
                 errors.append(err)
-        for sv in standard_validators or []:
-            message = run_standard_validator(sv.type, value, sv.params)
+        for sv in validators or []:
+            message = run_validator(sv.name, value, sv.params)
             if message is not None:
                 suffix = " [warning]" if sv.severity == "warning" else ""
                 errors.append(
                     FieldValidationError(
-                        rule=ValidationRule.STANDARD,
-                        message=f"{sv.type.value}: {message}{suffix}",
+                        rule=ValidationRule.VALIDATOR,
+                        message=f"{sv.name.value}: {message}{suffix}",
                     )
                 )
         return errors

@@ -31,19 +31,18 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.firefly.flydocs.sdk.error.FlydocsHttpException;
-import com.firefly.flydocs.sdk.model.DocSpec;
-import com.firefly.flydocs.sdk.model.DocumentInput;
+import com.firefly.flydocs.sdk.model.DocumentTypeSpec;
+import com.firefly.flydocs.sdk.model.Extraction;
+import com.firefly.flydocs.sdk.model.ExtractionListQuery;
+import com.firefly.flydocs.sdk.model.ExtractionListResponse;
 import com.firefly.flydocs.sdk.model.ExtractionRequest;
 import com.firefly.flydocs.sdk.model.ExtractionResult;
-import com.firefly.flydocs.sdk.model.FieldSpec;
+import com.firefly.flydocs.sdk.model.ExtractionResultEnvelope;
+import com.firefly.flydocs.sdk.model.ExtractionStatus;
+import com.firefly.flydocs.sdk.model.Field;
 import com.firefly.flydocs.sdk.model.FieldType;
-import com.firefly.flydocs.sdk.model.JobListResponse;
-import com.firefly.flydocs.sdk.model.JobResult;
-import com.firefly.flydocs.sdk.model.JobStatus;
-import com.firefly.flydocs.sdk.model.JobStatusResponse;
-import com.firefly.flydocs.sdk.model.SubmitJobRequest;
-import com.firefly.flydocs.sdk.model.SubmitJobResponse;
-import com.firefly.flydocs.sdk.model.VersionInfo;
+import com.firefly.flydocs.sdk.model.FileInput;
+import com.firefly.flydocs.sdk.model.SubmitExtractionRequest;
 import com.github.tomakehurst.wiremock.WireMockServer;
 import java.util.List;
 import java.util.Map;
@@ -53,11 +52,11 @@ import org.junit.jupiter.api.Test;
 import reactor.test.StepVerifier;
 
 /**
- * End-to-end mock tests for the reactive client.
+ * End-to-end mock tests for the reactive v1 client.
  *
  * <p>Each test stands up a WireMock stub that mimics what the real
  * service would return, calls the SDK, and asserts both halves:
- * the request the SDK put on the wire matches the controller's
+ * the request the SDK put on the wire matches the controller's v1
  * contract (path, body, headers) and the response is decoded onto
  * the typed records.</p>
  */
@@ -66,11 +65,11 @@ class FlydocsClientAsyncTest {
     private WireMockServer wm;
     private FlydocsClientAsync client;
 
-    /** Minimal DocSpec list reused by tests that don't care about the schema's shape. */
-    private static List<DocSpec> invoiceSpec() {
+    /** Minimal DocumentTypeSpec list reused by tests that don't care about the schema's shape. */
+    private static List<DocumentTypeSpec> invoiceSpec() {
         return List.of(
-                DocSpec.builder("invoice")
-                        .addFieldGroup("totals", FieldSpec.required("total", FieldType.NUMBER))
+                DocumentTypeSpec.builder("invoice")
+                        .addFieldGroup("totals", Field.required("total", FieldType.NUMBER))
                         .build());
     }
 
@@ -97,7 +96,7 @@ class FlydocsClientAsyncTest {
                         .withBody("""
                                 {
                                   "service": "flydocs",
-                                  "version": "26.5.1",
+                                  "version": "26.6.0",
                                   "model":   "anthropic:claude-sonnet-4-6",
                                   "fallback_model": "",
                                   "eda_adapter": "postgres"
@@ -107,7 +106,7 @@ class FlydocsClientAsyncTest {
         StepVerifier.create(client.version())
                 .assertNext(info -> {
                     assertThat(info.service()).isEqualTo("flydocs");
-                    assertThat(info.version()).isEqualTo("26.5.1");
+                    assertThat(info.version()).isEqualTo("26.6.0");
                     assertThat(info.edaAdapter()).isEqualTo("postgres");
                 })
                 .verifyComplete();
@@ -130,28 +129,32 @@ class FlydocsClientAsyncTest {
         wm.stubFor(post(urlEqualTo("/api/v1/extract"))
                 .withHeader("Idempotency-Key", equalTo("abc-123"))
                 .withHeader("X-Correlation-Id", equalTo("corr-1"))
-                .withRequestBody(matchingJsonPath("$.documents[0].filename"))
+                .withRequestBody(matchingJsonPath("$.files[0].filename"))
                 .willReturn(aResponse()
                         .withStatus(200)
                         .withHeader("Content-Type", "application/json")
                         .withBody("""
                                 {
-                                  "request_id": "00000000-0000-0000-0000-000000000001",
-                                  "model": "anthropic:claude-sonnet-4-6",
-                                  "latency_ms": 4321,
-                                  "documents": []
+                                  "id": "ext_01",
+                                  "status": "success",
+                                  "documents": [],
+                                  "pipeline": {
+                                    "model": "anthropic:claude-sonnet-4-6",
+                                    "latency_ms": 4321
+                                  }
                                 }
                                 """)));
 
         ExtractionRequest req = ExtractionRequest.of(
-                List.of(DocumentInput.ofBytes("hello".getBytes(), "x.pdf", null, null)),
+                List.of(FileInput.ofBytes("hello".getBytes(), "x.pdf", null, null)),
                 invoiceSpec());
 
         StepVerifier.create(client.extract(req, "abc-123", "corr-1"))
                 .assertNext(r -> {
                     assertThat(r).isInstanceOf(ExtractionResult.class);
-                    assertThat(r.model()).isEqualTo("anthropic:claude-sonnet-4-6");
-                    assertThat(r.latencyMs()).isEqualTo(4321);
+                    assertThat(r.id()).isEqualTo("ext_01");
+                    assertThat(r.pipeline().model()).isEqualTo("anthropic:claude-sonnet-4-6");
+                    assertThat(r.pipeline().latencyMs()).isEqualTo(4321);
                 })
                 .verifyComplete();
     }
@@ -163,15 +166,13 @@ class FlydocsClientAsyncTest {
                         .withHeader("Content-Type", "application/json")
                         .withBody("""
                                 {
-                                  "detail": {
-                                    "code":   "extraction_timeout",
-                                    "title":  "Extraction timed out",
-                                    "detail": "Pipeline exceeded 60s sync ceiling"
-                                  }
+                                  "code":   "timeout",
+                                  "title":  "Extraction timed out",
+                                  "detail": "Pipeline exceeded 60s sync ceiling"
                                 }
                                 """)));
         ExtractionRequest req = ExtractionRequest.of(
-                List.of(DocumentInput.ofBytes(new byte[]{0}, "x.pdf")),
+                List.of(FileInput.ofBytes(new byte[]{0}, "x.pdf")),
                 invoiceSpec());
 
         assertThatThrownBy(() -> client.extract(req).block())
@@ -179,119 +180,120 @@ class FlydocsClientAsyncTest {
                 .satisfies(t -> {
                     FlydocsHttpException e = (FlydocsHttpException) t;
                     assertThat(e.statusCode()).isEqualTo(408);
-                    assertThat(e.code()).isEqualTo("extraction_timeout");
+                    assertThat(e.code()).isEqualTo("timeout");
                     assertThat(e.detail()).contains("Pipeline exceeded");
                 });
     }
 
     @Test
-    void extract_top_level_problem_detail_also_decoded() {
-        // Some flydocs error paths put ``code`` at the top level rather
-        // than nested under ``detail``.
+    void extract_file_too_large_decoded() {
         wm.stubFor(post(urlEqualTo("/api/v1/extract")).willReturn(
                 aResponse().withStatus(413)
-                        .withHeader("Content-Type", "application/json")
+                        .withHeader("Content-Type", "application/problem+json")
                         .withBody("""
                                 {
-                                  "code":   "document_too_large",
-                                  "title":  "Document too large",
+                                  "code":   "file_too_large",
+                                  "title":  "File too large",
                                   "detail": "x.pdf is 50000000 bytes"
                                 }
                                 """)));
         ExtractionRequest req = ExtractionRequest.of(
-                List.of(DocumentInput.ofBytes(new byte[]{0}, "x.pdf")),
+                List.of(FileInput.ofBytes(new byte[]{0}, "x.pdf")),
                 invoiceSpec());
 
         assertThatThrownBy(() -> client.extract(req).block())
                 .isInstanceOf(FlydocsHttpException.class)
-                .satisfies(t -> assertThat(((FlydocsHttpException) t).code()).isEqualTo("document_too_large"));
+                .satisfies(t -> assertThat(((FlydocsHttpException) t).code()).isEqualTo("file_too_large"));
     }
 
-    // ---------------------------- jobs lifecycle ------------------------
+    // ---------------------------- extractions lifecycle ------------------------
 
     @Test
-    void submitJob_returns_queued() {
-        wm.stubFor(post(urlEqualTo("/api/v1/jobs"))
+    void create_extraction_returns_queued() {
+        wm.stubFor(post(urlEqualTo("/api/v1/extractions"))
                 .withHeader("Idempotency-Key", equalTo("submit-once"))
                 .withRequestBody(containing("\"callback_url\":\"https://example.com/webhook\""))
                 .willReturn(aResponse().withStatus(202)
                         .withHeader("Content-Type", "application/json")
                         .withBody("""
                                 {
-                                  "job_id": "job-1",
-                                  "status": "QUEUED",
-                                  "submitted_at": "2026-05-17T10:00:00+00:00"
+                                  "id": "ext_01",
+                                  "status": "queued",
+                                  "submitted_at": "2026-05-17T10:00:00+00:00",
+                                  "attempts": 0
                                 }
                                 """)));
-        SubmitJobRequest req = new SubmitJobRequest(
-                null,
-                List.of(DocumentInput.ofBytes(new byte[]{0}, "x.pdf")),
-                invoiceSpec(),
-                null,
-                null,
-                "https://example.com/webhook",
-                Map.of("caller", "test"));
-        StepVerifier.create(client.submitJob(req, "submit-once", null))
+        SubmitExtractionRequest req = SubmitExtractionRequest.builder()
+                .addFile(FileInput.ofBytes(new byte[]{0}, "x.pdf"))
+                .addDocumentType(invoiceSpec().get(0))
+                .callbackUrl("https://example.com/webhook")
+                .metadata("caller", "test")
+                .build();
+        StepVerifier.create(client.extractions().create(req, "submit-once", null))
                 .assertNext(resp -> {
-                    assertThat(resp).isInstanceOf(SubmitJobResponse.class);
-                    assertThat(resp.jobId()).isEqualTo("job-1");
-                    assertThat(resp.status()).isEqualTo(JobStatus.QUEUED);
+                    assertThat(resp).isInstanceOf(Extraction.class);
+                    assertThat(resp.id()).isEqualTo("ext_01");
+                    assertThat(resp.status()).isEqualTo(ExtractionStatus.QUEUED);
                 })
                 .verifyComplete();
     }
 
     @Test
-    void getJob_decodes_status() {
-        wm.stubFor(get(urlEqualTo("/api/v1/jobs/job-1")).willReturn(
+    void get_extraction_decodes_status() {
+        wm.stubFor(get(urlEqualTo("/api/v1/extractions/ext_01")).willReturn(
                 aResponse().withStatus(200).withHeader("Content-Type", "application/json")
                         .withBody("""
                                 {
-                                  "job_id": "job-1",
-                                  "status": "SUCCEEDED",
+                                  "id": "ext_01",
+                                  "status": "succeeded",
                                   "submitted_at": "2026-05-17T10:00:00+00:00",
-                                  "finished_at":  "2026-05-17T10:01:00+00:00"
+                                  "finished_at":  "2026-05-17T10:01:00+00:00",
+                                  "attempts": 1
                                 }
                                 """)));
-        StepVerifier.create(client.getJob("job-1"))
+        StepVerifier.create(client.extractions().get("ext_01"))
                 .assertNext(s -> {
-                    assertThat(s).isInstanceOf(JobStatusResponse.class);
-                    assertThat(s.status()).isEqualTo(JobStatus.SUCCEEDED);
+                    assertThat(s).isInstanceOf(Extraction.class);
+                    assertThat(s.status()).isEqualTo(ExtractionStatus.SUCCEEDED);
                     assertThat(s.isTerminal()).isTrue();
                 })
                 .verifyComplete();
     }
 
     @Test
-    void getJobResult_passes_long_poll_query_params() {
-        wm.stubFor(get(urlPathEqualTo("/api/v1/jobs/job-1/result"))
+    void get_result_passes_long_poll_query_params() {
+        wm.stubFor(get(urlPathEqualTo("/api/v1/extractions/ext_01/result"))
                 .withQueryParam("wait_for_bboxes", equalTo("true"))
                 .withQueryParam("timeout", equalTo("10"))
                 .willReturn(aResponse().withStatus(200)
                         .withHeader("Content-Type", "application/json")
                         .withBody("""
                                 {
-                                  "job_id": "job-1",
+                                  "id": "ext_01",
                                   "result": {
-                                    "request_id": "00000000-0000-0000-0000-000000000002",
-                                    "model": "anthropic:claude-sonnet-4-6",
-                                    "latency_ms": 1500,
-                                    "documents": []
+                                    "id": "ext_01",
+                                    "status": "success",
+                                    "documents": [],
+                                    "pipeline": {
+                                      "model": "anthropic:claude-sonnet-4-6",
+                                      "latency_ms": 1500
+                                    }
                                   }
                                 }
                                 """)));
-        StepVerifier.create(client.getJobResult("job-1", true, java.time.Duration.ofSeconds(10)))
+        StepVerifier.create(client.extractions().getResult("ext_01", true, java.time.Duration.ofSeconds(10)))
                 .assertNext(r -> {
-                    assertThat(r).isInstanceOf(JobResult.class);
-                    assertThat(r.jobId()).isEqualTo("job-1");
-                    assertThat(r.result().latencyMs()).isEqualTo(1500);
+                    assertThat(r).isInstanceOf(ExtractionResultEnvelope.class);
+                    assertThat(r.id()).isEqualTo("ext_01");
+                    assertThat(r.result().pipeline().latencyMs()).isEqualTo(1500);
                 })
                 .verifyComplete();
     }
 
     @Test
-    void listJobs_joins_status_filter_csv() {
-        wm.stubFor(get(urlPathEqualTo("/api/v1/jobs"))
-                .withQueryParam("status", equalTo("SUCCEEDED,PARTIAL_SUCCEEDED"))
+    void list_joins_status_filter_csv() {
+        wm.stubFor(get(urlPathEqualTo("/api/v1/extractions"))
+                .withQueryParam("status", equalTo("succeeded,failed"))
                 .withQueryParam("limit", equalTo("25"))
                 .willReturn(aResponse().withStatus(200)
                         .withHeader("Content-Type", "application/json")
@@ -303,17 +305,14 @@ class FlydocsClientAsyncTest {
                                   "offset": 0
                                 }
                                 """)));
-        FlydocsClientAsync.JobListFilter filter = new FlydocsClientAsync.JobListFilter(
-                List.of("SUCCEEDED", "PARTIAL_SUCCEEDED"),
-                null,
-                null,
-                null,
-                null,
-                25,
-                0);
-        StepVerifier.create(client.listJobs(filter))
+        ExtractionListQuery q = ExtractionListQuery.builder()
+                .status(ExtractionStatus.SUCCEEDED)
+                .status(ExtractionStatus.FAILED)
+                .limit(25)
+                .build();
+        StepVerifier.create(client.extractions().list(q))
                 .assertNext(r -> {
-                    assertThat(r).isInstanceOf(JobListResponse.class);
+                    assertThat(r).isInstanceOf(ExtractionListResponse.class);
                     assertThat(r.total()).isZero();
                     assertThat(r.limit()).isEqualTo(25);
                 })
@@ -321,40 +320,39 @@ class FlydocsClientAsyncTest {
     }
 
     @Test
-    void cancelJob_returns_cancelled() {
-        wm.stubFor(delete(urlEqualTo("/api/v1/jobs/job-1")).willReturn(
+    void cancel_returns_cancelled() {
+        wm.stubFor(delete(urlEqualTo("/api/v1/extractions/ext_01")).willReturn(
                 aResponse().withStatus(200).withHeader("Content-Type", "application/json")
                         .withBody("""
                                 {
-                                  "job_id": "job-1",
-                                  "status": "CANCELLED",
-                                  "submitted_at": "2026-05-17T10:00:00+00:00"
+                                  "id": "ext_01",
+                                  "status": "cancelled",
+                                  "submitted_at": "2026-05-17T10:00:00+00:00",
+                                  "attempts": 0
                                 }
                                 """)));
-        StepVerifier.create(client.cancelJob("job-1"))
-                .assertNext(s -> assertThat(s.status()).isEqualTo(JobStatus.CANCELLED))
+        StepVerifier.create(client.extractions().cancel("ext_01"))
+                .assertNext(s -> assertThat(s.status()).isEqualTo(ExtractionStatus.CANCELLED))
                 .verifyComplete();
     }
 
     @Test
-    void cancelJob_not_cancellable_maps_to_typed_error() {
-        wm.stubFor(delete(urlEqualTo("/api/v1/jobs/job-1")).willReturn(
-                aResponse().withStatus(409).withHeader("Content-Type", "application/json")
+    void cancel_not_cancellable_maps_to_typed_error() {
+        wm.stubFor(delete(urlEqualTo("/api/v1/extractions/ext_01")).willReturn(
+                aResponse().withStatus(409).withHeader("Content-Type", "application/problem+json")
                         .withBody("""
                                 {
-                                  "detail": {
-                                    "code":   "job_not_cancellable",
-                                    "title":  "Job cannot be cancelled",
-                                    "detail": "Job is RUNNING"
-                                  }
+                                  "code":   "not_cancellable",
+                                  "title":  "Extraction cannot be cancelled",
+                                  "detail": "Extraction is running"
                                 }
                                 """)));
-        assertThatThrownBy(() -> client.cancelJob("job-1").block())
+        assertThatThrownBy(() -> client.extractions().cancel("ext_01").block())
                 .isInstanceOf(FlydocsHttpException.class)
                 .satisfies(t -> {
                     FlydocsHttpException e = (FlydocsHttpException) t;
                     assertThat(e.statusCode()).isEqualTo(409);
-                    assertThat(e.code()).isEqualTo("job_not_cancellable");
+                    assertThat(e.code()).isEqualTo("not_cancellable");
                 });
     }
 
@@ -362,26 +360,25 @@ class FlydocsClientAsyncTest {
 
     @Test
     void submit_request_body_uses_snake_case_field_names() {
-        wm.stubFor(post(urlEqualTo("/api/v1/jobs")).willReturn(
+        wm.stubFor(post(urlEqualTo("/api/v1/extractions")).willReturn(
                 aResponse().withStatus(202)
                         .withHeader("Content-Type", "application/json")
                         .withBody("""
-                                {"job_id":"job-x","status":"QUEUED","submitted_at":"2026-05-17T10:00:00+00:00"}
+                                {"id":"ext_x","status":"queued","submitted_at":"2026-05-17T10:00:00+00:00","attempts":0}
                                 """)));
 
-        SubmitJobRequest req = new SubmitJobRequest(
-                null,
-                List.of(DocumentInput.ofBytes(new byte[]{0}, "x.pdf", "application/pdf", null)),
-                invoiceSpec(),
-                null,
-                null,
-                "https://example.com/webhook",
-                Map.of());
-        client.submitJob(req).block();
+        SubmitExtractionRequest req = SubmitExtractionRequest.builder()
+                .addFile(FileInput.ofBytes(new byte[]{0}, "x.pdf", "application/pdf", null))
+                .addDocumentType(invoiceSpec().get(0))
+                .callbackUrl("https://example.com/webhook")
+                .metadata(Map.of())
+                .build();
+        client.extractions().create(req).block();
 
-        wm.verify(postRequestedFor(urlEqualTo("/api/v1/jobs"))
+        wm.verify(postRequestedFor(urlEqualTo("/api/v1/extractions"))
                 .withRequestBody(matchingJsonPath("$.callback_url"))
-                .withRequestBody(matchingJsonPath("$.documents[0].content_base64"))
-                .withRequestBody(matchingJsonPath("$.documents[0].content_type")));
+                .withRequestBody(matchingJsonPath("$.files[0].content_base64"))
+                .withRequestBody(matchingJsonPath("$.files[0].content_type"))
+                .withRequestBody(matchingJsonPath("$.document_types[0].id")));
     }
 }

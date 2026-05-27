@@ -51,12 +51,12 @@ def refiner() -> BboxRefiner:
 async def test_grounds_simple_field_against_pdf_text_layer(refiner: BboxRefiner) -> None:
     pdf = _make_pdf(["Customer Name: Acme Corporation Madrid"])
     field = ExtractedField(
-        fieldName="customer_name",
-        fieldValueFound="Acme Corporation",
-        pagesFound=[1],
+        name="customer_name",
+        value="Acme Corporation",
+        pages=[1],
         bbox=_llm_bbox(),
     )
-    group = ExtractedFieldGroup(fieldGroupName="customer", fieldGroupFields=[field])
+    group = ExtractedFieldGroup(name="customer", fields=[field])
     counters = await refiner.refine(
         document_bytes=pdf,
         media_type="application/pdf",
@@ -65,6 +65,7 @@ async def test_grounds_simple_field_against_pdf_text_layer(refiner: BboxRefiner)
     )
     assert counters.fields_seen == 1
     assert counters.grounded_pdf_text == 1
+    assert field.bbox is not None
     assert field.bbox.source == BboxSource.PDF_TEXT
     assert field.bbox.refinement_confidence is not None
     assert field.bbox.refinement_confidence >= 0.85
@@ -76,12 +77,12 @@ async def test_grounds_simple_field_against_pdf_text_layer(refiner: BboxRefiner)
 async def test_keeps_llm_bbox_for_unfindable_value(refiner: BboxRefiner) -> None:
     pdf = _make_pdf(["totally different text"])
     field = ExtractedField(
-        fieldName="customer_name",
-        fieldValueFound="Banco Santander S.A.",
-        pagesFound=[1],
+        name="customer_name",
+        value="Banco Santander S.A.",
+        pages=[1],
         bbox=_llm_bbox(),
     )
-    group = ExtractedFieldGroup(fieldGroupName="customer", fieldGroupFields=[field])
+    group = ExtractedFieldGroup(name="customer", fields=[field])
     counters = await refiner.refine(
         document_bytes=pdf,
         media_type="application/pdf",
@@ -90,6 +91,7 @@ async def test_keeps_llm_bbox_for_unfindable_value(refiner: BboxRefiner) -> None
     )
     assert counters.kept_llm == 1
     assert counters.grounded_pdf_text == 0
+    assert field.bbox is not None
     assert field.bbox.source == BboxSource.LLM
     assert field.bbox.refinement_confidence is None
     # Original LLM coordinates are preserved.
@@ -99,14 +101,15 @@ async def test_keeps_llm_bbox_for_unfindable_value(refiner: BboxRefiner) -> None
 
 @pytest.mark.asyncio
 async def test_skips_empty_field_value(refiner: BboxRefiner) -> None:
+    """Fields with ``value=None`` are skipped -- no work to do, no counters touched."""
     pdf = _make_pdf(["any content"])
     field = ExtractedField(
-        fieldName="missing_field",
-        fieldValueFound=None,
-        pagesFound=[],
-        bbox=BoundingBox.empty(),
+        name="missing_field",
+        value=None,
+        pages=[],
+        bbox=None,
     )
-    group = ExtractedFieldGroup(fieldGroupName="g", fieldGroupFields=[field])
+    group = ExtractedFieldGroup(name="g", fields=[field])
     counters = await refiner.refine(
         document_bytes=pdf,
         media_type="application/pdf",
@@ -116,20 +119,18 @@ async def test_skips_empty_field_value(refiner: BboxRefiner) -> None:
     assert counters.fields_seen == 1
     assert counters.kept_llm == 0
     assert counters.grounded_pdf_text == 0
-    # Empty placeholder keeps source=NONE
-    assert field.bbox.source == BboxSource.NONE
+    # Field bbox stays None -- v1 represents 'no bbox' as null.
+    assert field.bbox is None
 
 
 @pytest.mark.asyncio
 async def test_recurses_into_array_field_rows(refiner: BboxRefiner) -> None:
     pdf = _make_pdf(["Items list", "Apple 100", "Banana 200"])
-    apple_qty = ExtractedField(fieldName="qty", fieldValueFound=100, pagesFound=[1], bbox=_llm_bbox())
-    apple_name = ExtractedField(fieldName="name", fieldValueFound="Apple", pagesFound=[1], bbox=_llm_bbox())
-    apple_row = ExtractedField(
-        fieldName="row", fieldValueFound=[apple_name, apple_qty], pagesFound=[1], bbox=_llm_bbox()
-    )
-    items = ExtractedField(fieldName="items", fieldValueFound=[apple_row], pagesFound=[1], bbox=_llm_bbox())
-    group = ExtractedFieldGroup(fieldGroupName="invoice", fieldGroupFields=[items])
+    apple_qty = ExtractedField(name="qty", value=100, pages=[1], bbox=_llm_bbox())
+    apple_name = ExtractedField(name="name", value="Apple", pages=[1], bbox=_llm_bbox())
+    apple_row = ExtractedField(name="row", value=[apple_name, apple_qty], pages=[1], bbox=_llm_bbox())
+    items = ExtractedField(name="items", value=[apple_row], pages=[1], bbox=_llm_bbox())
+    group = ExtractedFieldGroup(name="invoice", fields=[items])
     counters = await refiner.refine(
         document_bytes=pdf,
         media_type="application/pdf",
@@ -140,6 +141,7 @@ async def test_recurses_into_array_field_rows(refiner: BboxRefiner) -> None:
     assert counters.fields_seen == 2
     # Both leaves should ground.
     assert counters.grounded_pdf_text >= 1
+    assert apple_name.bbox is not None
     assert apple_name.bbox.source == BboxSource.PDF_TEXT
 
 

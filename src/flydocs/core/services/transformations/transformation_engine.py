@@ -149,14 +149,14 @@ def _consolidate_groups(
     found_any = False
     for task_groups in per_task_groups:
         for g in task_groups:
-            if g.fieldGroupName != target_name:
+            if g.name != target_name:
                 continue
             found_any = True
-            for f in g.fieldGroupFields:
-                if isinstance(f.fieldValueFound, list):
+            for f in g.fields:
+                if isinstance(f.value, list):
                     if not array_field_name:
-                        array_field_name = f.fieldName
-                    all_rows.extend(r for r in f.fieldValueFound if isinstance(r, ExtractedField))
+                        array_field_name = f.name
+                    all_rows.extend(r for r in f.value if isinstance(r, ExtractedField))
     if not found_any or not all_rows:
         return None
     array_field = ExtractedField(
@@ -164,8 +164,8 @@ def _consolidate_groups(
         value=all_rows,
     )
     return ExtractedFieldGroup(
-        fieldGroupName=target_name,
-        fieldGroupFields=[array_field],
+        name=target_name,
+        fields=[array_field],
     )
 
 

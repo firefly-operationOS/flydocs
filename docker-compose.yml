@@ -145,11 +145,11 @@ services:
       FLYDOCS_DATABASE_URL: postgresql+asyncpg://idp:idp@postgres:5432/flydocs
       FLYDOCS_REDIS_URL: redis://redis:6379/0
       FLYDOCS_EDA_ADAPTER: postgres
-      # Subscribe to the bbox-refine topic under a dedicated consumer
+      # Subscribe to the post-processing topic under a dedicated consumer
       # group so the offset advances independently of the main worker.
-      # Without these the bus would default to ``flydocs.jobs`` and
-      # the bbox-refine events would never reach this container.
-      FLYDOCS_EDA_DESTINATIONS: flydocs.bbox.refine
+      # Without these the bus would default to ``flydocs.extractions``
+      # and the post-processing events would never reach this container.
+      FLYDOCS_EDA_DESTINATIONS: flydocs.extractions.post_processing
       FLYDOCS_EDA_GROUP: flydocs-bbox-workers
       FLYDOCS_MODEL: ${FLYDOCS_MODEL:-anthropic:claude-sonnet-4-6}
       FLYDOCS_OFFICE_CONVERTER: ${FLYDOCS_OFFICE_CONVERTER:-gotenberg}

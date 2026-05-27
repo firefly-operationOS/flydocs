@@ -5,17 +5,17 @@ Pydantic validates the *shape* of the payload (types, required fields,
 ``min_length``). This validator catches the *semantic* mistakes a caller
 can make even with a well-formed JSON body:
 
-  * a ``RuleSpec.parents`` entry that points to a ``documentType`` not
-    declared in ``docs``,
-  * field names that don't exist in the referenced DocSpec,
-  * a rule that depends on a validator name not declared on that doc,
+  * a ``RuleSpec.parents`` entry that points to a ``document_type`` not
+    declared in ``document_types``,
+  * field names that don't exist in the referenced :class:`DocumentTypeSpec`,
+  * a rule that depends on a validator name not declared on that document type,
   * a rule that depends on another rule's ``id`` not present in the request,
   * duplicate rule ids,
   * cycles in the rule DAG (detected before the rule engine is invoked),
   * ``stages.rule_engine`` toggled without any rule.
 
 Each issue carries a ``severity`` (``error`` or ``warning``); the
-controller layer raises ``422 invalid_request`` with the RFC 7807
+controller layer raises ``422 validation_failed`` with the RFC 7807
 problem-detail body when at least one error is present. Warnings are
 returned but don't block the request.
 """
@@ -83,14 +83,14 @@ class RequestValidator:
     """Pre-flight checks before the pipeline runs.
 
     Stateless and side-effect-free. Registered as a pyfly @bean so the
-    controllers, the job submit handler, and the test suite all share
-    one instance.
+    controllers, the extraction submit handler, and the test suite all
+    share one instance.
     """
 
     def validate(self, request: ExtractionRequest) -> ValidationReport:
         report = ValidationReport()
         self._check_files(request, report)
-        self._check_docs(request, report)
+        self._check_document_types(request, report)
         self._check_rule_references(request, report)
         self._check_rule_dag(request, report)
         self._check_stage_consistency(request, report)
@@ -99,58 +99,61 @@ class RequestValidator:
     # -- file-level checks (multi-file shape) ----------------------------
 
     def _check_files(self, request: ExtractionRequest, report: ValidationReport) -> None:
-        known_types = {d.docType.documentType for d in request.docs}
-        for f_index, file in enumerate(request.documents):
-            if not file.document_type:
+        known_types = {d.id for d in request.document_types}
+        for f_index, file in enumerate(request.files):
+            if not file.expected_type:
                 continue
-            if file.document_type not in known_types:
+            if file.expected_type not in known_types:
                 report.issues.append(
                     ValidationIssue(
                         severity="error",
                         code="document_type_unknown",
                         message=(
-                            f"File {file.filename!r} pins document_type "
-                            f"{file.document_type!r} which is not declared in "
-                            "docs[]."
+                            f"File {file.filename!r} pins expected_type "
+                            f"{file.expected_type!r} which is not declared in "
+                            "document_types[]."
                         ),
-                        path=f"documents[{f_index}].document_type",
+                        path=f"files[{f_index}].expected_type",
                     )
                 )
 
-    # -- doc-level checks ------------------------------------------------
+    # -- document-type-level checks --------------------------------------
 
-    def _check_docs(self, request: ExtractionRequest, report: ValidationReport) -> None:
-        # Pydantic already rejects empty docs[] (min_length=1) but each
-        # DocSpec may still have an empty fieldGroups or empty fieldFields.
+    def _check_document_types(self, request: ExtractionRequest, report: ValidationReport) -> None:
+        # Pydantic already rejects empty document_types[] (min_length=1)
+        # but each DocumentTypeSpec may still have an empty field_groups
+        # or empty group.fields.
         seen_doctypes: dict[str, int] = {}
-        for d_index, doc in enumerate(request.docs):
-            path = f"docs[{d_index}].docType.documentType"
-            doc_type = doc.docType.documentType
+        for d_index, doc in enumerate(request.document_types):
+            path = f"document_types[{d_index}].id"
+            doc_type = doc.id
             seen_doctypes[doc_type] = seen_doctypes.get(doc_type, 0) + 1
-            if not doc.fieldGroups:
+            if not doc.field_groups:
                 report.issues.append(
                     ValidationIssue(
                         severity="error",
                         code="empty_field_groups",
-                        message=f"DocSpec {doc_type!r} declares no fieldGroups -- nothing to extract.",
-                        path=f"docs[{d_index}].fieldGroups",
+                        message=(
+                            f"DocumentTypeSpec {doc_type!r} declares no field_groups -- nothing to extract."
+                        ),
+                        path=f"document_types[{d_index}].field_groups",
                     )
                 )
                 continue
-            for g_index, group in enumerate(doc.fieldGroups):
-                if not group.fieldGroupFields:
+            for g_index, group in enumerate(doc.field_groups):
+                if not group.fields:
                     report.issues.append(
                         ValidationIssue(
                             severity="error",
                             code="empty_field_group",
                             message=(
-                                f"DocSpec {doc_type!r} fieldGroup {group.fieldGroupName!r} has no fields."
+                                f"DocumentTypeSpec {doc_type!r} field group {group.name!r} has no fields."
                             ),
-                            path=f"docs[{d_index}].fieldGroups[{g_index}].fieldGroupFields",
+                            path=f"document_types[{d_index}].field_groups[{g_index}].fields",
                         )
                     )
-            # Duplicate field names within the same doc.
-            all_names: list[str] = [f.fieldName for g in doc.fieldGroups for f in g.fieldGroupFields]
+            # Duplicate field names within the same document type.
+            all_names: list[str] = [f.name for g in doc.field_groups for f in g.fields]
             seen: set[str] = set()
             for name in all_names:
                 if name in seen:
@@ -158,13 +161,15 @@ class RequestValidator:
                         ValidationIssue(
                             severity="error",
                             code="duplicate_field_name",
-                            message=(f"DocSpec {doc_type!r} declares fieldName {name!r} more than once."),
+                            message=(
+                                f"DocumentTypeSpec {doc_type!r} declares field name {name!r} more than once."
+                            ),
                             path=path,
                         )
                     )
                 seen.add(name)
 
-        # Duplicate documentType across docs.
+        # Duplicate document type id across declarations.
         for doc_type, count in seen_doctypes.items():
             if count > 1:
                 report.issues.append(
@@ -172,10 +177,10 @@ class RequestValidator:
                         severity="error",
                         code="duplicate_document_type",
                         message=(
-                            f"documentType {doc_type!r} declared {count} times in "
-                            "docs[]; document types must be unique."
+                            f"document type {doc_type!r} declared {count} times in "
+                            "document_types[]; ids must be unique."
                         ),
-                        path="docs[].docType.documentType",
+                        path="document_types[].id",
                     )
                 )
 
@@ -183,13 +188,12 @@ class RequestValidator:
 
     def _check_rule_references(self, request: ExtractionRequest, report: ValidationReport) -> None:
         # Catalog what's declared so rule parents can be resolved.
-        doc_index = {doc.docType.documentType: doc for doc in request.docs}
+        doc_index = {doc.id: doc for doc in request.document_types}
         fields_per_doc: dict[str, set[str]] = {
-            dt: {f.fieldName for g in d.fieldGroups for f in g.fieldGroupFields}
-            for dt, d in doc_index.items()
+            dt: {f.name for g in d.field_groups for f in g.fields} for dt, d in doc_index.items()
         }
         validators_per_doc: dict[str, set[str]] = {
-            dt: {v.name for v in d.validators.visual} for dt, d in doc_index.items()
+            dt: {v.name for v in d.visual_checks} for dt, d in doc_index.items()
         }
         rule_ids = {r.id for r in request.rules}
 
@@ -210,21 +214,22 @@ class RequestValidator:
                 parent_path = f"rules[{r_index}].parents[{p_index}]"
 
                 if isinstance(parent, RuleFieldParent):
-                    if parent.documentType not in doc_index:
+                    if parent.document_type not in doc_index:
                         report.issues.append(
                             ValidationIssue(
                                 severity="error",
                                 code="rule_unknown_doctype",
                                 message=(
-                                    f"Rule {rule.id!r} references documentType "
-                                    f"{parent.documentType!r} which is not declared in docs[]."
+                                    f"Rule {rule.id!r} references document_type "
+                                    f"{parent.document_type!r} which is not declared in "
+                                    "document_types[]."
                                 ),
                                 path=parent_path,
                             )
                         )
                         continue
-                    known = fields_per_doc.get(parent.documentType, set())
-                    for fn in parent.fieldNames:
+                    known = fields_per_doc.get(parent.document_type, set())
+                    for fn in parent.fields:
                         if fn not in known:
                             report.issues.append(
                                 ValidationIssue(
@@ -232,59 +237,60 @@ class RequestValidator:
                                     code="rule_unknown_field",
                                     message=(
                                         f"Rule {rule.id!r} references field "
-                                        f"{fn!r} on documentType "
-                                        f"{parent.documentType!r}, but that doc "
-                                        "doesn't declare such a field."
+                                        f"{fn!r} on document_type "
+                                        f"{parent.document_type!r}, but that document "
+                                        "type doesn't declare such a field."
                                     ),
                                     path=parent_path,
                                 )
                             )
 
                 elif isinstance(parent, RuleValidatorParent):
-                    if parent.documentType not in doc_index:
+                    if parent.document_type not in doc_index:
                         report.issues.append(
                             ValidationIssue(
                                 severity="error",
                                 code="rule_unknown_doctype",
                                 message=(
-                                    f"Rule {rule.id!r} references documentType "
-                                    f"{parent.documentType!r} which is not declared in docs[]."
+                                    f"Rule {rule.id!r} references document_type "
+                                    f"{parent.document_type!r} which is not declared in "
+                                    "document_types[]."
                                 ),
                                 path=parent_path,
                             )
                         )
                         continue
-                    known = validators_per_doc.get(parent.documentType, set())
-                    if parent.validatorName not in known:
+                    known = validators_per_doc.get(parent.document_type, set())
+                    if parent.validator not in known:
                         report.issues.append(
                             ValidationIssue(
                                 severity="error",
                                 code="rule_unknown_validator",
                                 message=(
                                     f"Rule {rule.id!r} references validator "
-                                    f"{parent.validatorName!r} on documentType "
-                                    f"{parent.documentType!r}, but that doc "
-                                    "doesn't declare such a visual validator."
+                                    f"{parent.validator!r} on document_type "
+                                    f"{parent.document_type!r}, but that document "
+                                    "type doesn't declare such a visual check."
                                 ),
                                 path=parent_path,
                             )
                         )
 
                 elif isinstance(parent, RuleRuleParent):
-                    if parent.ruleId not in rule_ids:
+                    if parent.rule not in rule_ids:
                         report.issues.append(
                             ValidationIssue(
                                 severity="error",
                                 code="rule_unknown_parent",
                                 message=(
                                     f"Rule {rule.id!r} declares parent rule "
-                                    f"{parent.ruleId!r} which is not present in "
+                                    f"{parent.rule!r} which is not present in "
                                     "the request."
                                 ),
                                 path=parent_path,
                             )
                         )
-                    elif parent.ruleId == rule.id:
+                    elif parent.rule == rule.id:
                         report.issues.append(
                             ValidationIssue(
                                 severity="error",
@@ -300,9 +306,7 @@ class RequestValidator:
         rule_ids = {r.id for r in request.rules}
         sorter: TopologicalSorter[str] = TopologicalSorter()
         for rule in request.rules:
-            parents = [
-                p.ruleId for p in rule.parents if isinstance(p, RuleRuleParent) and p.ruleId in rule_ids
-            ]
+            parents = [p.rule for p in rule.parents if isinstance(p, RuleRuleParent) and p.rule in rule_ids]
             sorter.add(rule.id, *parents)
         try:
             sorter.prepare()
@@ -338,30 +342,31 @@ class RequestValidator:
                 )
             )
 
-        # visual_authenticity on but no visual validators anywhere => warn.
+        # visual_authenticity on but no visual_checks anywhere => warn.
         if stages.visual_authenticity:
-            any_visual = any(bool(d.validators.visual) for d in request.docs)
+            any_visual = any(bool(d.visual_checks) for d in request.document_types)
             if not any_visual:
                 report.issues.append(
                     ValidationIssue(
                         severity="warning",
                         code="visual_authenticity_no_validators",
                         message=(
-                            "stages.visual_authenticity is enabled but no DocSpec declares visual validators."
+                            "stages.visual_authenticity is enabled but no DocumentTypeSpec "
+                            "declares visual_checks."
                         ),
                         path="options.stages.visual_authenticity",
                     )
                 )
 
-        # splitter on but only one doc => the stage will short-circuit. Warn.
-        if stages.splitter and len(request.docs) <= 1:
+        # splitter on but only one document type => the stage will short-circuit. Warn.
+        if stages.splitter and len(request.document_types) <= 1:
             report.issues.append(
                 ValidationIssue(
                     severity="warning",
                     code="splitter_single_doc",
                     message=(
                         "stages.splitter is enabled but the request declares "
-                        "only one DocSpec -- the splitter will short-circuit."
+                        "only one DocumentTypeSpec -- the splitter will short-circuit."
                     ),
                     path="options.stages.splitter",
                 )

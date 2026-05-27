@@ -28,6 +28,7 @@ Verification rules implemented here:
 * The raw request body must be passed in unchanged -- decoding /
   re-encoding the JSON before verifying will change the bytes and
   break the signature.
+* On success, the body is parsed into a typed :class:`EventEnvelope`.
 """
 
 from __future__ import annotations
@@ -35,17 +36,20 @@ from __future__ import annotations
 import hashlib
 import hmac
 
+from flydocs_sdk.errors import FlydocsError
+from flydocs_sdk.models import EventEnvelope
 
-class WebhookVerificationError(Exception):
+
+class WebhookVerificationError(FlydocsError):
     """Raised when a webhook signature does not match the body."""
 
 
 class WebhookVerifier:
-    """Verify ``X-Flydocs-Signature`` HMACs.
+    """Verify ``X-Flydocs-Signature`` HMACs and parse the body.
 
         verifier = WebhookVerifier(secret="...")
         try:
-            payload = verifier.verify(raw_body, signature_header)
+            envelope = verifier.verify(raw_body, signature_header)
         except WebhookVerificationError:
             return 403
 
@@ -70,11 +74,14 @@ class WebhookVerifier:
         digest = hmac.new(self._secret, body, hashlib.sha256).hexdigest()
         return f"{self._scheme}={digest}"
 
-    def verify(self, body: bytes, signature_header: str) -> bytes:
-        """Return ``body`` if the signature matches; else raise.
+    def verify(self, body: bytes, signature_header: str) -> EventEnvelope:
+        """Verify the signature and parse the body into an :class:`EventEnvelope`.
 
         Both ``sha256=<hex>`` and a bare ``<hex>`` are accepted, since
         some intermediate proxies strip the scheme prefix.
+
+        Raises :class:`WebhookVerificationError` on signature mismatch,
+        missing header, or unsupported scheme.
         """
         if not signature_header:
             raise WebhookVerificationError("signature header missing")
@@ -88,4 +95,7 @@ class WebhookVerifier:
         expected = hmac.new(self._secret, body, hashlib.sha256).hexdigest()
         if not hmac.compare_digest(candidate, expected):
             raise WebhookVerificationError("signature mismatch")
-        return body
+        return EventEnvelope.model_validate_json(body)
+
+
+__all__ = ["WebhookVerificationError", "WebhookVerifier"]

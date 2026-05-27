@@ -16,29 +16,33 @@
 
 package com.firefly.flydocs.sdk.spring;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.firefly.flydocs.sdk.FlydocsClient;
 import com.firefly.flydocs.sdk.FlydocsClientAsync;
 import com.firefly.flydocs.sdk.webhook.WebhookVerifier;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
+import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 /**
- * Auto-configures the flydocs SDK in any Spring Boot 3.5.x application.
+ * Auto-configures the flydocs SDK in any Spring Boot 3.x application.
  *
  * <p>Bean wiring:</p>
- *
  * <ul>
  *   <li>{@link FlydocsClientAsync} — reactive client, conditional on
- *       {@code flydocs.base-url} being set and on no other
- *       {@code FlydocsClientAsync} bean already existing.</li>
- *   <li>{@link FlydocsClient} — blocking facade over the async client,
- *       same conditions plus the async bean.</li>
- *   <li>{@link WebhookVerifier} — only when
- *       {@code flydocs.webhook.hmac-secret} is set.</li>
+ *       {@code flydocs.base-url} being set.</li>
+ *   <li>{@link FlydocsClient} — blocking facade over the async client.</li>
+ *   <li>{@link WebhookVerifier} — only when {@code flydocs.webhook.secret} is set.</li>
+ *   <li>{@link FlydocsWebhookArgumentResolver} + {@link FlydocsWebhookWebMvcConfigurer}
+ *       — only when the {@link WebhookVerifier} bean is present and Spring MVC is
+ *       on the classpath.</li>
  * </ul>
  *
  * <p>Both client beans declare {@code destroyMethod="close"}, so the
@@ -61,6 +65,9 @@ public class FlydocsAutoConfiguration {
                 .maxConnections(props.getMaxConnections())
                 .pendingAcquireTimeout(props.getPendingAcquireTimeout())
                 .maxInMemorySize(props.getMaxInMemorySize());
+        if (props.getApiKey() != null && !props.getApiKey().isEmpty()) {
+            b.apiKey(props.getApiKey());
+        }
         if (props.getTenantId() != null && !props.getTenantId().isEmpty()) {
             b.defaultHeader("X-Tenant-Id", props.getTenantId());
         }
@@ -75,15 +82,44 @@ public class FlydocsAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    @ConditionalOnProperty(prefix = "flydocs.webhook", name = "hmac-secret")
+    @ConditionalOnProperty(prefix = "flydocs.webhook", name = "secret")
     public WebhookVerifier flydocsWebhookVerifier(FlydocsProperties props) {
-        String secret = props.getWebhook().getHmacSecret();
+        String secret = props.getWebhook().getSecret();
         if (secret == null || secret.isEmpty()) {
-            // ConditionalOnProperty already filtered this, but the
-            // accessor is nullable -- be explicit so the constructor
-            // contract is clear.
-            throw new IllegalStateException("flydocs.webhook.hmac-secret must be set");
+            throw new IllegalStateException("flydocs.webhook.secret must be set");
         }
         return new WebhookVerifier(secret);
+    }
+
+    /**
+     * Default Jackson mapper for webhook deserialisation. Falls back to a
+     * private instance when the application context has no
+     * {@link ObjectMapper} primary bean.
+     */
+    @Bean(name = "flydocsWebhookObjectMapper")
+    @ConditionalOnMissingBean(name = "flydocsWebhookObjectMapper")
+    public ObjectMapper flydocsWebhookObjectMapper() {
+        return new ObjectMapper()
+                .registerModule(new JavaTimeModule())
+                .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+    }
+
+    /** Resolver that powers {@code @FlydocsWebhook} controller parameters. */
+    @Bean
+    @ConditionalOnBean(WebhookVerifier.class)
+    @ConditionalOnClass(name = "jakarta.servlet.http.HttpServletRequest")
+    @ConditionalOnMissingBean
+    public FlydocsWebhookArgumentResolver flydocsWebhookArgumentResolver(
+            WebhookVerifier verifier, ObjectMapper flydocsWebhookObjectMapper) {
+        return new FlydocsWebhookArgumentResolver(verifier, flydocsWebhookObjectMapper);
+    }
+
+    /** Wires the argument resolver into Spring MVC's resolver chain. */
+    @Bean
+    @ConditionalOnBean(FlydocsWebhookArgumentResolver.class)
+    @ConditionalOnClass(WebMvcConfigurer.class)
+    public FlydocsWebhookWebMvcConfigurer flydocsWebhookWebMvcConfigurer(
+            FlydocsWebhookArgumentResolver resolver) {
+        return new FlydocsWebhookWebMvcConfigurer(resolver);
     }
 }

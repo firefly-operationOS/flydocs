@@ -17,14 +17,16 @@
 package com.firefly.flydocs.sdk.model;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 /** Response body for {@code GET /api/v1/version}. */
 @JsonIgnoreProperties(ignoreUnknown = true)
+@JsonInclude(JsonInclude.Include.NON_NULL)
 public record VersionInfo(
-        String service,
-        String version,
-        String model,
+        @JsonProperty("service") String service,
+        @JsonProperty("version") String version,
+        @JsonProperty("model") String model,
         @JsonProperty("fallback_model") String fallbackModel,
         @JsonProperty("eda_adapter") String edaAdapter) {
 }

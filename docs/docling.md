@@ -4,8 +4,14 @@ Optional, layout-aware augmentations for the bbox refiner and the
 multimodal extractor, backed by IBM's [Docling](https://github.com/docling-project/docling)
 (LF AI&Data Foundation, MIT).
 
-> **Read time**: 8 minutes. **Scope**: how to enable it, what it
-> changes, and what to watch out for.
+> **What this doc covers:** when Docling is worth enabling, the two
+> integration points (`DoclingOcrEngine` + `DoclingTextAnchor`), env
+> vars, trade-offs (cold start, prompt cache, distroless). **When to
+> read it:** before enabling Docling in production. **Where else to
+> look:**
+> - Pipeline integration: [`pipeline.md`](pipeline.md) (`bbox_refine`
+>   stage).
+> - Image variants: [`deployment.md § 1`](deployment.md#1-topology).
 
 ---
 
@@ -196,12 +202,14 @@ the full caching discussion.
 
 ### 5c. Async path
 
-The `JobWorker` already mutates `stages.bbox_refine = False` before
-calling the orchestrator, then publishes `IDPBboxRefineRequested` for
-the dedicated `BboxRefineWorker`. With Docling as the OCR engine the
-refiner runs out-of-band — same as Tesseract — so async submitters
-get a `PARTIAL_SUCCEEDED → SUCCEEDED` transition once Docling has
-finished grounding bboxes. Idempotent on re-run because the refiner
+The `ExtractionWorker` already mutates `stages.bbox_refine = False`
+before calling the orchestrator, then publishes
+`extraction.post_processing.requested` for the dedicated
+`BboxRefineWorker`. With Docling as the OCR engine the refiner runs
+out-of-band — same as Tesseract — so async submitters get
+`post_processing.bbox_refinement.status: "succeeded"` once Docling
+has finished grounding bboxes (the main `extraction.status` stays
+`succeeded` throughout). Idempotent on re-run because the refiner
 skips fields with `bbox.source ∈ {pdf_text, ocr}`.
 
 ### 5d. Distroless deployment

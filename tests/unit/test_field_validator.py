@@ -2,8 +2,8 @@
 """Unit tests for :class:`FieldValidator` -- the pure-Python validation node.
 
 Verifies the post-extraction validator correctly:
-- decorates each extracted field with a ``field_validation`` object
-- rejects values that fail a regex / enum / standard validator
+- decorates each extracted field with a ``validation`` object
+- rejects values that fail a regex / enum / built-in validator
 - treats ``severity=warning`` validators as soft (``valid=true`` but error recorded)
 """
 
@@ -13,68 +13,68 @@ from flydocs.core.services.validation import FieldValidator
 from flydocs.interfaces.dtos.field import (
     ExtractedField,
     ExtractedFieldGroup,
+    Field,
     FieldGroup,
-    FieldSpec,
 )
-from flydocs.interfaces.dtos.standard_validator import StandardValidatorSpec
+from flydocs.interfaces.dtos.validator import ValidatorSpec
 from flydocs.interfaces.enums.field_type import FieldType
-from flydocs.interfaces.enums.standard_validator import StandardValidatorType
+from flydocs.interfaces.enums.validator import ValidatorType
 
 
-def _group(spec: FieldSpec, extracted: ExtractedField) -> tuple[FieldGroup, ExtractedFieldGroup]:
+def _group(spec: Field, extracted: ExtractedField) -> tuple[FieldGroup, ExtractedFieldGroup]:
     return (
-        FieldGroup(fieldGroupName="g", fieldGroupDesc="", fieldGroupFields=[spec]),
-        ExtractedFieldGroup(fieldGroupName="g", fieldGroupFields=[extracted]),
+        FieldGroup(name="g", description="", fields=[spec]),
+        ExtractedFieldGroup(name="g", fields=[extracted]),
     )
 
 
 def test_enum_rejects_unknown_value() -> None:
-    spec = FieldSpec(fieldName="currency", fieldType=FieldType.STRING, enum=["EUR", "USD"])
-    extracted = ExtractedField(fieldName="currency", fieldValueFound="GBP")
+    spec = Field(name="currency", type=FieldType.STRING, enum=["EUR", "USD"])
+    extracted = ExtractedField(name="currency", value="GBP")
     sg, eg = _group(spec, extracted)
     FieldValidator().validate([sg], [eg])
-    assert eg.fieldGroupFields[0].field_validation.valid is False
-    assert eg.fieldGroupFields[0].field_validation.errors[0].rule.value == "enum"
+    assert eg.fields[0].validation.valid is False
+    assert eg.fields[0].validation.errors[0].rule.value == "enum"
 
 
-def test_standard_validator_marks_invalid_email() -> None:
-    spec = FieldSpec(
-        fieldName="contact",
-        fieldType=FieldType.STRING,
-        standard_validators=[StandardValidatorSpec(type=StandardValidatorType.EMAIL)],
+def test_validator_marks_invalid_email() -> None:
+    spec = Field(
+        name="contact",
+        type=FieldType.STRING,
+        validators=[ValidatorSpec(name=ValidatorType.EMAIL)],
     )
-    extracted = ExtractedField(fieldName="contact", fieldValueFound="not-an-email")
+    extracted = ExtractedField(name="contact", value="not-an-email")
     sg, eg = _group(spec, extracted)
     FieldValidator().validate([sg], [eg])
-    assert eg.fieldGroupFields[0].field_validation.valid is False
-    assert any(e.rule.value == "standard" for e in eg.fieldGroupFields[0].field_validation.errors)
+    assert eg.fields[0].validation.valid is False
+    assert any(e.rule.value == "validator" for e in eg.fields[0].validation.errors)
 
 
 def test_warning_severity_keeps_field_valid() -> None:
-    spec = FieldSpec(
-        fieldName="iban",
-        fieldType=FieldType.STRING,
-        standard_validators=[
-            StandardValidatorSpec(type=StandardValidatorType.IBAN, severity="warning"),
+    spec = Field(
+        name="iban",
+        type=FieldType.STRING,
+        validators=[
+            ValidatorSpec(name=ValidatorType.IBAN, severity="warning"),
         ],
     )
-    extracted = ExtractedField(fieldName="iban", fieldValueFound="NOT-AN-IBAN")
+    extracted = ExtractedField(name="iban", value="NOT-AN-IBAN")
     sg, eg = _group(spec, extracted)
     FieldValidator().validate([sg], [eg])
-    fv = eg.fieldGroupFields[0].field_validation
+    fv = eg.fields[0].validation
     assert fv.valid is True
     assert len(fv.errors) == 1
     assert fv.errors[0].message.endswith("[warning]")
 
 
 def test_none_value_is_skipped() -> None:
-    spec = FieldSpec(
-        fieldName="iban",
-        fieldType=FieldType.STRING,
-        standard_validators=[StandardValidatorSpec(type=StandardValidatorType.IBAN)],
+    spec = Field(
+        name="iban",
+        type=FieldType.STRING,
+        validators=[ValidatorSpec(name=ValidatorType.IBAN)],
     )
-    extracted = ExtractedField(fieldName="iban", fieldValueFound=None)
+    extracted = ExtractedField(name="iban", value=None)
     sg, eg = _group(spec, extracted)
     FieldValidator().validate([sg], [eg])
-    assert eg.fieldGroupFields[0].field_validation.valid is True
-    assert eg.fieldGroupFields[0].field_validation.errors == []
+    assert eg.fields[0].validation.valid is True
+    assert eg.fields[0].validation.errors == []

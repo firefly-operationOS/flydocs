@@ -2,59 +2,65 @@
 """Business-rule DTOs.
 
 Rules express boolean / categorical decisions over extracted fields,
-validator outcomes, and other rules' results. They form a DAG: a rule
-that depends on another rule's output is evaluated *after* the parent.
-Cycles are rejected at request validation time by :class:`RuleEngine`.
+validator outcomes, and other rules' results. They form a DAG; cycles are
+rejected at request validation time by ``RequestValidator`` /
+``RuleEngine``.
+
+The :class:`RuleParent` discriminator is ``kind`` (not ``type``) to avoid
+collision with :class:`Field.type` / :class:`RuleOutputSpec.type` when
+walking a request by literal key name.
 """
 
 from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
-class RuleFieldParent(BaseModel):
-    parentType: Literal["field"] = "field"
-    documentType: str
-    fieldNames: list[str] = Field(..., min_length=1)
+class _BaseParent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
 
 
-class RuleValidatorParent(BaseModel):
-    parentType: Literal["validator"] = "validator"
-    documentType: str
-    validatorName: str
+class RuleFieldParent(_BaseParent):
+    kind: Literal["field"] = "field"
+    document_type: str
+    fields: list[str] = Field(..., min_length=1)
 
 
-class RuleRuleParent(BaseModel):
-    parentType: Literal["rule"] = "rule"
-    ruleId: str
+class RuleValidatorParent(_BaseParent):
+    kind: Literal["validator"] = "validator"
+    document_type: str
+    validator: str
+
+
+class RuleRuleParent(_BaseParent):
+    kind: Literal["rule"] = "rule"
+    rule: str
 
 
 RuleParent = Annotated[
     RuleFieldParent | RuleValidatorParent | RuleRuleParent,
-    Field(discriminator="parentType"),
+    Field(discriminator="kind"),
 ]
 
 
 class RuleOutputSpec(BaseModel):
     """How the rule's output is interpreted."""
 
-    type: str = Field(default="boolean", description="``boolean``, ``string``, or ``number``.")
-    valid_outputs: list[str] | None = Field(
-        default=None,
-        description=(
-            "Optional closed set of valid output strings. The rule engine "
-            "treats anything outside this set as ``flag_for_review``."
-        ),
-    )
+    model_config = ConfigDict(extra="forbid")
+
+    type: str = Field(default="boolean", description="'boolean' | 'string' | 'number'.")
+    valid_outputs: list[str] | None = None
 
 
 class RuleSpec(BaseModel):
     """One business rule."""
 
+    model_config = ConfigDict(extra="forbid")
+
     id: str = Field(..., min_length=1)
-    predicate: str = Field(..., min_length=1, description="Natural-language predicate evaluated by the LLM.")
+    predicate: str = Field(..., min_length=1)
     parents: list[RuleParent] = Field(default_factory=list)
     output: RuleOutputSpec = Field(default_factory=RuleOutputSpec)
 
@@ -62,11 +68,11 @@ class RuleSpec(BaseModel):
 class RuleResult(BaseModel):
     """Per-rule outcome returned in the response."""
 
+    model_config = ConfigDict(extra="forbid")
+
     rule_id: str
     predicate: str
-    output: str = Field(
-        default="", description="The resolved output value (string form -- ``true``/``false``/...)."
-    )
-    summary: str = ""
+    output: str = ""
+    summary: str | None = None
     notes: list[str] = Field(default_factory=list)
-    human_revision: str = Field(default="", description="Instructions for a human reviewer if needed.")
+    human_revision: str | None = None

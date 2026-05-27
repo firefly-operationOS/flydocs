@@ -1,0 +1,54 @@
+Post-server test snapshot -- captured after API v1 redesign Phase 5 (server tests)
+Date: 2026-05-26
+Branch: feat/api-v1-redesign
+
+`uv run pytest tests/unit/` summary:
+- 308 passed
+- 1 skipped (pre-existing docling skip when extra not installed)
+- 8 warnings (pre-existing SwigPy deprecation + event-loop cleanup)
+- duration: ~6.0s
+
+`uv run pytest tests/unit/ tests/integration/ tests/llm/` summary:
+- 308 passed
+- 10 skipped (8 Postgres-gated integration tests when FLYDOCS_TEST_PG_URL unset
+  + 1 EDA advisory-lock test gated on Postgres + 1 docling collected-but-skipped)
+- 1 deselected (LLM smoke test gated by `-m llm`)
+
+Baseline (before redesign) was 303 passed / 1 skipped. The v1 test
+suite is +5 tests over baseline despite some legacy tests retired:
+
+Retired (v0-specific):
+- 4 tests in test_event_envelopes -- v0 had 4 typed event classes
+  (IDPJobSubmittedEvent, IDPJobCompletedEvent, etc.). v1 has a
+  single EventEnvelope shape with a dotted-snake-case event_type
+  discriminator. The new module covers the unified shape with 9
+  tests (+5 vs v0).
+- 1 test (test_returns_partial_result_when_status_partial_succeeded)
+  removed -- v1 no longer has PARTIAL_SUCCEEDED state. Equivalent
+  coverage now exists as test_returns_result_when_bbox_leg_pending
+  and test_returns_result_when_bbox_leg_running, which exercise the
+  new "succeeded + post_processing.bbox_refinement.status=pending|running"
+  shape.
+- The test_bbox_validator::test_empty_when_field_value_is_none and
+  test_empty_when_bbox_is_zero_placeholder were merged into a single
+  test_bbox_cleared_when_field_value_is_none in v1 because the
+  validator now nulls out `field.bbox` instead of stamping a synthetic
+  EMPTY quality. BboxQuality.EMPTY no longer exists.
+
+Net new tests added for v1 vocabulary / state machine:
+- test_extraction_status_string_values
+- test_post_processing_status_terminal_predicate
+- test_mark_succeeded_with_request_bbox_refinement_sets_pending
+- test_mark_succeeded_without_bbox_request_leaves_bbox_status_null
+- test_fail_bbox_refinement_only_from_running
+- test_event_type_constants_use_dotted_snake_case
+- test_envelope_for_publish_is_json_friendly (v1 shape)
+- test_envelope_round_trips_through_serialise_parse[*]  (4 parametrised)
+- test_envelope_can_carry_full_result
+- test_envelope_result_defaults_to_null
+
+Acceptance gate met: server test suite is green, every test now
+exercises the v1 contract (snake_case keys, lowercase enum values,
+files[] / document_types[] / field_groups[] / fields[] / validators[],
+Extraction state machine with additive PostProcessing bbox sub-status,
+unified EventEnvelope for EDA + webhook payloads).

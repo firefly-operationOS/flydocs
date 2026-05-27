@@ -16,19 +16,25 @@
 
 package com.firefly.flydocs.sdk.model;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonValue;
 
 /**
- * Supported primitives for a {@link FieldSpec}. Mirrors the service-side
- * {@code FieldType} enum; the wire form is the lowercase value
- * ({@code "string"}, {@code "number"}, ...).
+ * Supported primitives for a {@link Field}.
+ *
+ * <p>{@code array} requires the field to set {@code items} (a single
+ * recursive {@link Field} describing the row shape). {@code object}
+ * requires {@code fields} (a non-empty list of member {@link Field}s).
+ * Primitives forbid both. Mirrors the service-side {@code FieldType} enum;
+ * wire form is lowercase ({@code "string"}, {@code "number"}, …).</p>
  */
 public enum FieldType {
     STRING("string"),
     NUMBER("number"),
     INTEGER("integer"),
     BOOLEAN("boolean"),
-    ARRAY("array");
+    ARRAY("array"),
+    OBJECT("object");
 
     private final String wire;
 
@@ -36,9 +42,21 @@ public enum FieldType {
         this.wire = wire;
     }
 
-    /** JSON wire value. */
     @JsonValue
     public String wire() {
         return wire;
+    }
+
+    @JsonCreator
+    public static FieldType fromWire(String value) {
+        if (value == null) {
+            throw new IllegalArgumentException("FieldType value is null");
+        }
+        for (FieldType t : values()) {
+            if (t.wire.equals(value)) {
+                return t;
+            }
+        }
+        throw new IllegalArgumentException("unknown FieldType: " + value);
     }
 }

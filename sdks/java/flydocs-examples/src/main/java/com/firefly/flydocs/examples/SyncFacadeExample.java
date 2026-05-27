@@ -17,9 +17,9 @@
 package com.firefly.flydocs.examples;
 
 import com.firefly.flydocs.sdk.FlydocsClient;
-import com.firefly.flydocs.sdk.model.DocumentInput;
 import com.firefly.flydocs.sdk.model.ExtractionRequest;
 import com.firefly.flydocs.sdk.model.ExtractionResult;
+import com.firefly.flydocs.sdk.model.FileInput;
 import com.firefly.flydocs.sdk.model.VersionInfo;
 import java.io.IOException;
 import java.nio.file.Path;
@@ -55,13 +55,17 @@ public final class SyncFacadeExample {
             System.out.printf("service: %s %s%n", info.service(), info.version());
 
             ExtractionRequest req = ExtractionRequest.builder()
-                    .addDocument(DocumentInput.ofPath(pdf))
-                    .addDocSpec(ExampleHelpers.invoiceDocSpec())
+                    .addFile(FileInput.ofPath(pdf))
+                    .addDocumentType(ExampleHelpers.invoiceDocumentType())
                     .build();
 
             ExtractionResult result = flydocs.extract(req);
-            System.out.printf("model=%s  latency=%dms  documents=%d%n",
-                    result.model(), result.latencyMs(), result.documents().size());
+            System.out.printf("id=%s  status=%s  model=%s  latency=%dms  documents=%d%n",
+                    result.id(),
+                    result.status(),
+                    result.pipeline().model(),
+                    result.pipeline().latencyMs(),
+                    result.documents().size());
         }
     }
 }

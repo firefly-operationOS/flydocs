@@ -44,7 +44,7 @@ wheels = [
 
 [[package]]
 name = "flydocs-sdk"
-version = "26.5.1"
+version = "26.6.0"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },

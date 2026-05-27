@@ -1,17 +1,17 @@
 # Copyright 2026 Firefly Software Solutions Inc
-"""Typed EDA event envelopes.
+"""Unified :class:`EventEnvelope` covering EDA + webhook deliveries.
 
 Coverage:
 
-1. ``IDPJobSubmittedEvent`` defaults populate ``event_id`` (UUID),
-   ``occurred_at`` (UTC datetime), ``version``, and ``event_type``.
-2. ``envelope_for_publish`` produces a JSON-friendly dict suitable
-   for ``EventPublisher.publish(payload=...)`` — datetimes serialise
-   to ISO strings, the event id round-trips, and the enum discriminator
-   matches the constant pyfly will route on.
-3. The discriminated union (``IDPEvent``) round-trips through pydantic
-   from raw dicts the EDA bus would deliver, so the consumer-side
-   parse is loss-free.
+1. Defaults populate ``event_id`` (UUID4), ``occurred_at`` (UTC datetime),
+   ``version`` and accept any of the four canonical event-type strings.
+2. ``envelope_for_publish`` produces a JSON-friendly dict suitable for
+   :func:`EventPublisher.publish(payload=...)`: datetimes serialise to ISO
+   strings, the event id round-trips, and enums become their string values.
+3. The envelope round-trips through pydantic from raw dicts the EDA bus
+   would deliver, so the consumer-side parse is loss-free.
+4. The four event-type constants carry the dotted snake_case form
+   (the deliberate exception to the flat-snake convention).
 """
 
 from __future__ import annotations
@@ -19,89 +19,154 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
-from pydantic import TypeAdapter
+import pytest
 
 from flydocs.interfaces.dtos.event import (
-    IDPBboxRefineCompletedEvent,
-    IDPBboxRefineRequestedEvent,
-    IDPEvent,
-    IDPJobCompletedEvent,
-    IDPJobSubmittedEvent,
+    ALL_EVENT_TYPES,
+    EVENT_TYPE_EXTRACTION_COMPLETED,
+    EVENT_TYPE_EXTRACTION_POST_PROCESSING_COMPLETED,
+    EVENT_TYPE_EXTRACTION_POST_PROCESSING_REQUESTED,
+    EVENT_TYPE_EXTRACTION_SUBMITTED,
+    EventEnvelope,
     envelope_for_publish,
 )
-from flydocs.interfaces.enums.job_status import JobStatus
+from flydocs.interfaces.dtos.extract import (
+    ExtractionResult,
+    PipelineMeta,
+)
+from flydocs.interfaces.dtos.extraction import Extraction
+from flydocs.interfaces.enums.extraction_status import ExtractionStatus
 
 
-def test_submitted_event_defaults() -> None:
-    """Constructor populates id + timestamp + version + discriminator."""
-    ev = IDPJobSubmittedEvent(job_id="job-1")
+def _extraction(status: ExtractionStatus = ExtractionStatus.QUEUED) -> Extraction:
+    return Extraction(
+        id="ext_TEST00000000000000000000000",
+        status=status,
+        submitted_at=datetime(2026, 5, 15, 12, 0, 0, tzinfo=UTC),
+    )
 
+
+# ---------------------------------------------------------------------------
+# Event-type constants
+# ---------------------------------------------------------------------------
+
+
+def test_event_type_constants_use_dotted_snake_case() -> None:
+    """The deliberate exception to flat snake_case enums."""
+    assert EVENT_TYPE_EXTRACTION_SUBMITTED == "extraction.submitted"
+    assert EVENT_TYPE_EXTRACTION_COMPLETED == "extraction.completed"
+    assert EVENT_TYPE_EXTRACTION_POST_PROCESSING_REQUESTED == "extraction.post_processing.requested"
+    assert EVENT_TYPE_EXTRACTION_POST_PROCESSING_COMPLETED == "extraction.post_processing.completed"
+    assert set(ALL_EVENT_TYPES) == {
+        EVENT_TYPE_EXTRACTION_SUBMITTED,
+        EVENT_TYPE_EXTRACTION_COMPLETED,
+        EVENT_TYPE_EXTRACTION_POST_PROCESSING_REQUESTED,
+        EVENT_TYPE_EXTRACTION_POST_PROCESSING_COMPLETED,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Envelope defaults
+# ---------------------------------------------------------------------------
+
+
+def test_envelope_defaults_populate_id_timestamp_version() -> None:
+    """Constructor populates id + timestamp + version."""
+    env = EventEnvelope(
+        event_type=EVENT_TYPE_EXTRACTION_SUBMITTED,
+        extraction=_extraction(),
+    )
     # event_id is a valid UUID4 string.
-    parsed = uuid.UUID(ev.event_id)
+    parsed = uuid.UUID(env.event_id)
     assert parsed.version == 4
-
     # occurred_at is timezone-aware UTC.
-    assert isinstance(ev.occurred_at, datetime)
-    assert ev.occurred_at.tzinfo == UTC
+    assert isinstance(env.occurred_at, datetime)
+    assert env.occurred_at.tzinfo is not None
+    # Discriminator carries the dotted snake form.
+    assert env.event_type == "extraction.submitted"
+    assert env.version == "1.0.0"
 
-    # Type + version + attempt defaults.
-    assert ev.event_type == "IDPJobSubmitted"
-    assert ev.version == "1.0.0"
-    assert ev.attempt == 1
+
+# ---------------------------------------------------------------------------
+# envelope_for_publish serialisation
+# ---------------------------------------------------------------------------
 
 
 def test_envelope_for_publish_is_json_friendly() -> None:
-    """The serialiser used by publishers produces a primitive dict."""
+    """The serialiser produces a primitive dict suitable for EventPublisher."""
     occurred = datetime(2026, 5, 15, 12, 0, 0, tzinfo=UTC)
-    ev = IDPJobSubmittedEvent(
-        job_id="job-1",
+    env = EventEnvelope(
+        event_type=EVENT_TYPE_EXTRACTION_SUBMITTED,
         occurred_at=occurred,
         correlation_id="cor-42",
+        tenant_id="acme",
+        extraction=_extraction(),
     )
-    payload = envelope_for_publish(ev)
-
-    # Discriminator is preserved verbatim — pyfly routes on this.
-    assert payload["event_type"] == "IDPJobSubmitted"
-    assert payload["job_id"] == "job-1"
+    payload = envelope_for_publish(env)
+    # Discriminator preserved verbatim.
+    assert payload["event_type"] == "extraction.submitted"
     assert payload["correlation_id"] == "cor-42"
+    assert payload["tenant_id"] == "acme"
     # Datetimes become ISO strings (mode='json').
     assert payload["occurred_at"].startswith("2026-05-15T12:00:00")
     # event_id is preserved.
-    assert payload["event_id"] == ev.event_id
+    assert payload["event_id"] == env.event_id
+    # Nested extraction is serialised as a dict with the enum coerced to its string value.
+    assert payload["extraction"]["id"] == "ext_TEST00000000000000000000000"
+    assert payload["extraction"]["status"] == "queued"
 
 
-def test_discriminated_union_round_trips_every_type() -> None:
+# ---------------------------------------------------------------------------
+# Round-trip across the bus
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "event_type",
+    list(ALL_EVENT_TYPES),
+)
+def test_envelope_round_trips_through_serialise_parse(event_type: str) -> None:
     """Every event type re-parses correctly from its serialised dict."""
-    adapter: TypeAdapter[IDPEvent] = TypeAdapter(IDPEvent)
-    events: list[IDPEvent] = [
-        IDPJobSubmittedEvent(job_id="job-1"),
-        IDPJobCompletedEvent(
-            job_id="job-2",
-            status=JobStatus.SUCCEEDED,
-            started_at=datetime(2026, 5, 15, 10, 0, 0, tzinfo=UTC),
-            finished_at=datetime(2026, 5, 15, 10, 5, 0, tzinfo=UTC),
-            attempts=2,
-        ),
-        IDPBboxRefineRequestedEvent(job_id="job-3", attempt=1),
-        IDPBboxRefineCompletedEvent(
-            job_id="job-4",
-            status="succeeded",
-            attempts=1,
-        ),
-    ]
-    for ev in events:
-        raw = ev.model_dump(mode="json")
-        parsed = adapter.validate_python(raw)
-        assert parsed.event_type == ev.event_type
-        # event_id is stable across the round-trip.
-        assert parsed.event_id == ev.event_id
-
-
-def test_completed_event_serialises_status_enum() -> None:
-    """JobStatus enum serialises to its string value in the payload."""
-    ev = IDPJobCompletedEvent(
-        job_id="job-9",
-        status=JobStatus.PARTIAL_SUCCEEDED,
+    env = EventEnvelope(
+        event_type=event_type,
+        extraction=_extraction(ExtractionStatus.SUCCEEDED),
     )
-    payload = envelope_for_publish(ev)
-    assert payload["status"] == "PARTIAL_SUCCEEDED"
+    raw = env.model_dump(mode="json")
+    parsed = EventEnvelope.model_validate(raw)
+    assert parsed.event_type == event_type
+    assert parsed.event_id == env.event_id
+    assert parsed.extraction.id == env.extraction.id
+    assert parsed.extraction.status == ExtractionStatus.SUCCEEDED
+
+
+# ---------------------------------------------------------------------------
+# Result is populated only on success
+# ---------------------------------------------------------------------------
+
+
+def test_envelope_can_carry_full_result() -> None:
+    """``result`` is null by default; completed-success events fill it."""
+    result = ExtractionResult(
+        id="ext_TEST00000000000000000000000",
+        files=[],
+        documents=[],
+        pipeline=PipelineMeta(model="m", latency_ms=1),
+    )
+    env = EventEnvelope(
+        event_type=EVENT_TYPE_EXTRACTION_COMPLETED,
+        extraction=_extraction(ExtractionStatus.SUCCEEDED),
+        result=result,
+    )
+    payload = envelope_for_publish(env)
+    assert payload["result"]["id"] == "ext_TEST00000000000000000000000"
+    assert payload["result"]["pipeline"]["model"] == "m"
+
+
+def test_envelope_result_defaults_to_null() -> None:
+    env = EventEnvelope(
+        event_type=EVENT_TYPE_EXTRACTION_SUBMITTED,
+        extraction=_extraction(),
+    )
+    assert env.result is None
+    payload = envelope_for_publish(env)
+    assert payload["result"] is None

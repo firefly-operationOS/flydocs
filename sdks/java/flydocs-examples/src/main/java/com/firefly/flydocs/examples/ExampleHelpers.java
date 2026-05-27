@@ -16,8 +16,8 @@
 
 package com.firefly.flydocs.examples;
 
-import com.firefly.flydocs.sdk.model.DocSpec;
-import com.firefly.flydocs.sdk.model.FieldSpec;
+import com.firefly.flydocs.sdk.model.DocumentTypeSpec;
+import com.firefly.flydocs.sdk.model.Field;
 import com.firefly.flydocs.sdk.model.FieldType;
 import com.firefly.flydocs.sdk.model.RuleSpec;
 
@@ -34,17 +34,17 @@ final class ExampleHelpers {
     private ExampleHelpers() {}
 
     /** Invoice schema with a totals group and a customer group. */
-    static DocSpec invoiceDocSpec() {
-        return DocSpec.builder("invoice")
+    static DocumentTypeSpec invoiceDocumentType() {
+        return DocumentTypeSpec.builder("invoice")
                 .description("Standard invoice with totals + customer block")
                 .addFieldGroup(
                         "totals",
-                        FieldSpec.required("total_amount", FieldType.NUMBER),
-                        FieldSpec.required("currency", FieldType.STRING))
+                        Field.required("total_amount", FieldType.NUMBER),
+                        Field.required("currency", FieldType.STRING))
                 .addFieldGroup(
                         "customer",
-                        FieldSpec.required("customer_name", FieldType.STRING),
-                        FieldSpec.of("customer_email", FieldType.STRING))
+                        Field.required("customer_name", FieldType.STRING),
+                        Field.of("customer_email", FieldType.STRING))
                 .build();
     }
 

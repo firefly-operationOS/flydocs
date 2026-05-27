@@ -1,7 +1,7 @@
 # Copyright 2026 Firefly Software Solutions Inc
-"""Convert the raw LLM output for one :class:`DocSpec` into a stable
-list of :class:`ExtractedFieldGroup` -- value-coerced, bbox-clamped,
-field-order preserved.
+"""Convert the raw LLM output for one :class:`DocumentTypeSpec` into a
+stable list of :class:`ExtractedFieldGroup` -- value-coerced,
+bbox-clamped, field-order preserved.
 """
 
 from __future__ import annotations
@@ -11,18 +11,34 @@ from typing import Any
 from pydantic import BaseModel
 
 from flydocs.core.services.extraction.schema import clamp_bbox, coerce_scalar
-from flydocs.interfaces.dtos.bbox import BoundingBox
-from flydocs.interfaces.dtos.doc import DocSpec
+from flydocs.interfaces.dtos.document_type import DocumentTypeSpec
 from flydocs.interfaces.dtos.field import (
     ExtractedField,
     ExtractedFieldGroup,
-    FieldSpec,
+)
+from flydocs.interfaces.dtos.field import (
+    Field as FieldSpec,
 )
 from flydocs.interfaces.enums.field_type import FieldType
 
 
+def _row_items(spec: FieldSpec) -> list[FieldSpec]:
+    """Return the per-row sub-field specs for an array field.
+
+    Mirrors ``schema._items_specs`` -- v1 :class:`Field` is recursive
+    so arrays carry their row shape under ``items`` (typically a Field
+    of type ``object`` whose ``fields`` list contains the columns).
+    """
+    if spec.items is None:
+        return []
+    items_field = spec.items
+    if items_field.type == FieldType.OBJECT and items_field.fields:
+        return list(items_field.fields)
+    return [items_field]
+
+
 def _scalar_from_payload(spec: FieldSpec, payload: dict[str, Any]) -> ExtractedField:
-    value = coerce_scalar(spec.fieldType, payload.get("value"))
+    value = coerce_scalar(spec.type, payload.get("value"))
     confidence = _clamp01(payload.get("confidence", 0.0))
     page = _int_or_none(payload.get("page"))
     bbox = clamp_bbox(payload.get("bbox"))
@@ -30,13 +46,13 @@ def _scalar_from_payload(spec: FieldSpec, payload: dict[str, Any]) -> ExtractedF
 
     if value is None:
         page = None
-        bbox = BoundingBox.empty()
+        bbox = None
 
     pages: list[int] = [page] if page is not None else []
     return ExtractedField(
-        fieldName=spec.fieldName,
-        fieldValueFound=value,
-        pagesFound=pages,
+        name=spec.name,
+        value=value,
+        pages=pages,
         confidence=confidence,
         bbox=bbox,
         notes=notes,
@@ -48,58 +64,56 @@ def _array_from_payload(spec: FieldSpec, payload: dict[str, Any]) -> ExtractedFi
     coerced_rows: list[ExtractedField] = []
     page_set: set[int] = set()
 
+    items = _row_items(spec)
     for row_idx, row in enumerate(rows):
         if not isinstance(row, dict):
             continue
         sub_fields: list[ExtractedField] = []
-        for item in spec.items or []:
-            item_payload = row.get(item.fieldName)
+        for item in items:
+            item_payload = row.get(item.name)
             if not isinstance(item_payload, dict):
-                sub_fields.append(ExtractedField(fieldName=item.fieldName, fieldValueFound=None))
+                sub_fields.append(ExtractedField(name=item.name, value=None))
                 continue
-            item_spec = FieldSpec.model_validate(
-                item.model_dump() | {"name": item.fieldName, "type": item.fieldType}
-            )
-            sub_field = _scalar_from_payload(item_spec, item_payload)
+            sub_field = _scalar_from_payload(item, item_payload)
             sub_fields.append(sub_field)
-            page_set.update(sub_field.pagesFound)
+            page_set.update(sub_field.pages)
         coerced_rows.append(
             ExtractedField(
-                fieldName=f"row_{row_idx + 1}",
-                fieldValueFound=sub_fields,
-                pagesFound=sorted(page_set),
+                name=f"row_{row_idx + 1}",
+                value=sub_fields,
+                pages=sorted(page_set),
             )
         )
 
-    pages_from_payload = payload.get("pagesFound") or []
+    pages_from_payload = payload.get("pages") or []
     pages = sorted({int(p) for p in pages_from_payload if isinstance(p, int) and p >= 1} | page_set)
     return ExtractedField(
-        fieldName=spec.fieldName,
-        fieldValueFound=coerced_rows,
-        pagesFound=pages,
+        name=spec.name,
+        value=coerced_rows,
+        pages=pages,
         confidence=_clamp01(payload.get("confidence", 0.0)),
         notes=_maybe_str(payload.get("notes")),
     )
 
 
-def normalise_doc(raw_output: BaseModel, doc: DocSpec) -> list[ExtractedFieldGroup]:
-    """Build the public list of :class:`ExtractedFieldGroup` for one doc."""
+def normalise_doc(raw_output: BaseModel, doc: DocumentTypeSpec) -> list[ExtractedFieldGroup]:
+    """Build the public list of :class:`ExtractedFieldGroup` for one document type."""
     output_dict = raw_output.model_dump(by_alias=True)
     groups: list[ExtractedFieldGroup] = []
-    for group in doc.fieldGroups:
-        group_payload = output_dict.get(group.fieldGroupName) or {}
+    for group in doc.field_groups:
+        group_payload = output_dict.get(group.name) or {}
         if not isinstance(group_payload, dict):
             group_payload = {}
         fields: list[ExtractedField] = []
-        for spec in group.fieldGroupFields:
-            field_payload = group_payload.get(spec.fieldName)
+        for spec in group.fields:
+            field_payload = group_payload.get(spec.name)
             if not isinstance(field_payload, dict):
                 field_payload = {}
-            if spec.fieldType == FieldType.ARRAY:
+            if spec.type == FieldType.ARRAY:
                 fields.append(_array_from_payload(spec, field_payload))
             else:
                 fields.append(_scalar_from_payload(spec, field_payload))
-        groups.append(ExtractedFieldGroup(fieldGroupName=group.fieldGroupName, fieldGroupFields=fields))
+        groups.append(ExtractedFieldGroup(name=group.name, fields=fields))
     return groups
 
 

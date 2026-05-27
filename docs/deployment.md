@@ -3,6 +3,14 @@
 Notes for taking flydocs from a developer laptop to a real
 environment — topology, configuration, scaling, security, and cost.
 
+> **What this doc covers:** topology, env vars, image variants,
+> migrations, health probes, observability, scaling, security, cost
+> tuning. **When to read it:** while shipping to staging or
+> production. **Where else to look:**
+> - Concurrency / multi-worker safety: [`concurrency.md`](concurrency.md).
+> - CI/CD: [`cicd.md`](cicd.md).
+> - Troubleshooting recipes: [`troubleshooting.md`](troubleshooting.md).
+
 ---
 
 ## 1. Topology
@@ -12,14 +20,14 @@ A production deployment has three moving parts:
 ```
                 ┌──────────────┐                  ┌────────────────────────────┐
    client ─────▶│ API (uvicorn)│── INSERT + NOTIFY ▶│ Postgres                   │
-                │ /api/v1/...  │                  │   extraction_jobs          │
+                │ /api/v1/...  │                  │   extractions              │
                 │ /actuator/...│                  │   pyfly_eda_outbox         │
                 └──────────────┘                  │   pyfly_eda_offsets        │
                                                   └──────────┬─────────────────┘
                                                              │ LISTEN
                                                              ▼
                                                   ┌──────────────────────────────────┐
-                                                  │ JobWorker(s) (uvicorn)           │
+                                                  │ ExtractionWorker(s) (uvicorn)    │
                                                   │  fireflyframework-pyfly EDA      │
                                                   │  subscribe                       │
                                                   └──────────────────────────────────┘
@@ -27,9 +35,9 @@ A production deployment has three moving parts:
 
 | Component    | Role |
 | ------------ | ---- |
-| **API**      | One or more uvicorn workers behind a load balancer. Stateless; no sticky sessions. Publishes ``IDPJobSubmitted`` events on the EDA bus. |
+| **API**      | One or more uvicorn workers behind a load balancer. Stateless; no sticky sessions. Publishes ``extraction.submitted`` events on the EDA bus. |
 | **Worker**   | One or more processes that subscribe to the EDA bus via `fireflyframework-pyfly`'s `EventPublisher.subscribe`. Each event is delivered to exactly one consumer in the `flydocs-workers` consumer group. |
-| **Postgres** | Holds `extraction_jobs` *and* the EDA outbox (`pyfly_eda_outbox` + `pyfly_eda_offsets`). With the Postgres EDA adapter you no longer need a separate broker. |
+| **Postgres** | Holds `extractions` *and* the EDA outbox (`pyfly_eda_outbox` + `pyfly_eda_offsets`). With the Postgres EDA adapter you no longer need a separate broker. |
 
 Redis or Kafka are still supported brokers — see §3 — but the default
 posture is **Postgres-only**: the service already runs Postgres for
@@ -87,7 +95,7 @@ FLYDOCS_FALLBACK_MODEL=openai:gpt-4o
 # Timeouts (seconds).
 FLYDOCS_SYNC_TIMEOUT_S=60
 FLYDOCS_ASYNC_TIMEOUT_S=300
-FLYDOCS_JOB_MAX_ATTEMPTS=3
+FLYDOCS_EXTRACTION_MAX_ATTEMPTS=3
 
 # Retry backoff bounds. The worker schedules each retry at
 # min(retry_max_delay_s, retry_base_delay_s * 2^(attempt-1)) plus 20% jitter.
@@ -100,7 +108,7 @@ FLYDOCS_RETRY_MAX_DELAY_S=300
 FLYDOCS_ESCALATION_THRESHOLD=0.0
 FLYDOCS_ESCALATION_MODEL=anthropic:claude-opus-4-7
 
-# Document size / page caps.
+# File size / page caps.
 FLYDOCS_MAX_BYTES=33554432       # 32 MiB
 FLYDOCS_MAX_SYNC_PAGES=10
 
@@ -257,9 +265,9 @@ lifespan rescan picks it up automatically.
 A typical investigation flow:
 
 1. Alert fires on `extract_latency_p95_seconds > 60`.
-2. Find the slow `request_id` in the metrics' high-cardinality labels
+2. Find the slow `correlation_id` in the metrics' high-cardinality labels
    or the access log.
-3. Grep the JSON logs for that `request_id`. Every pipeline node
+3. Grep the JSON logs for that `correlation_id`. Every pipeline node
    stamps its `node_start` / `node_done` / `node_failed` line.
 4. Cross-reference with the trace span tree to find the slowest stage.
 
@@ -274,7 +282,7 @@ outbound_call target=anthropic op=extract        status=ok  latency_ms=12879 mod
 outbound_call target=anthropic op=judge          status=ok  latency_ms=15162 model=anthropic:claude-opus-4-7
 outbound_call target=openai    op=extract        status=ok  latency_ms=11420 model=openai:gpt-4o
 outbound_call target=webhook   op=deliver        status=ok  latency_ms=12    url=... attempt=1 http_status=200 correlation_id=...
-outbound_call target=worker    op=job.run        status=ok  latency_ms=42557 job_id=... attempt=1
+outbound_call target=worker    op=extraction.run status=ok  latency_ms=42557 extraction_id=ext_... attempt=1
 ```
 
 ---
@@ -284,9 +292,9 @@ outbound_call target=worker    op=job.run        status=ok  latency_ms=42557 job
 | Component  | Strategy                                                                                                                                                                |
 | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **API**    | Stateless — scale horizontally. Set uvicorn workers via `--workers` (one per CPU is a good default). Sticky sessions are not required.                                  |
-| **Worker** | Stateless — scale horizontally. Multi-worker safety is enforced at three layers: a per-group `pg_try_advisory_lock` in the Postgres EDA adapter (or competitive consumer for Redis/Kafka), atomic `UPDATE … WHERE … RETURNING` state transitions on `extraction_jobs`, and a periodic reaper sidecar that republishes orphans whose triggering events were lost to a crash. See [concurrency.md](concurrency.md). Right-size against peak job arrival; one worker handles ~1 job/min if each takes ~30 s. |
-| **Bbox worker** | Same scaling story as the main worker, on a separate consumer group (`flydocs-bbox-workers`). Its `BboxReaper` sidecar revives `REFINING_BBOXES` and `PARTIAL_SUCCEEDED` orphans the same way. |
-| **Postgres** | A single primary is fine for the `extraction_jobs` table size you'll see. Add a read replica only if `/api/v1/jobs/{id}` reads dominate and you want to offload them. The EDA outbox grows monotonically — schedule a periodic VACUUM of `pyfly_eda_outbox` if you don't already. |
+| **Worker** | Stateless — scale horizontally. Multi-worker safety is enforced at three layers: a per-group `pg_try_advisory_lock` in the Postgres EDA adapter (or competitive consumer for Redis/Kafka), atomic `UPDATE … WHERE … RETURNING` state transitions on `extractions`, and a periodic reaper sidecar that republishes orphans whose triggering events were lost to a crash. See [concurrency.md](concurrency.md). Right-size against peak arrival; one worker handles ~1 extraction/min if each takes ~30 s. |
+| **Bbox worker** | Same scaling story as the main worker, on a separate consumer group (`flydocs-bbox-workers`). Its `BboxReaper` sidecar revives stale `post_processing.bbox_refinement.status ∈ {pending, running}` orphans the same way. |
+| **Postgres** | A single primary is fine for the `extractions` table size you'll see. Add a read replica only if `/api/v1/extractions/{id}` reads dominate and you want to offload them. The EDA outbox grows monotonically — schedule a periodic VACUUM of `pyfly_eda_outbox` if you don't already. |
 | **Redis**  | Only required when `FLYDOCS_EDA_ADAPTER=redis`. Single primary is fine; the stream durability covers worker restarts. Postgres adapter (default) uses the database itself for the outbox — no Redis dependency. |
 
 ---
@@ -295,7 +303,7 @@ outbound_call target=worker    op=job.run        status=ok  latency_ms=42557 job
 
 | Concern          | Posture                                                                                                                                                       |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Document bytes** | Never written to disk on the service side. Only the base64 payload sits in `extraction_jobs.schema_json` for the job lifetime. Replace with a blob-store pointer if your DB can't keep this. |
+| **Document bytes** | Never written to disk on the service side. Only the base64 payload sits in `extractions.schema_json` for the extraction lifetime. Replace with a blob-store pointer if your DB can't keep this. |
 | **Webhook HMAC** | Mandatory in production — set `FLYDOCS_WEBHOOK_HMAC_SECRET` to a strong random string. The publisher signs every payload with HMAC-SHA256.                  |
 | **API keys**     | Entry-level gate — set `FLYDOCS_API_KEYS` to a comma-separated list. For OIDC / OAuth2, swap in `fireflyframework-pyfly`'s `security-jwt` starter and add a JWT decoder bean. |
 | **LLM keys**     | Provider credentials are read from each provider's standard env var (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`, `MISTRAL_API_KEY`, …). `fireflyframework-genai` resolves the right one from the model id prefix. Use your secrets manager; never bake them into the image. |
