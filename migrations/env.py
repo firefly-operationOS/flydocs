@@ -1,5 +1,5 @@
 # Copyright 2026 Firefly Software Solutions Inc
-"""Alembic env -- sync runner that delegates to ``ExtractionJob`` metadata.
+"""Alembic env -- sync runner that delegates to ``Extraction`` metadata.
 
 The application uses async SQLAlchemy, but Alembic always runs sync;
 we strip the async driver suffix to make the URL synchronous for the
@@ -21,7 +21,7 @@ from sqlalchemy import engine_from_config, pool
 _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT / "src"))
 
-from flydocs.models.entities.extraction_job import Base  # noqa: E402
+from flydocs.models.entities.extraction import Base  # noqa: E402
 
 config = context.config
 
