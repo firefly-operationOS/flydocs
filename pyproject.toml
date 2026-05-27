@@ -21,7 +21,11 @@ dependencies = [
 
     # GenAI metaframework -- FireflyAgent with multimodal content (BinaryContent/ImageUrl)
     # over pydantic-ai. Pulls in the OpenAI / Anthropic / Bedrock providers via pydantic-ai-slim.
-    "fireflyframework-agentic[rest,security,redis]>=26.5.11",
+    # Upper-cap excludes 26.5.21 which pulls a pydantic-ai version line whose
+    # transitive ``mistralai>=2.0.0`` constraint only has pre-release builds
+    # available on PyPI today. Bump the upper bound once mistralai 2.x lands
+    # as a stable release.
+    "fireflyframework-agentic[rest,security,redis]>=26.5.11,<26.5.21",
 
     # Document handling.
     #
