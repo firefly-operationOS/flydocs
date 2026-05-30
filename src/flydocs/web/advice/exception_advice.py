@@ -10,9 +10,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from fireflyframework_agentic.content.binary import BinaryNormalizationError
 from pyfly.web import controller_advice, exception_handler
 
-from flydocs.core.services.binary import BinaryNormalizationError
 from flydocs.core.services.extract.extract_handler import ExtractionTimedOutError
 from flydocs.core.services.extractions.cancel_extraction_handler import (
     ExtractionNotCancellable,
@@ -71,11 +71,13 @@ class ExceptionAdvice:
 
     @exception_handler(BinaryNormalizationError)
     async def binary_normalization_failed(self, exc: BinaryNormalizationError) -> dict[str, Any]:
-        """Map every BinaryNormalizationError subclass to a 422 problem-detail.
+        """Map every BinaryNormalizationError subclass to a problem-detail.
 
-        ``code`` carries the subclass-specific stable identifier
-        (``encrypted_pdf``, ``office_conversion_failed``, ...) so callers
-        can branch on the failure mode without parsing ``detail``.
+        ``status`` comes from the error (``exc.http_status``): 422 for most
+        failures, 415 for ``unsupported_file``. ``code`` carries the
+        subclass-specific stable identifier (``encrypted_pdf``,
+        ``office_conversion_failed``, ``corrupt_pdf``, ...) so callers can
+        branch on the failure mode without parsing ``detail``.
         Registered BEFORE the generic ``ValueError`` handler so the more
         specific one wins.
         """

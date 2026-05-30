@@ -1423,6 +1423,14 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+binary = [
+    { name = "cairosvg" },
+    { name = "extract-msg" },
+    { name = "pillow" },
+    { name = "pillow-heif" },
+    { name = "py7zr" },
+    { name = "pypdf" },
+]
 redis = [
     { name = "redis" },
 ]
@@ -1447,14 +1455,16 @@ requires-dist = [
     { name = "azure-monitor-opentelemetry-exporter", marker = "extra == 'azure'", specifier = ">=1.0.0b30" },
     { name = "azure-storage-blob", marker = "extra == 'corpus-search'", specifier = ">=12.20.0" },
     { name = "boto3", marker = "extra == 'bedrock-embeddings'", specifier = ">=1.35.0" },
+    { name = "cairosvg", marker = "extra == 'binary'", specifier = ">=2.7" },
     { name = "chromadb", marker = "extra == 'vectorstores-chroma'", specifier = ">=0.5.0" },
     { name = "cohere", marker = "extra == 'cohere-embeddings'", specifier = ">=5.0.0" },
     { name = "cryptography", marker = "extra == 'security'", specifier = ">=44.0.0" },
+    { name = "extract-msg", marker = "extra == 'binary'", specifier = ">=0.51" },
     { name = "fastapi", marker = "extra == 'rest'", specifier = ">=0.115.0" },
     { name = "fastmcp", marker = "extra == 'mcp'", specifier = ">=3.2" },
     { name = "fireflyframework-agentic", extras = ["kafka", "rabbitmq", "redis"], marker = "extra == 'queues'" },
     { name = "fireflyframework-agentic", extras = ["markitdown", "watch", "openai-embeddings", "vectorstores-sqlite-vec"], marker = "extra == 'corpus-search'" },
-    { name = "fireflyframework-agentic", extras = ["rest", "queues", "postgres", "mongodb", "security", "azure", "http", "embeddings", "openai-embeddings", "cohere-embeddings", "google-embeddings", "mistral-embeddings", "voyage-embeddings", "azure-embeddings", "bedrock-embeddings", "ollama-embeddings", "corpus-search", "vectorstores-chroma", "vectorstores-pinecone", "vectorstores-qdrant", "vectorstores-sqlite-vec", "markitdown", "watch"], marker = "extra == 'all'" },
+    { name = "fireflyframework-agentic", extras = ["rest", "queues", "postgres", "mongodb", "security", "azure", "embeddings", "openai-embeddings", "cohere-embeddings", "google-embeddings", "mistral-embeddings", "voyage-embeddings", "azure-embeddings", "bedrock-embeddings", "ollama-embeddings", "vectorstores-chroma", "vectorstores-pinecone", "vectorstores-qdrant", "vectorstores-sqlite-vec", "markitdown", "watch", "binary"], marker = "extra == 'all'" },
     { name = "genai-prices", specifier = ">=0.0.1" },
     { name = "google-generativeai", marker = "extra == 'google-embeddings'", specifier = ">=0.8.0" },
     { name = "httpx", specifier = ">=0.28.0" },
@@ -1472,14 +1482,18 @@ requires-dist = [
     { name = "opentelemetry-api", specifier = ">=1.29.0" },
     { name = "opentelemetry-sdk", specifier = ">=1.29.0" },
     { name = "pdfplumber", marker = "extra == 'dev'", specifier = ">=0.11.0" },
+    { name = "pillow", marker = "extra == 'binary'", specifier = ">=11.0" },
+    { name = "pillow-heif", marker = "extra == 'binary'", specifier = ">=0.18" },
     { name = "pinecone", marker = "extra == 'vectorstores-pinecone'", specifier = ">=5.0.0" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=3.8.0" },
+    { name = "py7zr", marker = "extra == 'binary'", specifier = ">=0.22" },
     { name = "pydantic", specifier = ">=2.10.0" },
     { name = "pydantic-ai", specifier = ">=1.56.0" },
     { name = "pydantic-settings", specifier = ">=2.7.0" },
     { name = "pyjwt", marker = "extra == 'security'", specifier = ">=2.10.0" },
     { name = "pyjwt", extras = ["crypto"], marker = "extra == 'azure'", specifier = ">=2.10.0" },
     { name = "pymongo", marker = "extra == 'mongodb'", specifier = ">=4.10.0" },
+    { name = "pypdf", marker = "extra == 'binary'", specifier = ">=4.3.0" },
     { name = "pyright", marker = "extra == 'dev'", specifier = ">=1.1.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24.0" },
@@ -1498,24 +1512,20 @@ requires-dist = [
     { name = "voyageai", marker = "extra == 'voyage-embeddings'", specifier = ">=0.3.0" },
     { name = "watchfiles", marker = "extra == 'watch'", specifier = ">=0.24.0" },
 ]
-provides-extras = ["rest", "kafka", "rabbitmq", "redis", "queues", "postgres", "mongodb", "security", "azure", "mcp", "embeddings", "openai-embeddings", "cohere-embeddings", "google-embeddings", "mistral-embeddings", "markitdown", "voyage-embeddings", "azure-embeddings", "bedrock-embeddings", "ollama-embeddings", "corpus-search", "vectorstores-chroma", "vectorstores-sqlite-vec", "vectorstores-pinecone", "vectorstores-qdrant", "watch", "all", "dev"]
+provides-extras = ["rest", "kafka", "rabbitmq", "redis", "queues", "postgres", "mongodb", "security", "azure", "mcp", "embeddings", "openai-embeddings", "cohere-embeddings", "google-embeddings", "mistral-embeddings", "markitdown", "voyage-embeddings", "azure-embeddings", "bedrock-embeddings", "ollama-embeddings", "corpus-search", "vectorstores-chroma", "vectorstores-sqlite-vec", "vectorstores-pinecone", "vectorstores-qdrant", "watch", "binary", "all", "dev"]
 
 [[package]]
 name = "flydocs"
-version = "26.6.0"
+version = "26.6.1"
 source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },
     { name = "alembic" },
     { name = "asyncpg" },
-    { name = "cairosvg" },
-    { name = "extract-msg" },
-    { name = "fireflyframework-agentic", extra = ["redis", "rest", "security"] },
+    { name = "fireflyframework-agentic", extra = ["binary", "redis", "rest", "security"] },
     { name = "httpx" },
     { name = "pillow" },
-    { name = "pillow-heif" },
     { name = "psycopg", extra = ["binary"] },
-    { name = "py7zr" },
     { name = "pydantic" },
     { name = "pydantic-ai-slim", extra = ["anthropic", "bedrock", "openai"] },
     { name = "pydantic-settings" },
@@ -1553,16 +1563,12 @@ requires-dist = [
     { name = "aiosqlite", specifier = ">=0.22" },
     { name = "alembic", specifier = ">=1.14" },
     { name = "asyncpg", specifier = ">=0.30" },
-    { name = "cairosvg", specifier = ">=2.7" },
     { name = "docling", marker = "extra == 'docling'", specifier = ">=2.93" },
-    { name = "extract-msg", specifier = ">=0.51" },
-    { name = "fireflyframework-agentic", extras = ["rest", "security", "redis"], editable = "../../fireflyframework/fireflyframework-agentic" },
+    { name = "fireflyframework-agentic", extras = ["rest", "security", "redis", "binary"], editable = "../../fireflyframework/fireflyframework-agentic" },
     { name = "httpx", specifier = ">=0.28.0" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.28" },
     { name = "pillow", specifier = ">=11.0" },
-    { name = "pillow-heif", specifier = ">=0.18" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
-    { name = "py7zr", specifier = ">=0.22" },
     { name = "pydantic", specifier = ">=2.10.0" },
     { name = "pydantic-ai-slim", extras = ["anthropic", "openai", "bedrock"], specifier = ">=1.56.0" },
     { name = "pydantic-settings", specifier = ">=2.7.0" },

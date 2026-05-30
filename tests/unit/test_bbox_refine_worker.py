@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
+from fireflyframework_agentic.content.binary import BinaryConfig, BinaryNormalizer
 from reportlab.pdfgen import canvas
 
 from flydocs.config import IDPSettings
@@ -20,12 +21,6 @@ from flydocs.core.services.bbox import (
     ValueMatcher,
     WordRouter,
 )
-from flydocs.core.services.binary import BinaryNormalizer
-from flydocs.core.services.binary.archive import ArchiveUnpacker
-from flydocs.core.services.binary.email import EmailUnpacker
-from flydocs.core.services.binary.image import ImageNormalizer
-from flydocs.core.services.binary.libreoffice import LibreOfficeConverter
-from flydocs.core.services.binary.pdf_guard import PdfGuard
 from flydocs.core.services.workers.bbox_refine_worker import BboxRefineWorker
 from flydocs.interfaces.dtos.bbox import BboxSource, BoundingBox
 from flydocs.interfaces.dtos.extract import Document, ExtractionResult, PipelineMeta
@@ -155,15 +150,7 @@ class _StubWebhook:
 
 
 def _make_normalizer() -> BinaryNormalizer:
-    settings = IDPSettings(office_converter="libreoffice")
-    return BinaryNormalizer(
-        settings=settings,
-        pdf_guard=PdfGuard(),
-        image=ImageNormalizer(),
-        office=LibreOfficeConverter(settings=settings),
-        archive=ArchiveUnpacker(settings=settings),
-        email_=EmailUnpacker(),
-    )
+    return BinaryNormalizer(config=BinaryConfig(office_converter="libreoffice", wrap_text_as_pdf=True))
 
 
 def _make_refiner() -> BboxRefiner:

@@ -2,7 +2,7 @@
 name = "flydocs"
 # CalVer YY.MM.PP -- bumped per release. Note that PEP 440 normalises
 # ``26.05.01`` -> ``26.5.1`` in the built wheel filename.
-version = "26.6.0"
+version = "26.6.1"
 description = "Pure-multimodal Intelligent Document Processing service: structured fields + bounding boxes, validation, authenticity checks, LLM judge, and a business-rule engine. Sync + queue-backed async APIs over fireflyframework-pyfly and -agentic. Part of Firefly OperationOS, platform-agnostic by design."
 readme = "README.md"
 requires-python = ">=3.13"
@@ -21,39 +21,23 @@ dependencies = [
 
     # GenAI metaframework -- FireflyAgent with multimodal content (BinaryContent/ImageUrl)
     # over pydantic-ai. Pulls in the OpenAI / Anthropic / Bedrock providers via pydantic-ai-slim.
-    "fireflyframework-agentic[rest,security,redis]>=26.5.11",
+    "fireflyframework-agentic[rest,security,redis,binary]>=26.5.11",
 
-    # Document handling.
+    # Document handling. Binary normalisation (PDF / Office / images /
+    # archives / emails -> renderable bytes) now lives in the framework's
+    # ``fireflyframework-agentic[binary]`` extra requested above, which
+    # supplies pypdf, Pillow, pillow-heif, cairosvg, py7zr and extract-msg.
+    # The deps below back flydocs-specific paths that are NOT part of that
+    # stack:
     #
-    # ``pypdf`` -- cheap page counting + encrypted-PDF detection in the
-    # binary normalizer (raw bytes still ship straight to the multimodal
-    # LLM, no local rasterisation for the extraction path).
-    #
-    # ``Pillow`` + ``pillow-heif`` -- the binary normalizer uses Pillow
-    # to canonicalise raster inputs the LLM provider can't natively read
-    # (HEIC/HEIF iPhone photos, multi-frame TIFF fax scans, animated GIFs,
-    # SVG via cairosvg) into PNG or multi-page PDF.
-    #
-    # ``cairosvg`` -- vector SVG rasterisation; the providers don't accept
-    # SVG so we render to PNG before shipping.
-    #
-    # ``py7zr`` -- 7-Zip archive expansion (.zip and .tar are stdlib).
-    #
-    # ``extract-msg`` -- Outlook .msg parsing; .eml is stdlib ``email``.
-    #
-    # ``pymupdf`` -- bbox refiner reads the embedded text layer of
-    # born-digital PDFs at sub-pixel accuracy via ``page.get_text("words")``.
-    # MIT-licensed; no JVM, no native subprocess.
-    #
-    # ``rapidfuzz`` -- bbox refiner's value matcher (Levenshtein over
-    # contiguous word / character spans, with NFC normalisation +
-    # script-aware tokenisation). Pure C++; no PyTorch dep.
+    # * ``pypdf``     -- page slicing (``pdf_slicer``) + the extraction loader.
+    # * ``Pillow``    -- the Tesseract OCR engine's raster handling.
+    # * ``pymupdf``   -- bbox refiner reads the embedded text layer of
+    #   born-digital PDFs at sub-pixel accuracy via ``page.get_text("words")``.
+    # * ``rapidfuzz`` -- bbox refiner's value matcher (Levenshtein over
+    #   contiguous word / character spans). Pure C++; no PyTorch dep.
     "pypdf>=4.3.0",
     "Pillow>=11.0",
-    "pillow-heif>=0.18",
-    "cairosvg>=2.7",
-    "py7zr>=0.22",
-    "extract-msg>=0.51",
     "pymupdf>=1.24",
     "rapidfuzz>=3.10",
 

@@ -39,6 +39,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
+from fireflyframework_agentic.content.binary import BinaryNormalizer
 from fireflyframework_agentic.pipeline import (
     CallableStep,
     PipelineBuilder,
@@ -55,7 +56,6 @@ from flydocs.core.services.authenticity import (
     VisualAuthenticityChecker,
 )
 from flydocs.core.services.bbox import BboxRefiner, BboxValidator
-from flydocs.core.services.binary import BinaryNormalizer
 from flydocs.core.services.classification import (
     UNMATCHED,
     ClassificationResult,

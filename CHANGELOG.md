@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses **CalVer `YY.M.PP`** (PEP 440 may normalise patch numbers
 for the Python wheel — e.g. `26.06.00` → `26.6.0`).
 
+## [26.6.1] - 2026-05-30
+
+### Changed
+
+- **Binary normalisation moved to the framework.** The local
+  `core/services/binary/` package is deleted; flydocs now consumes
+  `fireflyframework_agentic.content.binary` (the unified normaliser shared
+  with flycanon). `BinaryNormalizer` is wired in `IDPCoreConfiguration` from
+  a `BinaryConfig` mapped off `IDPSettings`; `OfficeConverter` stays
+  pluggable. Rows are now `BinaryArtifact` (same `bytes/media_type/filename/
+  page_count/derived_from` fields as the old `NormalisedBinary`, plus a
+  `kind` token), so downstream plumbing is unchanged.
+- **Wire change:** unsupported files now return HTTP **415** (was 422); the
+  error `code` stays `unsupported_file`. Corrupt PDFs now carry the more
+  specific `corrupt_pdf` code (was `binary_normalization_error`); status
+  unchanged (422).
+- Dropped the now-redundant direct deps `pillow-heif`, `cairosvg`, `py7zr`
+  and `extract-msg` — they ship via `fireflyframework-agentic[binary]`.
+  `pypdf`, `Pillow`, `pymupdf` and `rapidfuzz` stay (used by the slicer,
+  loader, OCR engine and bbox refiner).
+
 ## [26.6.0] - 2026-05-26
 
 ### BREAKING CHANGES — API v1 redesign

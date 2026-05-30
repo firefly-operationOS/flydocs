@@ -121,13 +121,13 @@ def cmd_bbox_worker(_: argparse.Namespace) -> int:
     """Boot pyfly, run :class:`BboxRefineWorker` + :class:`BboxReaper` together."""
 
     async def _run() -> None:
+        from fireflyframework_agentic.content.binary import BinaryNormalizer
         from pyfly.core import PyFlyApplication
         from pyfly.eda import EventPublisher
 
         from flydocs.app import FlydocsApplication
         from flydocs.config import IDPSettings
         from flydocs.core.services.bbox import BboxRefiner
-        from flydocs.core.services.binary import BinaryNormalizer
         from flydocs.core.services.webhook import WebhookPublisher
         from flydocs.core.services.workers.bbox_reaper import BboxReaper
         from flydocs.core.services.workers.bbox_refine_worker import BboxRefineWorker

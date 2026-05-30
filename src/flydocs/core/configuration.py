@@ -27,6 +27,12 @@ that is not picked up by a stereotype decorator
 
 from __future__ import annotations
 
+from fireflyframework_agentic.content.binary import (
+    BinaryConfig,
+    BinaryNormalizer,
+    OfficeConverter,
+    build_office_converter,
+)
 from pyfly.container import bean, configuration
 from pyfly.data.relational.health import SqlAlchemyHealthIndicator
 from pyfly.eda import EventPublisher
@@ -47,16 +53,6 @@ from flydocs.core.services.bbox import (
     OcrEngine,
     TesseractOcrEngine,
     ValueMatcher,
-)
-from flydocs.core.services.binary import (
-    ArchiveUnpacker,
-    BinaryNormalizer,
-    EmailUnpacker,
-    GotenbergConverter,
-    ImageNormalizer,
-    LibreOfficeConverter,
-    OfficeConverter,
-    PdfGuard,
 )
 from flydocs.core.services.classification import DocumentClassifier
 from flydocs.core.services.escalation import JudgeEscalator
@@ -259,40 +255,45 @@ class IDPCoreConfiguration:
     # ------------------------------------------------------------------
 
     @bean
-    def office_converter(self, settings: IDPSettings) -> OfficeConverter:
-        kind = (settings.office_converter or "gotenberg").lower()
-        if kind == "libreoffice":
-            return LibreOfficeConverter(settings=settings)
-        if kind == "gotenberg":
-            return GotenbergConverter(settings=settings)
-        raise ValueError(
-            f"unknown FLYDOCS_OFFICE_CONVERTER={settings.office_converter!r}; "
-            "expected 'gotenberg' or 'libreoffice'"
+    def binary_config(self, settings: IDPSettings) -> BinaryConfig:
+        """Map flydocs settings onto the framework's host-agnostic BinaryConfig.
+
+        ``wrap_text_as_pdf`` is True: plain text / markdown / CSV are rendered
+        to PDF via the office converter so the multimodal LLM receives
+        renderable bytes (flydocs is pure-multimodal, no text loader).
+        """
+        return BinaryConfig(
+            normalize_enabled=settings.binary_normalize_enabled,
+            max_recursion_depth=settings.binary_max_recursion_depth,
+            max_expanded_files=settings.binary_max_expanded_files,
+            wrap_text_as_pdf=True,
+            office_converter=settings.office_converter,
+            gotenberg_url=settings.gotenberg_url,
+            gotenberg_timeout_s=float(settings.gotenberg_timeout_s),
+            libreoffice_path=settings.binary_libreoffice_path,
+            libreoffice_timeout_s=float(settings.binary_libreoffice_timeout_s),
         )
+
+    @bean
+    def office_converter(self, binary_config: BinaryConfig) -> OfficeConverter:
+        kind = (binary_config.office_converter or "gotenberg").lower()
+        if kind not in {"gotenberg", "libreoffice"}:
+            raise ValueError(
+                f"unknown FLYDOCS_OFFICE_CONVERTER={binary_config.office_converter!r}; "
+                "expected 'gotenberg' or 'libreoffice'"
+            )
+        return build_office_converter(binary_config)
 
     @bean
     def binary_normalizer(
         self,
-        settings: IDPSettings,
-        pdf_guard: PdfGuard,
-        image_normalizer: ImageNormalizer,
+        binary_config: BinaryConfig,
         office_converter: OfficeConverter,
-        archive_unpacker: ArchiveUnpacker,
-        email_unpacker: EmailUnpacker,
     ) -> BinaryNormalizer:
-        return BinaryNormalizer(
-            settings=settings,
-            pdf_guard=pdf_guard,
-            image=image_normalizer,
-            office=office_converter,
-            archive=archive_unpacker,
-            email_=email_unpacker,
-        )
-
-    # PdfGuard / ImageNormalizer / ArchiveUnpacker / EmailUnpacker carry
-    # ``@service`` decorators -- pyfly autoscan picks them up via the
-    # ``flydocs.core`` scan_packages entry. They are listed here only
-    # so the dependency graph is auditable from this single file.
+        # The framework BinaryNormalizer constructs its own PdfGuard /
+        # ImageNormalizer / ArchiveUnpacker / EmailUnpacker from the config;
+        # only the pluggable OfficeConverter is injected.
+        return BinaryNormalizer(config=binary_config, office=office_converter)
 
     @bean
     def visual_checker(self, settings: IDPSettings, prompts: PromptCatalog) -> VisualAuthenticityChecker:

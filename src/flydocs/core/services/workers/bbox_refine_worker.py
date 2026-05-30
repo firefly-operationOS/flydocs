@@ -45,13 +45,13 @@ import time
 from datetime import UTC, datetime
 from typing import Any
 
+from fireflyframework_agentic.content.binary import BinaryArtifact, BinaryNormalizer
 from pyfly.eda import EventEnvelope as EdaEnvelope
 from pyfly.eda import EventPublisher
 
 from flydocs.config import IDPSettings
 from flydocs.core.observability import log_outbound
 from flydocs.core.services.bbox import BboxRefiner
-from flydocs.core.services.binary import BinaryNormalizer, NormalisedBinary
 from flydocs.core.services.extractions._projector import row_to_extraction
 from flydocs.core.services.webhook import WebhookPublisher
 from flydocs.interfaces.dtos.event import (
@@ -286,7 +286,7 @@ class BboxRefineWorker:
         if not sources:
             raise ValueError(f"extraction {row.id} has no decodable file bytes in schema_json")
 
-        normalised: list[NormalisedBinary] = []
+        normalised: list[BinaryArtifact] = []
         for raw_bytes, media_type, name in sources:
             normalised.extend(
                 await self._normalizer.normalise(
@@ -297,7 +297,7 @@ class BboxRefineWorker:
             )
         # Index by filename for source_file lookups. Multi-row inputs
         # carry their normalised filename in ``row.filename``.
-        by_filename: dict[str, NormalisedBinary] = {row.filename: row for row in normalised}
+        by_filename: dict[str, BinaryArtifact] = {row.filename: row for row in normalised}
 
         language_hint = (row.options_json or {}).get("language_hint")
 
