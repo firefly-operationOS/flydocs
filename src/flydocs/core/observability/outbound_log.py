@@ -183,7 +183,7 @@ def _extract_usage_fields(result: Any, model: str) -> dict[str, Any]:
         # fireflyframework-agentic and is optional. ``genai_prices_cost``
         # consults the bundled ``genai-prices`` database and returns the
         # USD estimate, or ``None`` when the model is unknown.
-        from fireflyframework_agentic.observability.cost import (  # pyright: ignore[reportMissingImports]
+        from fireflyframework_agentic.observability.cost_resolvers import (
             CostContext,
             genai_prices_cost,
         )
