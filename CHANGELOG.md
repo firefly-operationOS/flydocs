@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses **CalVer `YY.M.PP`** (PEP 440 may normalise patch numbers
 for the Python wheel — e.g. `26.06.00` → `26.6.0`).
 
+## [26.6.2] - 2026-05-31
+
+### Changed
+
+- **Open-sourced under the Apache License 2.0.** Added the full `LICENSE`
+  at the repository root and in both SDKs, and prepended the Apache 2.0
+  header to every source file. The copyright holder is now Firefly
+  Software Foundation, and the repository is public.
+- Declared `org.opencontainers.image.licenses=Apache-2.0` on the published
+  container image and surfaced the license in the README and OpenAPI metadata.
+- Realigned `__version__` with the packaged release version.
+
+### Removed
+
+- Removed the bundled `flydocs-whitepaper.pdf` from the repository and its
+  git history.
+
 ## [26.6.1] - 2026-05-30
 
 ### Changed

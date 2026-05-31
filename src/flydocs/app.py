@@ -29,7 +29,7 @@ from pyfly.starters.core import enable_core_stack
 @enable_core_stack
 @pyfly_application(
     name="flydocs",
-    version="26.5.1",
+    version="26.6.2",
     description=(
         "flydocs -- pure-multimodal document extraction with bounding "
         "boxes. Part of Firefly OperationOS, platform-agnostic."

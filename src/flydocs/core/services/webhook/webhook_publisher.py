@@ -82,7 +82,7 @@ class WebhookPublisher:
         body = payload.model_dump_json(by_alias=True).encode("utf-8")
         headers = {
             "Content-Type": "application/json",
-            "User-Agent": "flydocs/26.5.1",
+            "User-Agent": "flydocs/26.6.2",
         }
         if extra_headers:
             for name, value in extra_headers.items():

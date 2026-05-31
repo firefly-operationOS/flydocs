@@ -32,4 +32,4 @@ dedicated module so :mod:`flydocs_sdk` can import it without circular
 imports and so the build pipeline can read it without parsing TOML.
 """
 
-__version__ = "26.6.0"
+__version__ = "26.6.2"
