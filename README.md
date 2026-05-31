@@ -16,6 +16,7 @@ independent of any particular product or vertical.
 [![PR gate](https://github.com/firefly-operationOS/flydocs/actions/workflows/pr-gate.yaml/badge.svg)](https://github.com/firefly-operationOS/flydocs/actions/workflows/pr-gate.yaml)
 [![Docker publish](https://github.com/firefly-operationOS/flydocs/actions/workflows/docker-publish.yaml/badge.svg)](https://github.com/firefly-operationOS/flydocs/actions/workflows/docker-publish.yaml)
 [![Image](https://img.shields.io/badge/ghcr-flydocs-blue)](https://github.com/firefly-operationOS/flydocs/pkgs/container/flydocs)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
 </div>
 
@@ -490,6 +491,7 @@ Releases, install with `uv add <release-url>`) · [Java / Spring
 Boot](sdks/java/) (`com.firefly.flydocs:flydocs-sdk` on GitHub
 Packages). See [sdks/README.md](sdks/) for install + quickstart.
 
-Copyright © 2026 Firefly Software Foundation
+Licensed under the [Apache License 2.0](LICENSE).
+Copyright © 2024-2026 Firefly Software Foundation
 
 </div>

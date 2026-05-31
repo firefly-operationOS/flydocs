@@ -99,6 +99,13 @@ def install_openapi(
         info.setdefault(
             "contact", {"name": "Firefly OperationOS", "url": "https://github.com/firefly-operationOS"}
         )
+        info.setdefault(
+            "license",
+            {
+                "name": "Apache-2.0",
+                "url": "https://github.com/firefly-operationOS/flydocs/blob/main/LICENSE",
+            },
+        )
 
         app.openapi_schema = spec
         logger.info(
