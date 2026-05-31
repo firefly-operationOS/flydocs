@@ -106,3 +106,7 @@ postgres_data/
 *.bak
 *.orig
 site/
+
+# --- Whitepaper PDF ----------------------------------------------------------
+# Not distributed in the repository. Regenerate from source if needed.
+flydocs-whitepaper.pdf

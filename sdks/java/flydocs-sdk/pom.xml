@@ -101,7 +101,7 @@
                         <manifestEntries>
                             <Implementation-Title>flydocs-sdk</Implementation-Title>
                             <Implementation-Version>${project.version}</Implementation-Version>
-                            <Built-By>Firefly Software Solutions Inc</Built-By>
+                            <Built-By>Firefly Software Foundation</Built-By>
                         </manifestEntries>
                     </archive>
                 </configuration>

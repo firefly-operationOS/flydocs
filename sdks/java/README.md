@@ -266,4 +266,4 @@ FLYDOCS_BASE_URL=http://localhost:8400 \
 
 ## License
 
-Apache-2.0. Copyright (c) 2026 Firefly Software Solutions Inc.
+Apache-2.0. Copyright (c) 2026 Firefly Software Foundation.

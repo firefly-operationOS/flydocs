@@ -179,7 +179,7 @@ org.opencontainers.image.title       flydocs
 org.opencontainers.image.description flydocs -- pure-multimodal Intelligent Document Processing service…
 org.opencontainers.image.source      https://github.com/firefly-operationOS/flydocs
 org.opencontainers.image.licenses    Proprietary
-org.opencontainers.image.vendor      Firefly Software Solutions Inc
+org.opencontainers.image.vendor      Firefly Software Foundation
 ```
 
 ---

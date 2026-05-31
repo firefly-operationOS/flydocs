@@ -490,6 +490,6 @@ Releases, install with `uv add <release-url>`) · [Java / Spring
 Boot](sdks/java/) (`com.firefly.flydocs:flydocs-sdk` on GitHub
 Packages). See [sdks/README.md](sdks/) for install + quickstart.
 
-Copyright © 2026 Firefly Software Solutions Inc
+Copyright © 2026 Firefly Software Foundation
 
 </div>

@@ -197,4 +197,4 @@ uv build
 
 ## License
 
-Apache-2.0. Copyright © 2026 Firefly Software Solutions Inc.
+Apache-2.0. Copyright © 2026 Firefly Software Foundation.

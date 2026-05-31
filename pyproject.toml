@@ -6,11 +6,11 @@ version = "26.6.1"
 description = "Pure-multimodal Intelligent Document Processing service: structured fields + bounding boxes, validation, authenticity checks, LLM judge, and a business-rule engine. Sync + queue-backed async APIs over fireflyframework-pyfly and -agentic. Part of Firefly OperationOS, platform-agnostic by design."
 readme = "README.md"
 requires-python = ">=3.13"
-# flydocs (the service) is proprietary -- no public license is granted.
-# Only the SDKs under ``sdks/python`` and ``sdks/java`` are released
-# under Apache-2.0; each carries its own LICENSE file.
+# Released under the Apache License 2.0 -- see the LICENSE file. The SDKs
+# under ``sdks/python`` and ``sdks/java`` carry their own LICENSE files.
+license = { text = "Apache-2.0" }
 authors = [
-    { name = "Firefly Software Solutions Inc" },
+    { name = "Firefly Software Foundation" },
 ]
 
 dependencies = [

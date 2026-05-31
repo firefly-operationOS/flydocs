@@ -112,7 +112,7 @@ Expected: ImportError / ModuleNotFoundError.
 
 ```python
 # src/flydocs/interfaces/enums/extraction_status.py
-# Copyright 2026 Firefly Software Solutions Inc
+# Copyright 2026 Firefly Software Foundation
 """Async extraction lifecycle states.
 
 One linear state machine: queued -> running -> succeeded | failed | cancelled.
@@ -214,7 +214,7 @@ Expected: FAIL with capital-letter comparison errors.
 Replace the entire body of `src/flydocs/interfaces/enums/status.py` with:
 
 ```python
-# Copyright 2026 Firefly Software Solutions Inc
+# Copyright 2026 Firefly Software Foundation
 """Status enums shared across nodes (validation rules, judge verdicts,
 content-authenticity verdicts)."""
 
@@ -305,7 +305,7 @@ Expected: FAIL (no OBJECT member).
 Replace `src/flydocs/interfaces/enums/field_type.py` with:
 
 ```python
-# Copyright 2026 Firefly Software Solutions Inc
+# Copyright 2026 Firefly Software Foundation
 """Supported field primitives + standard formats for the public extraction schema."""
 
 from __future__ import annotations
@@ -388,7 +388,7 @@ This reveals the full `StandardValidatorType` member list. Copy the **member val
 Create `src/flydocs/interfaces/enums/validator.py`:
 
 ```python
-# Copyright 2026 Firefly Software Solutions Inc
+# Copyright 2026 Firefly Software Foundation
 """Built-in validator catalogue applied to extracted field values."""
 
 from __future__ import annotations
@@ -511,7 +511,7 @@ Expected: FAIL on the EMPTY / NONE / empty() assertions.
 Replace `src/flydocs/interfaces/dtos/bbox.py` with:
 
 ```python
-# Copyright 2026 Firefly Software Solutions Inc
+# Copyright 2026 Firefly Software Foundation
 """Bounding box in normalised image-space coordinates.
 
 All values are floats in [0, 1]. (0, 0) is the top-left of the rendered
@@ -623,7 +623,7 @@ Expected: ImportError.
 Create `src/flydocs/interfaces/dtos/validator.py`:
 
 ```python
-# Copyright 2026 Firefly Software Solutions Inc
+# Copyright 2026 Firefly Software Foundation
 """ValidatorSpec -- request-side declaration for one built-in check."""
 
 from __future__ import annotations
@@ -793,7 +793,7 @@ Expected: many failures (Field doesn't exist yet).
 Replace `src/flydocs/interfaces/dtos/field.py` with:
 
 ```python
-# Copyright 2026 Firefly Software Solutions Inc
+# Copyright 2026 Firefly Software Foundation
 """Field-level DTOs -- schema in, extraction out.
 
 One recursive Field handles primitives, arrays, and objects. Arrays
@@ -1002,7 +1002,7 @@ Expected: ImportError.
 Create `src/flydocs/interfaces/dtos/document_type.py`:
 
 ```python
-# Copyright 2026 Firefly Software Solutions Inc
+# Copyright 2026 Firefly Software Foundation
 """DocumentTypeSpec -- schema template for one expected document type."""
 
 from __future__ import annotations
@@ -1130,7 +1130,7 @@ Expected: many failures.
 Replace `src/flydocs/interfaces/dtos/rule.py` with:
 
 ```python
-# Copyright 2026 Firefly Software Solutions Inc
+# Copyright 2026 Firefly Software Foundation
 """Business-rule DTOs.
 
 Rules express boolean / categorical decisions over extracted fields,
@@ -1263,7 +1263,7 @@ Expected: FAIL (VisualValidationOutcome name vs VisualCheckResult; `content` not
 Replace `src/flydocs/interfaces/dtos/authenticity.py` with:
 
 ```python
-# Copyright 2026 Firefly Software Solutions Inc
+# Copyright 2026 Firefly Software Foundation
 """Authenticity DTOs -- visual + content integrity outputs."""
 
 from __future__ import annotations
@@ -1387,7 +1387,7 @@ Expected: FAIL on extra-keys-rejected test.
 Replace `src/flydocs/interfaces/dtos/transformation.py` with:
 
 ```python
-# Copyright 2026 Firefly Software Solutions Inc
+# Copyright 2026 Firefly Software Foundation
 """Public DTOs for the transform pipeline stage."""
 
 from __future__ import annotations
@@ -1577,7 +1577,7 @@ Expected: many ImportErrors / AttributeErrors.
 Replace `src/flydocs/interfaces/dtos/extract.py` with:
 
 ```python
-# Copyright 2026 Firefly Software Solutions Inc
+# Copyright 2026 Firefly Software Foundation
 """Top-level request / response DTOs for the public extraction API."""
 
 from __future__ import annotations
@@ -1915,7 +1915,7 @@ Expected: ImportError.
 Create `src/flydocs/interfaces/dtos/extraction.py`:
 
 ```python
-# Copyright 2026 Firefly Software Solutions Inc
+# Copyright 2026 Firefly Software Foundation
 """DTOs for the async extraction lifecycle.
 
 Endpoints: POST /api/v1/extractions, GET /api/v1/extractions{,/id,/id/result},
@@ -2086,7 +2086,7 @@ Expected: ImportError.
 Replace `src/flydocs/interfaces/dtos/event.py` with:
 
 ```python
-# Copyright 2026 Firefly Software Solutions Inc
+# Copyright 2026 Firefly Software Foundation
 """Unified event + webhook envelope.
 
 The same shape is published over the EDA bus and posted to webhook
