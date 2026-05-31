@@ -23,8 +23,8 @@ Algorithm (per page in scope):
 Format coercion (cheap, additive): when the literal target doesn't
 match, retry with light variants (digits-only for numeric, basic ISO
 date alternatives for ``YYYY-MM-DD``-looking strings). Heavier date
-parsing is intentionally Phase 1.5 -- the basic variants cover most of
-the real Spanish notarial-deed corpus.
+parsing is intentionally out of scope -- the basic variants cover most
+of the real Spanish notarial-deed corpus.
 
 The matcher is multilingual by construction: NFC + casefold work for
 every Unicode script; the spaced/unspaced split handles the

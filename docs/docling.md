@@ -47,7 +47,7 @@ Implements the same `OcrEngine` protocol as `NoneOcrEngine` and
 What it produces, per page:
 
 - Word-level `PageWords` with bboxes normalised to `[0, 1]` top-left
-  image-space — same contract as the legacy engines.
+  image-space — same contract as the other engines.
 - `Word.reading_order` (per-page monotonic counter) on every emitted
   token.
 - `Word.table_id` / `row_idx` / `col_idx` on cells that came out of a
@@ -58,8 +58,8 @@ What it produces, per page:
 The value matcher consumes the new metadata transparently:
 `ValueMatcher._match_spaced` / `_match_unspaced` break score ties by
 **lowest `reading_order`**. When the same value appears in a header
-and in body text, the header (earlier in document) wins. Legacy
-engines that don't populate `reading_order` are unchanged.
+and in body text, the header (earlier in document) wins. Engines
+that don't populate `reading_order` fall back to first-encountered.
 
 ### 2b. `DoclingTextAnchor` — pre-extraction Markdown anchor
 
@@ -147,7 +147,7 @@ docker buildx build \
 
 | Env var | Default | Effect |
 |---|---|---|
-| `FLYDOCS_BBOX_REFINE_OCR_ENGINE` | `tesseract` | `docling` swaps in `DoclingOcrEngine` for image-PDFs + rasters. `none` keeps the LLM bbox. `tesseract` is the legacy default. |
+| `FLYDOCS_BBOX_REFINE_OCR_ENGINE` | `tesseract` | `docling` swaps in `DoclingOcrEngine` for image-PDFs + rasters. `none` keeps the LLM bbox. `tesseract` is the default. |
 | `FLYDOCS_EXTRACTION_TEXT_ANCHOR` | `none` | `docling` splices a Markdown anchor into every extract / extract-retry call. |
 | `FLYDOCS_EXTRACTION_TEXT_ANCHOR_MAX_CHARS` | `12000` | Hard ceiling on the anchor length. Truncated on a paragraph boundary when in reach, otherwise hard-cut with a visible sentinel. Set to `0` to silently disable even when the engine is configured. |
 
@@ -190,7 +190,7 @@ Anthropic prompt caching keys on the exact byte prefix of
 message and changes per document, so it **moves the cache boundary**.
 Two follow-ups:
 
-- Cache hit-rate drops on documents that previously shared a system
+- Cache hit-rate drops on documents that would otherwise share a system
   prompt prefix — the warm-cache premium increases relative to the
   binary-only path. Measure before flipping on for high-volume
   workloads.

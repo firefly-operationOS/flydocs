@@ -205,8 +205,7 @@ def test_tie_break_prefers_earlier_reading_order() -> None:
 
 def test_tie_break_is_inert_when_reading_order_unset() -> None:
     """When no word carries reading_order (PyMuPDF, Tesseract path)
-    the tie-break degrades to "first encountered wins" -- the existing
-    behaviour, no regression for legacy engines.
+    the tie-break degrades to "first encountered wins".
     """
     page = _page(
         _words(

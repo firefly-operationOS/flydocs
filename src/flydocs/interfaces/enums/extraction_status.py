@@ -33,9 +33,9 @@ class ExtractionStatus(StrEnum):
     def has_result(self) -> bool:
         """True when the extraction carries a readable ExtractionResult.
 
-        Only ``succeeded`` does; partial / refining states no longer exist in
-        v1 — refinement runs as additive post-processing on a fully-succeeded
-        result.
+        Only ``succeeded`` does. Refinement runs as additive post-processing
+        on a fully-succeeded result, so there are no partial / refining
+        result states.
         """
         return self is ExtractionStatus.SUCCEEDED
 

@@ -275,7 +275,8 @@ async def test_extraction_worker_retry_path_uses_atomic_requeue() -> None:
     await worker._process(ext.id)
 
     assert "requeue_for_retry" in repo.calls
-    # The legacy 'update(status=...)' path is gone.
+    # Status changes go through atomic transitions, never the generic
+    # 'update(status=...)' path.
     assert not any(call.startswith("update:") and "status" in call for call in repo.calls)
 
 

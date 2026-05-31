@@ -91,6 +91,6 @@ app = create_app(
 )
 # The W3C correlation surface (X-Correlation-Id / X-Request-Id /
 # X-Tenant-Id / traceparent / tracestate) is wired into pyfly's default
-# WebFilter chain since pyfly 26.5.5 via
+# WebFilter chain via
 # ``pyfly.web.adapters.starlette.filters.CorrelationFilter`` -- no
 # extra middleware to register here.

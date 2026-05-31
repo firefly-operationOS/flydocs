@@ -10,21 +10,18 @@ for the Python wheel — e.g. `26.06.00` → `26.6.0`).
 
 ### Changed
 
-- **Binary normalisation moved to the framework.** The local
-  `core/services/binary/` package is deleted; flydocs now consumes
-  `fireflyframework_agentic.content.binary` (the unified normaliser shared
-  with flycanon). `BinaryNormalizer` is wired in `IDPCoreConfiguration` from
-  a `BinaryConfig` mapped off `IDPSettings`; `OfficeConverter` stays
-  pluggable. Rows are now `BinaryArtifact` (same `bytes/media_type/filename/
-  page_count/derived_from` fields as the old `NormalisedBinary`, plus a
-  `kind` token), so downstream plumbing is unchanged.
-- **Wire change:** unsupported files now return HTTP **415** (was 422); the
-  error `code` stays `unsupported_file`. Corrupt PDFs now carry the more
-  specific `corrupt_pdf` code (was `binary_normalization_error`); status
-  unchanged (422).
-- Dropped the now-redundant direct deps `pillow-heif`, `cairosvg`, `py7zr`
-  and `extract-msg` — they ship via `fireflyframework-agentic[binary]`.
-  `pypdf`, `Pillow`, `pymupdf` and `rapidfuzz` stay (used by the slicer,
+- **Binary normalisation runs on the framework's
+  `fireflyframework_agentic.content.binary`.** `BinaryNormalizer` is wired
+  in `IDPCoreConfiguration` from a `BinaryConfig` mapped off `IDPSettings`;
+  `OfficeConverter` stays pluggable. Rows are `BinaryArtifact`
+  (`bytes/media_type/filename/page_count/derived_from` plus a `kind`
+  token).
+- **Wire contract:** unsupported files return HTTP **415**; the error
+  `code` is `unsupported_file`. Corrupt PDFs carry the specific
+  `corrupt_pdf` code (422).
+- The binary dependencies `pillow-heif`, `cairosvg`, `py7zr` and
+  `extract-msg` ship via `fireflyframework-agentic[binary]`. `pypdf`,
+  `Pillow`, `pymupdf` and `rapidfuzz` are direct deps (used by the slicer,
   loader, OCR engine and bbox refiner).
 
 ## [26.6.0] - 2026-05-26

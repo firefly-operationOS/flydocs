@@ -14,13 +14,13 @@ image-space. The difference is what's behind the slot:
   on text regions. The result is more accurate words on noisy scans and
   structured spatial metadata for free (reading order, table cells).
 
-For this Phase 1 adapter we only consume the **text + bbox** signal --
-every Docling text item is split into whitespace-delimited tokens and
+Every Docling text item is split into whitespace-delimited tokens and
 emitted as :class:`Word` rows. Token bboxes are distributed across the
 parent rectangle proportionally to character count, so the union of any
-contiguous token window reconstructs the original phrase bbox. The
-table-cell / reading-order surface is left for a follow-up that extends
-the matcher protocol.
+contiguous token window reconstructs the original phrase bbox. Each
+token also carries Docling's reading-order index, and cells from a
+``TableItem`` carry their table id and row / column offsets, which the
+matcher protocol uses as tie-break signals.
 
 Docling pulls in PyTorch + Hugging Face models and is an **optional**
 dependency (``pip install flydocs[docling]``). The import is lazy

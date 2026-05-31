@@ -116,20 +116,16 @@ def test_genai_prices_resolves_our_anthropic_models() -> None:
     response stops reporting ``$0.00`` silently.
 
     Skipped when the framework's cost module isn't reachable on the
-    Python path (e.g. when CI clones an older ``fireflyframework-agentic``
-    ref that pre-dates the resolver split). The cost telemetry feature
-    is itself optional -- :func:`flydocs.core.observability.outbound_log._extract_usage_fields`
+    Python path. The cost telemetry feature is itself optional --
+    :func:`flydocs.core.observability.outbound_log._extract_usage_fields`
     already swallows the same ImportError silently -- so skipping here
     only loses test coverage, not service behaviour.
     """
-    # ``fireflyframework_agentic`` shipped the cost helpers under two
-    # module paths over its lifetime: the legacy ``observability.cost``
-    # package (Foundation v25-26) and the flat
-    # ``observability.cost_resolvers`` module (Foundation v26.6+). Try
-    # both so the test survives a framework upgrade either way; skip
-    # only when both paths are absent (the cost feature itself is
-    # optional -- the production extractor swallows the same
-    # ImportError silently).
+    # The cost helpers live on the framework's
+    # ``observability.cost_resolvers`` module, with
+    # ``observability.cost`` as a secondary import path. Try both; skip
+    # only when neither is present (the cost feature itself is optional --
+    # the production extractor swallows the same ImportError silently).
     try:
         from fireflyframework_agentic.observability.cost_resolvers import (  # type: ignore[no-redef]
             CostContext,

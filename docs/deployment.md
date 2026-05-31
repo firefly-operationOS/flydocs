@@ -37,7 +37,7 @@ A production deployment has three moving parts:
 | ------------ | ---- |
 | **API**      | One or more uvicorn workers behind a load balancer. Stateless; no sticky sessions. Publishes ``extraction.submitted`` events on the EDA bus. |
 | **Worker**   | One or more processes that subscribe to the EDA bus via `fireflyframework-pyfly`'s `EventPublisher.subscribe`. Each event is delivered to exactly one consumer in the `flydocs-workers` consumer group. |
-| **Postgres** | Holds `extractions` *and* the EDA outbox (`pyfly_eda_outbox` + `pyfly_eda_offsets`). With the Postgres EDA adapter you no longer need a separate broker. |
+| **Postgres** | Holds `extractions` *and* the EDA outbox (`pyfly_eda_outbox` + `pyfly_eda_offsets`). With the Postgres EDA adapter no separate broker is required. |
 
 Redis or Kafka are still supported brokers — see §3 — but the default
 posture is **Postgres-only**: the service already runs Postgres for

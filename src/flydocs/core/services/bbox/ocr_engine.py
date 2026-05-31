@@ -1,11 +1,11 @@
 # Copyright 2026 Firefly Software Solutions Inc
 """``OcrEngine`` protocol -- pluggable OCR for image-PDFs and raster inputs.
 
-Phase 1a ships only the ``NoneOcrEngine`` (returns empty PageWords for
-every input). Image pages then keep the LLM bbox tagged ``source=llm``,
-matching the documented fallback policy.
+The ``NoneOcrEngine`` returns empty PageWords for every input. Image
+pages then keep the LLM bbox tagged ``source=llm``, matching the
+documented fallback policy.
 
-Subsequent phases add concrete engines:
+Concrete engines plug in behind the same protocol:
 
 * ``PaddleOcrEngine``  -- PaddleOCR PP-OCRv5, multilingual (80+ langs).
 * ``TesseractEngine``  -- Tesseract 5 with explicit lang packs.

@@ -24,9 +24,9 @@ dependencies = [
     "fireflyframework-agentic[rest,security,redis,binary]>=26.5.11",
 
     # Document handling. Binary normalisation (PDF / Office / images /
-    # archives / emails -> renderable bytes) now lives in the framework's
+    # archives / emails -> renderable bytes) is supplied by the framework's
     # ``fireflyframework-agentic[binary]`` extra requested above, which
-    # supplies pypdf, Pillow, pillow-heif, cairosvg, py7zr and extract-msg.
+    # brings pypdf, Pillow, pillow-heif, cairosvg, py7zr and extract-msg.
     # The deps below back flydocs-specific paths that are NOT part of that
     # stack:
     #
@@ -106,18 +106,16 @@ requires = ["hatchling>=1.18"]
 build-backend = "hatchling.build"
 
 [tool.uv]
-# fireflyframework-agentic@main (26.5.21) pulls a pydantic-ai version line
-# whose transitive ``pydantic-ai-slim[mistral]`` brings in
-# ``mistralai>=2.0.0``. mistralai 2.x exists today only as pre-release
-# builds on PyPI (2.4.0rc2), and the resolver refuses to mix stable +
-# pre-release without explicit opt-in. Override the transitive constraint
-# to keep ``mistralai`` on the stable 1.x line — flydocs never touches
-# the mistral provider, the [mistral] extra is dragged in by
-# pydantic-ai's own deps. Drop this override once pydantic-ai 1.x line
-# is yanked or mistralai 2.x reaches stable.
+# pydantic-ai's transitive ``pydantic-ai-slim[mistral]`` reaches for
+# ``mistralai>=2.0.0``. mistralai 2.x exists only as pre-release builds
+# on PyPI (2.4.0rc2), and the resolver refuses to mix stable +
+# pre-release without explicit opt-in. Pin the transitive constraint to
+# keep ``mistralai`` on the stable 1.x line — flydocs never touches the
+# mistral provider, the [mistral] extra is dragged in by pydantic-ai's
+# own deps.
 #
-# Also override ``opentelemetry-api`` because mistralai 1.x's transitive
-# dep on opentelemetry-semantic-conventions 0.60b1 (which pins
+# Also pin ``opentelemetry-api`` because mistralai 1.x's transitive dep
+# on opentelemetry-semantic-conventions 0.60b1 (which pins
 # opentelemetry-api==1.39.1) collides with pyfly[observability]'s
 # opentelemetry-api>=1.41.1. We pick the newer one (pyfly is the
 # heavier user of the API).

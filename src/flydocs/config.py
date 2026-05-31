@@ -60,8 +60,8 @@ class IDPSettings(BaseSettings):
     # -- Extraction -----------------------------------------------------
     model: str = "anthropic:claude-sonnet-4-6"
     fallback_model: str | None = "openai:gpt-4o"
-    # Optional pre-extraction text rendering. ``"none"`` (default) keeps
-    # the historical binary-only behaviour. ``"docling"`` runs Docling
+    # Optional pre-extraction text rendering. ``"none"`` (default) sends
+    # the binary only. ``"docling"`` runs Docling
     # over the document and splices the resulting Markdown into the
     # user message ahead of the binary content so the multimodal LLM
     # can cross-reference layout against a cleaned-up textual view --
@@ -88,8 +88,8 @@ class IDPSettings(BaseSettings):
         ),
     )
     # Page count threshold above which the sync path returns 413 and asks the
-    # caller to use the async API. The LLM sees the document directly so we
-    # can no longer enforce DPI here.
+    # caller to use the async API. The LLM sees the document directly, so
+    # there is no DPI to enforce here.
     max_sync_pages: int = 10
     max_bytes: int = 32 * 1024 * 1024  # 32 MiB
     sync_timeout_s: int = 60
