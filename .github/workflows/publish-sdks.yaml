@@ -164,8 +164,13 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           # Users install directly from these URLs with ``uv add``;
-          # no PyPI publish step — by design.
-          files: sdks/python/dist/*
+          # no PyPI publish step — by design. Glob only the wheel + sdist
+          # so ``uv build``'s side-effect ``dist/.gitignore`` is not
+          # attached as a stray release asset.
+          files: |
+            sdks/python/dist/*.whl
+            sdks/python/dist/*.tar.gz
+          fail_on_unmatched_files: true
           generate_release_notes: true
           append_body: true
           body: |
