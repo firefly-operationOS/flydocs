@@ -155,6 +155,21 @@ class IDPSettings(BaseSettings):
     # extraction wall-clock plus the bus poll cycle. Default
     # ``async_timeout_s + 120s``.
     partial_succeeded_orphan_threshold_s: int = 1320
+    # ----- Queued-backlog poll (durability fallback) ------------------
+    # LISTEN/NOTIFY dispatch is best-effort: a notification fired while the
+    # worker is mid-extraction -- or after its LISTEN connection is silently
+    # dropped by the server/pooler -- is lost, leaving the row in ``queued``
+    # with no redelivery until the reaper's coarse sweep (which republishes
+    # over the same lossy bus). This poll is the durable backstop: every
+    # ``job_poll_interval_s`` the worker claims ``queued`` rows older than
+    # ``job_poll_grace_s`` directly from the DB via the atomic ``mark_running``
+    # CAS (which dedupes against a concurrent NOTIFY delivery). NOTIFY stays
+    # the low-latency fast path; polling guarantees liveness. The grace lets
+    # the NOTIFY path win fresh jobs so the poll only sweeps up what it missed.
+    # Set ``job_poll_interval_s = 0`` to disable and rely on NOTIFY + reaper.
+    job_poll_interval_s: int = 15
+    job_poll_grace_s: int = 10
+    job_poll_batch: int = 10
 
     # Per-pipeline-step timeouts (env-tunable). Conservative defaults so
     # multi-file requests + the empty-array auto-retry don't run into a

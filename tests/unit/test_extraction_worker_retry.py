@@ -21,7 +21,8 @@ plumbing is exercised in the LLM smoke tests.
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+import asyncio
+from unittest.mock import AsyncMock, MagicMock
 
 from flydocs.core.services.workers.job_worker import ExtractionWorker, _is_permanent
 
@@ -101,3 +102,48 @@ def test_backoff_attempt_one_is_base() -> None:
     worker = _worker_with(base=2.0, ceiling=300.0)
     d = worker._backoff_delay(1)
     assert 2.0 <= d < 2.5
+
+
+# -- queued-backlog poll (durability fallback) -----------------------------
+
+
+def _poll_worker(repo: MagicMock, interval: float = 0.01) -> ExtractionWorker:
+    settings = MagicMock()
+    settings.job_poll_interval_s = interval
+    settings.job_poll_grace_s = 0
+    settings.job_poll_batch = 10
+    return ExtractionWorker(
+        orchestrator=MagicMock(),
+        repository=repo,
+        event_publisher=MagicMock(),
+        webhook=MagicMock(),
+        settings=settings,
+        consumer_id="test-worker",
+    )
+
+
+async def test_poll_claims_unnotified_queued_jobs() -> None:
+    # A row left in `queued` because its NOTIFY was missed must still be picked up.
+    repo = MagicMock()
+    repo.find_stale_queued = AsyncMock(return_value=["ext_missed"])
+    worker = _poll_worker(repo)
+    processed: list[str] = []
+
+    async def fake_process(extraction_id: str) -> None:
+        processed.append(extraction_id)
+        worker.stop()  # exit the loop after the first claim so the test is bounded
+
+    worker._process = fake_process  # type: ignore[assignment]
+    await asyncio.wait_for(worker._poll_queued_backlog(), timeout=2.0)
+
+    assert processed == ["ext_missed"]
+    repo.find_stale_queued.assert_awaited_with(older_than_seconds=0, limit=10)
+
+
+async def test_poll_disabled_when_interval_zero() -> None:
+    # interval <= 0 disables the poll entirely (NOTIFY + reaper only).
+    repo = MagicMock()
+    repo.find_stale_queued = AsyncMock()
+    worker = _poll_worker(repo, interval=0)
+    await asyncio.wait_for(worker._poll_queued_backlog(), timeout=1.0)
+    repo.find_stale_queued.assert_not_awaited()
