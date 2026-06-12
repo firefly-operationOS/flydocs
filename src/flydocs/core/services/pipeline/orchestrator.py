@@ -446,9 +446,7 @@ class PipelineOrchestrator:
         # stays ``unmatched`` and the file silently yields no document. Mirrors the
         # single-candidate shortcut the classifier step itself takes.
         classifier_off = not request.options.stages.classifier
-        sole_doctype = (
-            request.document_types[0].id if len(request.document_types) == 1 else None
-        )
+        sole_doctype = request.document_types[0].id if len(request.document_types) == 1 else None
         # Slot index is monotonic across the expansion of all inputs.
         slot_index = 0
         for file in request.files:
