@@ -182,7 +182,15 @@ class IDPSettings(BaseSettings):
     escalation_model: str | None = None
 
     # -- Webhook --------------------------------------------------------
-    webhook_timeout_s: int = 15
+    # The result webhook delivers the full extraction (split docs + fields +
+    # rule evaluations) to the consumer, which persists it synchronously before
+    # acking. That ingestion can take well over the old 15s default (slow
+    # downstream services, large results), and on timeout the worker disconnects
+    # mid-delivery, leaving the consumer's persistence half-applied and the
+    # workflow stuck "in progress" forever even though the pipeline succeeded.
+    # Default raised to 300s so a legitimately slow consumer has room to finish;
+    # override per-env with ``FLYDOCS_WEBHOOK_TIMEOUT_S``.
+    webhook_timeout_s: int = 300
     webhook_max_attempts: int = 5
     webhook_hmac_secret: str | None = None
 
