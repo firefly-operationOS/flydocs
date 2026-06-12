@@ -19,8 +19,8 @@ Four subcommands:
 * ``flydocs serve``        -- run the FastAPI server on the configured port.
 * ``flydocs worker``       -- run the EDA worker that consumes the job topic.
 * ``flydocs bbox-worker``  -- run the second-stage EDA worker that grounds
-                                  bboxes for jobs whose extraction finished in
-                                  ``PARTIAL_SUCCEEDED``.
+                                  bboxes out-of-band for extractions whose
+                                  ``post_processing.bbox_refinement`` is pending.
 * ``flydocs migrate``      -- run ``alembic upgrade head`` against the DB.
 
 ``serve`` lets uvicorn import ``flydocs.main:app`` (pyfly drives the
@@ -28,6 +28,14 @@ lifecycle there). The workers boot minimal :class:`PyFlyApplication`
 instances and pull their concrete worker classes out of the DI
 container; they never construct the workers themselves, so the
 container owns every dependency.
+
+Both worker modes also run an HTTP health server (``flydocs.worker_health``)
+as a sibling asyncio task so Kubernetes can probe ``/actuator/health/*``;
+it joins the same ``asyncio.wait(FIRST_COMPLETED)`` set as the worker and
+reaper, so any of the three dying takes the whole process down for a clean
+pod restart. SIGTERM stops all three gracefully via
+:func:`_install_sigterm_handler`; SIGINT keeps asyncio's KeyboardInterrupt
+behaviour for local Ctrl-C.
 """
 
 from __future__ import annotations
@@ -36,7 +44,9 @@ import argparse
 import asyncio
 import logging
 import os
+import signal
 import sys
+from collections.abc import Callable
 
 from flydocs.config import get_settings
 
@@ -49,6 +59,50 @@ def _configure_logging(level: str) -> None:
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         stream=sys.stderr,
     )
+
+
+def _install_sigterm_handler(stop: Callable[[], None]) -> None:
+    """Run *stop* on SIGTERM so the worker stack shuts down gracefully.
+
+    Kubernetes stops pods with SIGTERM. *stop* flips every component's stop
+    flag; the run tasks then return on their own and the CLI's done/pending
+    handling cancels the rest and runs the pyfly shutdown. SIGINT is left to
+    asyncio (KeyboardInterrupt) for local Ctrl-C.
+    """
+    asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, stop)
+
+
+# Grace period for sibling tasks to exit on their own after the stop flags
+# flip, before they are cancelled. Bounds worker shutdown: uvicorn needs a
+# tick (~0.1 s) to notice ``should_exit`` and close its sockets; the worker
+# and reaper return as soon as their stop event is observed.
+_SHUTDOWN_GRACE_S = 5.0
+
+
+async def _run_until_first_exit(tasks: set[asyncio.Task[None]], stop_all: Callable[[], None]) -> None:
+    """Wait for the first task to finish, then drain the rest before returning.
+
+    Flips the stop flags as soon as any task completes so the siblings shut
+    down through their own exit paths (uvicorn closes its listening sockets,
+    the worker and reaper run their cleanup); only stragglers that outlive
+    the grace period are cancelled, and every task is awaited before the
+    caller proceeds to the pyfly shutdown. The first observed exception is
+    re-raised so the whole process dies when any task dies.
+    """
+    done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+    stop_all()
+    if pending:
+        done_late, stragglers = await asyncio.wait(pending, timeout=_SHUTDOWN_GRACE_S)
+        for task in stragglers:
+            task.cancel()
+        await asyncio.gather(*stragglers, return_exceptions=True)
+        done |= done_late
+    for task in done:
+        if task.cancelled():
+            continue
+        exc = task.exception()
+        if exc is not None:
+            raise exc
 
 
 def cmd_serve(_: argparse.Namespace) -> int:
@@ -87,11 +141,13 @@ def cmd_worker(_: argparse.Namespace) -> int:
         from flydocs.core.services.workers.job_reaper import ExtractionReaper
         from flydocs.core.services.workers.job_worker import ExtractionWorker
         from flydocs.models.repositories import ExtractionRepository
+        from flydocs.worker_health import build_worker_health_server, serve_health
 
         pyfly_app = PyFlyApplication(FlydocsApplication)
         await pyfly_app.startup()
         worker: ExtractionWorker | None = None
         reaper: ExtractionReaper | None = None
+        health_server = None
         try:
             container = pyfly_app.context.container
             settings = container.resolve(IDPSettings)
@@ -107,23 +163,31 @@ def cmd_worker(_: argparse.Namespace) -> int:
                 event_publisher=container.resolve(EventPublisher),
                 settings=settings,
             )
-            worker_task = asyncio.create_task(worker.run_forever(), name="extraction-worker")
-            reaper_task = asyncio.create_task(reaper.run_forever(), name="extraction-reaper")
-            done, pending = await asyncio.wait(
-                {worker_task, reaper_task},
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-            for task in pending:
-                task.cancel()
-            for task in done:
-                exc = task.exception()
-                if exc is not None:
-                    raise exc
+            tasks = {
+                asyncio.create_task(worker.run_forever(), name="extraction-worker"),
+                asyncio.create_task(reaper.run_forever(), name="extraction-reaper"),
+            }
+            health_server = build_worker_health_server(pyfly_app.context, settings)
+            if health_server is not None:
+                tasks.add(asyncio.create_task(serve_health(health_server), name="health-server"))
+            else:
+                logger.info("worker health server disabled (resolved port is 0)")
+
+            def _stop_all() -> None:
+                worker.stop()
+                reaper.stop()
+                if health_server is not None:
+                    health_server.should_exit = True
+
+            _install_sigterm_handler(_stop_all)
+            await _run_until_first_exit(tasks, _stop_all)
         finally:
             if worker is not None:
                 worker.stop()
             if reaper is not None:
                 reaper.stop()
+            if health_server is not None:
+                health_server.should_exit = True
             await pyfly_app.shutdown()
 
     asyncio.run(_run())
@@ -145,11 +209,13 @@ def cmd_bbox_worker(_: argparse.Namespace) -> int:
         from flydocs.core.services.workers.bbox_reaper import BboxReaper
         from flydocs.core.services.workers.bbox_refine_worker import BboxRefineWorker
         from flydocs.models.repositories import ExtractionRepository
+        from flydocs.worker_health import build_worker_health_server, serve_health
 
         pyfly_app = PyFlyApplication(FlydocsApplication)
         await pyfly_app.startup()
         worker: BboxRefineWorker | None = None
         reaper: BboxReaper | None = None
+        health_server = None
         try:
             container = pyfly_app.context.container
             settings = container.resolve(IDPSettings)
@@ -166,23 +232,31 @@ def cmd_bbox_worker(_: argparse.Namespace) -> int:
                 event_publisher=container.resolve(EventPublisher),
                 settings=settings,
             )
-            worker_task = asyncio.create_task(worker.run_forever(), name="bbox-worker")
-            reaper_task = asyncio.create_task(reaper.run_forever(), name="bbox-reaper")
-            done, pending = await asyncio.wait(
-                {worker_task, reaper_task},
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-            for task in pending:
-                task.cancel()
-            for task in done:
-                exc = task.exception()
-                if exc is not None:
-                    raise exc
+            tasks = {
+                asyncio.create_task(worker.run_forever(), name="bbox-worker"),
+                asyncio.create_task(reaper.run_forever(), name="bbox-reaper"),
+            }
+            health_server = build_worker_health_server(pyfly_app.context, settings)
+            if health_server is not None:
+                tasks.add(asyncio.create_task(serve_health(health_server), name="health-server"))
+            else:
+                logger.info("worker health server disabled (resolved port is 0)")
+
+            def _stop_all() -> None:
+                worker.stop()
+                reaper.stop()
+                if health_server is not None:
+                    health_server.should_exit = True
+
+            _install_sigterm_handler(_stop_all)
+            await _run_until_first_exit(tasks, _stop_all)
         finally:
             if worker is not None:
                 worker.stop()
             if reaper is not None:
                 reaper.stop()
+            if health_server is not None:
+                health_server.should_exit = True
             await pyfly_app.shutdown()
 
     asyncio.run(_run())

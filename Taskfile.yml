@@ -105,7 +105,14 @@ tasks:
       - uv run uvicorn flydocs.main:app --reload --host 0.0.0.0 --port {{.PORT}}
 
   dev:worker:
-    desc: Run the EDA worker that consumes the job queue.
+    desc: |
+      Run the EDA worker that consumes the job queue. The worker health
+      server is disabled here because it would otherwise reuse FLYDOCS_PORT
+      and collide with the API started by ``task dev:serve`` on the same
+      host; export FLYDOCS_WORKER_HEALTH_PORT (host env wins over this
+      default) to probe it locally.
+    env:
+      FLYDOCS_WORKER_HEALTH_PORT: "0"
     cmds:
       - uv run flydocs worker
 

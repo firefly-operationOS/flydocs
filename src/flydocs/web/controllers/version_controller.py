@@ -34,7 +34,7 @@ class VersionInfo(BaseModel):
             "PEP 440 normalises ``26.05.01`` -> ``26.5.1`` so the value "
             "you see here uses the stripped form."
         ),
-        examples=["26.6.2"],
+        examples=["26.6.3"],
     )
     model: str = Field(
         description="Primary multimodal model the orchestrator uses by default.",

@@ -9,6 +9,11 @@
 # ----------------------------------------------------------------------------
 FLYDOCS_LOG_LEVEL=INFO
 FLYDOCS_PORT=8400
+# Port for the HTTP health server the worker modes (``flydocs worker`` /
+# ``flydocs bbox-worker``) run for Kubernetes httpGet probes against
+# /actuator/health/{liveness,readiness}. Unset reuses FLYDOCS_PORT;
+# 0 disables it (dev setups running serve + worker on the same host).
+#FLYDOCS_WORKER_HEALTH_PORT=8400
 
 # ----------------------------------------------------------------------------
 # Persistence
@@ -32,7 +37,7 @@ FLYDOCS_EDA_ADAPTER=postgres
 FLYDOCS_REDIS_URL=redis://localhost:6379/0
 
 # Topic / stream name for job-submitted events.
-FLYDOCS_JOBS_TOPIC=flydocs.jobs
+FLYDOCS_JOBS_TOPIC=flydocs.extractions
 
 # ----------------------------------------------------------------------------
 # Multimodal extraction
@@ -54,7 +59,7 @@ FLYDOCS_MAX_BYTES=33554432
 # Per-call timeouts (seconds). Sync requests get the shorter one; async jobs
 # retry up to ``JOB_MAX_ATTEMPTS`` times on timeout.
 FLYDOCS_SYNC_TIMEOUT_S=60
-FLYDOCS_ASYNC_TIMEOUT_S=300
+FLYDOCS_ASYNC_TIMEOUT_S=1200
 FLYDOCS_JOB_MAX_ATTEMPTS=3
 
 # ----------------------------------------------------------------------------
