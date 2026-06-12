@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime
 
@@ -68,6 +69,25 @@ from flydocs.interfaces.enums.extraction_status import (
 logger = logging.getLogger(__name__)
 
 
+def _inbound_payload_for_log(request: SubmitExtractionRequest) -> str:
+    """Serialise the inbound submit payload for logging.
+
+    The raw ``files[].content_base64`` document bytes (potentially several MB) are
+    elided to their length so the meaningful parts of the payload built by the
+    caller (orchestration) -- ``document_types``, ``fields``, ``validators``,
+    ``rules``, ``options``, ``metadata`` -- stay readable in the logs.
+    """
+    try:
+        data = request.model_dump(mode="json")
+        for file in data.get("files", []):
+            content = file.get("content_base64")
+            if content:
+                file["content_base64"] = f"<elided: {len(content)} base64 chars>"
+        return json.dumps(data, ensure_ascii=False, default=str)
+    except Exception as exc:  # never let logging break the request
+        return f"<unserialisable payload: {exc}>"
+
+
 @rest_controller
 @request_mapping("/api/v1/extractions")
 class ExtractionsController:
@@ -107,6 +127,11 @@ class ExtractionsController:
         returns ``422 validation_failed`` with every issue surfaced, and
         nothing is written to Postgres or the EDA outbox.
         """
+        logger.info(
+            "Inbound extraction submit: idempotency_key=%s payload=%s",
+            idempotency_key or "-",
+            _inbound_payload_for_log(request),
+        )
         try:
             return await self._commands.send(
                 SubmitExtractionCommand(request=request, idempotency_key=idempotency_key or None)
