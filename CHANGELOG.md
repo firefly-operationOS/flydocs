@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses **CalVer `YY.M.PP`** (PEP 440 may normalise patch numbers
 for the Python wheel — e.g. `26.06.00` → `26.6.0`).
 
+## [26.6.4] - 2026-06-12
+
+### Fixed
+
+- **Async worker consumed no jobs (wrong EDA topic).** `pyfly.eda.destinations`
+  defaulted to `flydocs.jobs`, but the submit handler publishes
+  `extraction.submitted` to `jobs_topic` = `flydocs.extractions`. The `worker`
+  container therefore subscribed to a topic nothing publishes to, so every
+  queued async extraction sat unprocessed (only the reaper eventually revived
+  it). Aligned the `destinations` default to `flydocs.extractions` — still
+  env-overridable via `FLYDOCS_EDA_DESTINATIONS`, and `bbox-worker` keeps its
+  own `flydocs.extractions.post_processing` override.
+
+### Changed
+
+- Bumped the locked `pyfly` framework dependency to `26.6.99`.
+
 ## [26.6.3] - 2026-06-12
 
 ### Added

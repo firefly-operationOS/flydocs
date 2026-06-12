@@ -3942,7 +3942,7 @@ wheels = [
 
 [[package]]
 name = "pyfly"
-version = "26.6.98"
+version = "26.6.99"
 source = { editable = "../../fireflyframework/fireflyframework-pyfly" }
 dependencies = [
     { name = "pydantic" },
