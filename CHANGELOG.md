@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses **CalVer `YY.M.PP`** (PEP 440 may normalise patch numbers
 for the Python wheel — e.g. `26.06.00` → `26.6.0`).
 
+## [26.6.6] - 2026-06-12
+
+### Fixed
+
+- **Async extractions could stall in `queued` when a NOTIFY was missed.** The
+  worker dispatched solely off the EDA bus (Postgres `LISTEN/NOTIFY` by default),
+  which is best-effort: a notification fired while the worker was mid-extraction —
+  or after its `LISTEN` connection was silently dropped by the server/pooler — was
+  lost, and the row sat in `queued`. The reaper only revived it after a coarse
+  (~10 min) sweep, and that revival republished over the same lossy bus, so a
+  worker with a dead `LISTEN` never picked it up. The worker now runs a
+  **queued-backlog poll** (`job_poll_interval_s`, default 15 s) that claims stale
+  `queued` rows directly from the DB via the existing atomic `mark_running` CAS —
+  which dedupes against a concurrent NOTIFY delivery. NOTIFY stays the low-latency
+  fast path; polling guarantees liveness regardless of bus delivery. Tunable via
+  `job_poll_interval_s` / `job_poll_grace_s` / `job_poll_batch`; set the interval
+  to `0` to disable.
+
 ## [26.6.5] - 2026-06-12
 
 ### Fixed

@@ -47,6 +47,7 @@ the main success transition, then publishes a separate
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import random
 import socket
@@ -142,13 +143,51 @@ class ExtractionWorker:
             self._settings.jobs_topic,
             EVENT_TYPE_EXTRACTION_SUBMITTED,
         )
+        poll_task = asyncio.create_task(self._poll_queued_backlog())
         try:
             await self._stop.wait()
         finally:
+            poll_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await poll_task
             await self._publisher.stop()
 
     def stop(self) -> None:
         self._stop.set()
+
+    async def _poll_queued_backlog(self) -> None:
+        """Durable fallback to the NOTIFY subscription.
+
+        LISTEN/NOTIFY dispatch is best-effort: a notification fired while the
+        worker is mid-extraction -- or after its LISTEN connection is silently
+        dropped by the server/pooler -- is gone, and the row sits in ``queued``
+        with no redelivery until the reaper's coarse sweep (and even that
+        republish rides the same lossy bus). This loop polls the queued backlog
+        directly: every ``job_poll_interval_s`` it claims ``queued`` rows older
+        than ``job_poll_grace_s`` straight from the DB. The atomic
+        ``mark_running`` claim in :meth:`_process` dedupes against a concurrent
+        NOTIFY delivery, so the poll only ever picks up what the bus missed.
+        NOTIFY stays the low-latency fast path; this guarantees liveness.
+        """
+        interval = self._settings.job_poll_interval_s
+        if interval <= 0:
+            return  # polling disabled -- rely on NOTIFY + reaper alone
+        while not self._stop.is_set():
+            try:
+                await asyncio.sleep(interval)
+                ids = await self._repository.find_stale_queued(
+                    older_than_seconds=self._settings.job_poll_grace_s,
+                    limit=self._settings.job_poll_batch,
+                )
+                for extraction_id in ids:
+                    if self._stop.is_set():
+                        break
+                    logger.info("Queued-backlog poll picked up unnotified extraction %s", extraction_id)
+                    await self._process(extraction_id)
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001 -- the poll loop must never die
+                logger.exception("Queued-backlog poll sweep failed -- retrying next cycle")
 
     # ------------------------------------------------------------------
 
