@@ -68,9 +68,11 @@ pyfly:
     enabled: true
     provider: ${FLYDOCS_EDA_ADAPTER:postgres}
     # Both knobs are env-overridable so the ``bbox-worker`` container can
-    # subscribe to ``flydocs.bbox.refine`` under its own consumer
-    # group while the main ``worker`` keeps consuming ``flydocs.jobs``.
-    destinations: ${FLYDOCS_EDA_DESTINATIONS:flydocs.jobs}
+    # subscribe to ``flydocs.extractions.post_processing`` under its own
+    # consumer group while the main ``worker`` consumes ``flydocs.extractions``
+    # (matching ``IDPSettings.jobs_topic`` -- the topic the submit handler
+    # publishes ``extraction.submitted`` to).
+    destinations: ${FLYDOCS_EDA_DESTINATIONS:flydocs.extractions}
     group: ${FLYDOCS_EDA_GROUP:flydocs-workers}
     postgres:
       dsn: ${FLYDOCS_DATABASE_URL:postgresql+asyncpg://idp:idp@localhost:5432/flydocs}
