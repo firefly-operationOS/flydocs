@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses **CalVer `YY.M.PP`** (PEP 440 may normalise patch numbers
 for the Python wheel — e.g. `26.06.00` → `26.6.0`).
 
+## [26.6.5] - 2026-06-12
+
+### Fixed
+
+- **Classifier-off + no `expected_type` silently produced zero documents.** When
+  `stages.classifier` was off and a file carried no `expected_type`, the segment
+  stayed `unmatched` and the file yielded no document — with no error. A single-row
+  file now defaults to the sole declared `document_type` in that case (mirroring the
+  single-candidate shortcut the classifier itself takes), so the common "one type,
+  no classifier" path just works.
+- **Request-scope LLM transformation returned empty rows.** The transformer's output
+  model wrapped each row under a `values` key, but the prompt instructs the model to
+  emit flat `{field: value}` rows — so the structured output never matched and every
+  consolidated row came back empty. The output row is now a flat dict, matching the
+  prompt, so `result.request_transformations` carries populated rows (e.g. a cap
+  table consolidated across several deeds).
+
 ## [26.6.4] - 2026-06-12
 
 ### Fixed

@@ -440,6 +440,15 @@ class PipelineOrchestrator:
         """
         request: ExtractionRequest = ctx.metadata["request"]
         files: list[_FileSlot] = []
+        # When the classifier is disabled and the caller pinned no ``expected_type``,
+        # default a single-row file to the sole declared document type. Without the
+        # classifier there is no node that assigns a type, so otherwise the segment
+        # stays ``unmatched`` and the file silently yields no document. Mirrors the
+        # single-candidate shortcut the classifier step itself takes.
+        classifier_off = not request.options.stages.classifier
+        sole_doctype = (
+            request.document_types[0].id if len(request.document_types) == 1 else None
+        )
         # Slot index is monotonic across the expansion of all inputs.
         slot_index = 0
         for file in request.files:
@@ -452,6 +461,8 @@ class PipelineOrchestrator:
             multi_row = len(normalised) > 1
             for row in normalised:
                 effective_doctype = file.expected_type if not multi_row else None
+                if effective_doctype is None and not multi_row and classifier_off and sole_doctype:
+                    effective_doctype = sole_doctype
                 slot_filename = (
                     "/".join((*row.derived_from, row.filename)) if row.derived_from else row.filename
                 )
