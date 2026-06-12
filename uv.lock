@@ -1483,7 +1483,7 @@ security = [
 
 [[package]]
 name = "flydocs"
-version = "26.6.1"
+version = "26.6.3"
 source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },
@@ -1496,7 +1496,7 @@ dependencies = [
     { name = "pydantic" },
     { name = "pydantic-ai-slim", extra = ["anthropic", "bedrock", "openai"] },
     { name = "pydantic-settings" },
-    { name = "pyfly", extra = ["cli", "client", "data-relational", "eda", "fastapi", "observability", "postgresql", "redis", "scheduling", "security"] },
+    { name = "pyfly", extra = ["cli", "client", "data-relational", "eda", "fastapi", "observability", "postgresql", "redis", "scheduling", "security", "web"] },
     { name = "pymupdf" },
     { name = "pypdf" },
     { name = "pytesseract" },
@@ -1539,7 +1539,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.10.0" },
     { name = "pydantic-ai-slim", extras = ["anthropic", "openai", "bedrock"], specifier = ">=1.56.0" },
     { name = "pydantic-settings", specifier = ">=2.7.0" },
-    { name = "pyfly", extras = ["fastapi", "observability", "security", "data-relational", "postgresql", "eda", "redis", "client", "scheduling", "cli"], editable = "../../fireflyframework/fireflyframework-pyfly" },
+    { name = "pyfly", extras = ["fastapi", "web", "observability", "security", "data-relational", "postgresql", "eda", "redis", "client", "scheduling", "cli"], editable = "../../fireflyframework/fireflyframework-pyfly" },
     { name = "pymupdf", specifier = ">=1.24" },
     { name = "pypdf", specifier = ">=4.3.0" },
     { name = "pyright", marker = "extra == 'dev'", specifier = ">=1.1" },
@@ -3942,7 +3942,7 @@ wheels = [
 
 [[package]]
 name = "pyfly"
-version = "26.5.5"
+version = "26.6.98"
 source = { editable = "../../fireflyframework/fireflyframework-pyfly" }
 dependencies = [
     { name = "pydantic" },
@@ -3991,6 +3991,12 @@ security = [
     { name = "bcrypt" },
     { name = "cryptography" },
     { name = "pyjwt", extra = ["crypto"] },
+    { name = "pyotp" },
+]
+web = [
+    { name = "python-multipart" },
+    { name = "starlette" },
+    { name = "uvicorn", extra = ["standard"] },
 ]
 
 [package.metadata]
@@ -4002,27 +4008,39 @@ requires-dist = [
     { name = "aiosqlite", marker = "extra == 'data-relational'", specifier = ">=0.22.1" },
     { name = "alembic", marker = "extra == 'data-relational'", specifier = ">=1.18.4" },
     { name = "asyncpg", marker = "extra == 'postgresql'", specifier = ">=0.31.0" },
+    { name = "azure-storage-blob", marker = "extra == 'ecm-azure'", specifier = ">=12.19.0" },
     { name = "bcrypt", marker = "extra == 'security'", specifier = ">=5.0.0" },
     { name = "beanie", marker = "extra == 'data-document'", specifier = ">=2.1.0" },
+    { name = "boto3", marker = "extra == 'ecm-aws'", specifier = ">=1.34.0" },
+    { name = "boto3", marker = "extra == 'idp-cognito'", specifier = ">=1.34.0" },
     { name = "click", marker = "extra == 'cli'", specifier = ">=8.3.3" },
     { name = "click", marker = "extra == 'shell'", specifier = ">=8.3.3" },
     { name = "croniter", marker = "extra == 'scheduling'", specifier = ">=6.2.2" },
     { name = "cryptography", marker = "extra == 'security'", specifier = ">=48.0.0" },
     { name = "fastapi", marker = "extra == 'fastapi'", specifier = ">=0.136.1" },
+    { name = "gitpython", marker = "extra == 'config-server-git'", specifier = ">=3.1" },
     { name = "granian", marker = "extra == 'granian'", specifier = ">=2.7.4" },
+    { name = "grpcio", marker = "extra == 'grpc'", specifier = ">=1.60.0" },
     { name = "httpx", marker = "extra == 'client'", specifier = ">=0.28.1" },
+    { name = "httpx", marker = "extra == 'idp-azure'", specifier = ">=0.28.1" },
+    { name = "httpx", marker = "extra == 'idp-keycloak'", specifier = ">=0.28.1" },
     { name = "hypercorn", marker = "extra == 'hypercorn'", specifier = ">=0.18.0" },
     { name = "jinja2", marker = "extra == 'cli'", specifier = ">=3.1.6" },
-    { name = "motor", marker = "extra == 'data-document'", specifier = ">=3.7.1" },
+    { name = "jinja2", marker = "extra == 'notifications'", specifier = ">=3.1.6" },
+    { name = "jsonpath-ng", marker = "extra == 'testing'", specifier = ">=1.8.0" },
     { name = "opentelemetry-api", marker = "extra == 'observability'", specifier = ">=1.41.1" },
     { name = "opentelemetry-instrumentation-starlette", marker = "extra == 'observability'", specifier = ">=0.62b1" },
     { name = "opentelemetry-sdk", marker = "extra == 'observability'", specifier = ">=1.41.1" },
+    { name = "pika", marker = "extra == 'testcontainers'", specifier = ">=1.3.0" },
+    { name = "presidio-analyzer", marker = "extra == 'pii'", specifier = ">=2.2" },
+    { name = "presidio-anonymizer", marker = "extra == 'pii'", specifier = ">=2.2" },
     { name = "prometheus-client", marker = "extra == 'observability'", specifier = ">=0.25.0" },
     { name = "pydantic", specifier = ">=2.13.3" },
     { name = "pyfly", extras = ["fastapi", "granian"], marker = "extra == 'web-fastapi'" },
-    { name = "pyfly", extras = ["web", "data-relational", "data-document", "postgresql", "eda", "cache", "client", "observability", "security", "scheduling", "cli", "shell", "kafka", "rabbitmq", "redis", "granian", "fastapi", "hypercorn"], marker = "extra == 'full'" },
+    { name = "pyfly", extras = ["web", "data-relational", "data-document", "postgresql", "eda", "cache", "client", "grpc", "websocket", "ecm-aws", "ecm-azure", "observability", "security", "scheduling", "cli", "shell", "kafka", "rabbitmq", "redis", "granian", "fastapi", "hypercorn", "idp-azure", "idp-keycloak", "idp-cognito", "notifications", "config-server-git"], marker = "extra == 'full'" },
     { name = "pyfly", extras = ["web", "granian"], marker = "extra == 'web-fast'" },
     { name = "pyjwt", extras = ["crypto"], marker = "extra == 'security'", specifier = ">=2.12.1" },
+    { name = "pyotp", marker = "extra == 'security'", specifier = ">=2.9.0" },
     { name = "python-multipart", marker = "extra == 'web'", specifier = ">=0.0.27" },
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "questionary", marker = "extra == 'cli'", specifier = ">=2.1.1" },
@@ -4032,14 +4050,17 @@ requires-dist = [
     { name = "sqlalchemy", extras = ["asyncio"], marker = "extra == 'data-relational'", specifier = ">=2.0.49" },
     { name = "starlette", marker = "extra == 'web'", specifier = ">=1.0.0" },
     { name = "structlog", marker = "extra == 'observability'", specifier = ">=25.5.0" },
+    { name = "testcontainers", marker = "extra == 'testcontainers'", specifier = ">=4.0.0" },
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'web'", specifier = ">=0.46.0" },
     { name = "uvloop", marker = "sys_platform != 'win32' and extra == 'web-fast'", specifier = ">=0.22.1" },
     { name = "uvloop", marker = "sys_platform != 'win32' and extra == 'web-fastapi'", specifier = ">=0.22.1" },
+    { name = "websockets", marker = "extra == 'websocket'", specifier = ">=12.0" },
 ]
-provides-extras = ["web", "data-relational", "data-document", "postgresql", "eda", "fastapi", "granian", "hypercorn", "kafka", "rabbitmq", "redis", "cache", "client", "observability", "scheduling", "security", "cli", "shell", "web-fast", "web-fastapi", "full"]
+provides-extras = ["web", "data-relational", "testing", "testcontainers", "data-document", "postgresql", "eda", "fastapi", "granian", "hypercorn", "kafka", "rabbitmq", "redis", "cache", "client", "config-server-git", "grpc", "websocket", "idp-azure", "idp-keycloak", "idp-cognito", "ecm-aws", "ecm-azure", "observability", "scheduling", "pii", "security", "notifications", "cli", "shell", "web-fast", "web-fastapi", "full"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "aiosmtpd", specifier = ">=1.4" },
     { name = "coverage", extras = ["toml"], specifier = ">=7.13.5" },
     { name = "jsonpath-ng", specifier = ">=1.8.0" },
     { name = "mongomock-motor", specifier = ">=0.0.36" },
@@ -4047,6 +4068,7 @@ dev = [
     { name = "pytest", specifier = ">=9.0.3" },
     { name = "pytest-asyncio", specifier = ">=1.3.0" },
     { name = "pytest-cov", specifier = ">=7.1.0" },
+    { name = "respx", specifier = ">=0.21.0" },
     { name = "ruff", specifier = ">=0.15.12" },
 ]
 
@@ -4093,6 +4115,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/f6/3f/3853d6608f394faf6eec2bd4e8ea9f6a00beea329b071abdb29f4164cc3d/pymupdf-1.27.2.3-cp310-abi3-win32.whl", hash = "sha256:a5c1088a87189891a4946ab314a14b7934ac4c5b6077f7e74ebee956f8906d0e", size = 18019286, upload-time = "2026-04-24T14:10:34.239Z" },
     { url = "https://files.pythonhosted.org/packages/44/47/5fb10fe73f96b31253a41647c362ea9e0380920bddf16028414a051247fc/pymupdf-1.27.2.3-cp310-abi3-win_amd64.whl", hash = "sha256:d20f68ef15195e073071dbc4ae7455257c7889af7584e39df490c0a92728526e", size = 19249102, upload-time = "2026-04-24T14:10:46.72Z" },
     { url = "https://files.pythonhosted.org/packages/53/a4/b9e91aac82293f9c954654c85581ee8212b5b05efadc534b581141241e6f/pymupdf-1.27.2.3-cp314-cp314t-manylinux_2_28_x86_64.whl", hash = "sha256:77691604c5d1d0233827139bbcdea61fd57879c84712b8e49b1f45520f7ab9c2", size = 25000393, upload-time = "2026-04-24T14:11:01.669Z" },
+]
+
+[[package]]
+name = "pyotp"
+version = "2.9.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/f3/b2/1d5994ba2acde054a443bd5e2d384175449c7d2b6d1a0614dbca3a63abfc/pyotp-2.9.0.tar.gz", hash = "sha256:346b6642e0dbdde3b4ff5a930b664ca82abfa116356ed48cc42c7d6590d36f63", size = 17763, upload-time = "2023-07-27T23:41:03.295Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c3/c0/c33c8792c3e50193ef55adb95c1c3c2786fe281123291c2dbf0eaab95a6f/pyotp-2.9.0-py3-none-any.whl", hash = "sha256:81c2e5865b8ac55e825b0358e496e1d9387c811e85bb40e71a3b29b288963612", size = 13376, upload-time = "2023-07-27T23:41:01.685Z" },
 ]
 
 [[package]]

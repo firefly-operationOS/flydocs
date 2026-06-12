@@ -246,6 +246,38 @@ probe by registering another `pyfly.actuator.health.HealthIndicator`
 bean (from `fireflyframework-pyfly`) in `core/configuration.py` — the
 lifespan rescan picks it up automatically.
 
+### Worker health
+
+`flydocs worker` and `flydocs bbox-worker` serve the same
+`/actuator/health/*` endpoints from a lightweight Starlette + uvicorn
+server (`src/flydocs/worker_health.py`) that runs as one more asyncio
+task inside the worker process, so all three workloads take the probes
+above. Specifics:
+
+- **Port.** `FLYDOCS_WORKER_HEALTH_PORT` when set, otherwise
+  `FLYDOCS_PORT` (default 8400). `0` disables the server — useful when
+  `serve` and `worker` share a host in dev. The server binds `0.0.0.0`
+  because the kubelet probes the pod IP, never loopback.
+- **Probe semantics.** Indicators discovered from the DI container
+  (`database_health`, `eda_health`) carry no probe group, so — exactly
+  like the API process — they participate in **both** liveness and
+  readiness: a sustained DB or broker outage flips liveness to 503 and
+  the kubelet restarts the worker pod until the dependency returns.
+  For Spring-strict liveness (process-alive only), register the
+  indicators with `groups={ProbeGroup.READINESS}`.
+- **Exposure.** Only `health` and `info` are mounted by default;
+  `/actuator/loggers`, `/actuator/metrics`, etc. return 404 unless
+  opted in via `pyfly.management.endpoints.web.exposure.include` —
+  note that key applies to the API **and** the worker health port,
+  since both build their routes from the same pyfly config.
+- **Lifecycle.** The health server joins the worker's
+  `asyncio.wait(FIRST_COMPLETED)` task set: if any task dies —
+  including a failed bind — the whole process exits and the pod
+  restarts cleanly. SIGTERM stops worker, reaper, and health server
+  gracefully and runs the pyfly shutdown before the process exits.
+- **No access log.** Probes fire every few seconds; the health
+  server's access log is disabled.
+
 > **W3C trace context** is propagated by `fireflyframework-pyfly`'s
 > default `CorrelationFilter`: every response echoes back `X-Correlation-Id`,
 > `X-Request-Id`, `traceparent`, `tracestate`, and `X-Tenant-Id` when
@@ -257,7 +289,7 @@ lifespan rescan picks it up automatically.
 
 | Telemetry      | Surface                                                                                              |
 | -------------- | ---------------------------------------------------------------------------------------------------- |
-| **Metrics**    | Prometheus at `GET /actuator/metrics` — CQRS handler latency, HTTP histograms, runtime metrics.       |
+| **Metrics**    | `GET /actuator/metrics` + Prometheus scrape at `GET /actuator/prometheus` — CQRS handler latency, HTTP histograms, runtime metrics. 404 until exposed via `pyfly.management.endpoints.web.exposure.include` (the secure default exposes only `health,info`). |
 | **Traces**     | OpenTelemetry. Configure via standard env vars (`OTEL_EXPORTER_OTLP_ENDPOINT`, …). One span per pipeline node. |
 | **Logs**       | structlog JSON. Every line carries `request_id`; correlation across API + worker is just a grep.       |
 | **Health**     | `/actuator/health`, `/actuator/health/liveness`, `/actuator/health/readiness`, `/actuator/info`.        |

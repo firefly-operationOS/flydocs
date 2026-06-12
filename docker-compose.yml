@@ -125,12 +125,18 @@ services:
         condition: service_healthy
       gotenberg:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8400/actuator/health/readiness"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
 
-  # Second-stage EDA consumer: subscribes to ``flydocs.bbox.refine``
-  # events that ``worker`` publishes when an extraction finishes with
+  # Second-stage EDA consumer: subscribes to the
+  # ``extraction.post_processing.requested`` events that ``worker``
+  # publishes when an extraction succeeds with
   # ``options.stages.bbox_refine == true``. Grounds bboxes against the
   # PDF text layer / configured OCR engine, persists the refined result,
-  # transitions the job ``PARTIAL_SUCCEEDED -> SUCCEEDED``, and fires the
+  # updates ``post_processing.bbox_refinement.status``, and fires the
   # final webhook. Same image as the API + worker; only the entrypoint
   # differs.
   bbox-worker:
@@ -162,6 +168,11 @@ services:
         condition: service_healthy
       gotenberg:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8400/actuator/health/readiness"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
 
 volumes:
   postgres_data:

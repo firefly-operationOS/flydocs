@@ -42,6 +42,12 @@ class IDPSettings(BaseSettings):
     # -- Service --------------------------------------------------------
     log_level: str = "INFO"
     port: int = 8400
+    # Port for the HTTP health server the worker CLI modes (``flydocs
+    # worker`` / ``flydocs bbox-worker``) run next to their asyncio tasks
+    # so Kubernetes can probe ``/actuator/health/*`` over httpGet. Unset
+    # reuses ``port``; ``0`` disables the server (dev setups running
+    # ``serve`` and ``worker`` on the same host).
+    worker_health_port: int | None = Field(default=None, ge=0, le=65535)
 
     # -- Persistence ----------------------------------------------------
     database_url: str = "postgresql+asyncpg://idp:idp@localhost:5432/flydocs"

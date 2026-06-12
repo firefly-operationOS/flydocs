@@ -6,6 +6,45 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses **CalVer `YY.M.PP`** (PEP 440 may normalise patch numbers
 for the Python wheel — e.g. `26.06.00` → `26.6.0`).
 
+## [26.6.3] - 2026-06-12
+
+### Added
+
+- **Worker health server.** `flydocs worker` and `flydocs bbox-worker` now
+  serve `GET /actuator/health`, `/actuator/health/liveness`, and
+  `/actuator/health/readiness` over HTTP (Starlette + uvicorn, assembled
+  from pyfly's actuator in `src/flydocs/worker_health.py`), so Kubernetes
+  probes the worker pods with httpGet instead of `exec` shims. The server
+  binds `0.0.0.0`, runs as a sibling asyncio task of the worker and reaper
+  (any task dying — including a failed bind — takes the whole process down
+  for a clean pod restart), keeps its access log off, and honours pyfly's
+  secure-by-default endpoint exposure (`/actuator/loggers`,
+  `/actuator/metrics` → 404 unless opted in). Indicator discovery uses
+  pyfly ≥ 26.6.98's public `pyfly.actuator.install_health_indicators`;
+  `database_health` and `eda_health` participate in both probes, matching
+  the API process. See the "Worker health" section in `docs/deployment.md`.
+- New setting `worker_health_port` (`FLYDOCS_WORKER_HEALTH_PORT`): unset
+  reuses `FLYDOCS_PORT`; `0` disables the worker health server.
+- `docker compose` healthchecks for the `worker` and `bbox-worker`
+  services against `/actuator/health/readiness`.
+- The worker modes now shut down gracefully on SIGTERM: worker, reaper,
+  and health server stop, and the pyfly shutdown runs before the process
+  exits.
+
+### Changed
+
+- `pyfly` dependency floor raised to 26.6.98 and the `web` extra added, so
+  `starlette` and `uvicorn` are declared (previously they only arrived
+  transitively).
+
+### Documentation
+
+- `env_template`: realigned `FLYDOCS_JOBS_TOPIC` and
+  `FLYDOCS_ASYNC_TIMEOUT_S` with the defaults in `config.py`.
+- `docs/deployment.md`: metrics endpoints require exposure opt-in via
+  `pyfly.management.endpoints.web.exposure.include`; the secure default
+  exposes only `health,info`.
+
 ## [26.6.2] - 2026-05-31
 
 ### Changed
