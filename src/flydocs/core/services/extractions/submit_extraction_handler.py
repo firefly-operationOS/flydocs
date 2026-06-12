@@ -116,6 +116,13 @@ class SubmitExtractionHandler(CommandHandler[SubmitExtractionCommand, Extraction
         )
         report = self._validator.validate(as_extraction)
         if report.has_errors:
+            for issue in report.errors:
+                logger.error(
+                    "submit_validation_error code=%s path=%s message=%s",
+                    issue.code,
+                    issue.path,
+                    issue.message,
+                )
             raise InvalidRequestError(report)
         for issue in report.warnings:
             logger.warning(
