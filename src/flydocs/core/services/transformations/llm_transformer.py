@@ -45,16 +45,16 @@ logger = logging.getLogger(__name__)
 _MAX_OUTPUT_TOKENS = 8192
 
 
-class _TransformRow(BaseModel):
-    """One row returned by the LLM. Free-form key/value dict."""
-
-    values: dict[str, Any] = Field(default_factory=dict)
-
-
 class _TransformOutput(BaseModel):
-    """LLM response envelope."""
+    """LLM response envelope.
 
-    rows: list[_TransformRow] = Field(default_factory=list)
+    Each row is a flat ``{field_name: value}`` object, exactly as the prompt
+    instructs the model to emit. (A previous shape wrapped each row under a
+    ``values`` key, which the prompt never produced — so every row came back
+    empty. Keeping the row a flat dict here matches the prompt 1:1.)
+    """
+
+    rows: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class LlmTransformer:
@@ -191,7 +191,7 @@ def _serialise_row(row: ExtractedField) -> dict[str, Any]:
     return out
 
 
-def _rebuild_rows(llm_rows: list[_TransformRow], template_row: ExtractedField) -> list[ExtractedField]:
+def _rebuild_rows(llm_rows: list[dict[str, Any]], template_row: ExtractedField) -> list[ExtractedField]:
     """Materialise LLM row dicts back into ExtractedField rows.
 
     The template row's metadata (bbox, page) is propagated so the
@@ -206,7 +206,7 @@ def _rebuild_rows(llm_rows: list[_TransformRow], template_row: ExtractedField) -
     materialised: list[ExtractedField] = []
     for i, lr in enumerate(llm_rows):
         sub_fields: list[ExtractedField] = []
-        for name, value in lr.values.items():
+        for name, value in (lr or {}).items():
             tmpl = template_by_name.get(name)
             sub_fields.append(
                 ExtractedField(
