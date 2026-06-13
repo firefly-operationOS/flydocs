@@ -1,5 +1,5 @@
 name: flydocs/transform
-version: "1.0.0"
+version: "1.1.0"
 description: >-
   Post-extraction LLM transformation of an array field group. The caller's
   ``intention`` is the goal in one sentence; the LLM rewrites the rows of
@@ -20,21 +20,52 @@ system_template: |
   Apply the intention and emit a JSON object ``{"rows": [...]}`` whose
   ``rows`` is the transformed list. Rules:
 
-  1. Preserve every input row unless the intention explicitly says to
-     drop, merge or filter rows.
+  1. Preserve every input row unless the intention — explicitly, or by
+     asking for a consolidated / current / deduplicated view — calls for
+     dropping, merging or filtering rows.
   2. Keep the same set of keys per row unless the intention asks to add,
      rename or remove keys. New keys must be self-descriptive lowercase
      snake_case.
   3. Never invent factual content. If a key cannot be derived from the
      input, leave the value empty (``""`` for strings, ``null`` for
-     other types) instead of fabricating.
+     other types) instead of fabricating. Reconciling or dropping a
+     superseded row (rules 6-7) is not invention; fabricating a value is.
   4. The output JSON must be valid and parseable. No prose, no commentary.
   5. The order of rows should follow the most natural reading order
      implied by the intention; when no order is implied, keep the input
      order.
+  6. Respect the category the group names. Include only rows that are
+     genuine members of the category the target/output group represents.
+     Do not promote into it an entity that appears in the source only in
+     a different role — an administrator, agent, signatory, counterparty,
+     representative, or mere reference is not a member of an ownership /
+     membership / holdings group just because it is named nearby. When in
+     doubt, an entity belongs only if the source attributes to it the
+     defining quantity of the group (e.g. a holding, a balance, a stake).
+  7. Reconcile to the state the intention asks for. When it asks for the
+     *current*, *effective*, *latest*, *active*, or *as-of* view, treat
+     the input rows as a history that may contain stale records: keep the
+     most recent and most authoritative record for each entity, and
+     exclude any entry a later record supersedes — replaced, revoked,
+     cancelled, closed, transferred away, or no longer in force. Never
+     represent the same entity twice (once stale, once current); collapse
+     it to its single current state.
+  8. Honor invariants the intention implies, and use them to find errors.
+     When the rows are parts of a whole — shares or percentages that
+     should total a declared amount, quantities that must reconcile to an
+     authoritative figure, or a count that must match a stated number —
+     treat the constraint as hard: take the authoritative total, set each
+     row's share from its own quantity over that total, and verify the
+     rows sum to the whole. A sum ABOVE the whole is a signal, not a
+     rounding issue: you have included a non-member (rule 6), a duplicate,
+     or a superseded entry (rule 7) — identify the offending row, remove
+     it, and re-verify before emitting. A sum BELOW may mean a current
+     holder was dropped. Do not emit output that violates the invariant.
 
   When the intention is unclear, prefer the most conservative
-  transformation that still answers the goal.
+  transformation that still answers the goal. Reconciliation under rules
+  6-8 is deterministic, not creative: apply it silently and consistently,
+  and never fabricate a value to force a sum.
 
 user_template: |
   TARGET GROUP: {{ target_group }}

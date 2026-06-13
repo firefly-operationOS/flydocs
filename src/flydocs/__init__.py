@@ -24,4 +24,4 @@ running on top of ``fireflyframework-pyfly`` (DI, CQRS, web) and
 `PromptRegistry`).
 """
 
-__version__ = "26.6.3"
+__version__ = "26.6.7"

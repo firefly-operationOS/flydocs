@@ -6,6 +6,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses **CalVer `YY.M.PP`** (PEP 440 may normalise patch numbers
 for the Python wheel — e.g. `26.06.00` → `26.6.0`).
 
+## [26.6.7] - 2026-06-13
+
+### Fixed
+
+- **Runtime version was reported as `26.6.3` after the 26.6.6 release.** The
+  version string was duplicated as a literal in `app.py` (the
+  `@pyfly_application` decorator) and `__init__.py`, and the 26.6.6 bump only
+  touched `pyproject.toml` and the changelog — so `GET /api/v1/version`,
+  `/openapi.json`, and the OpenAPI doc all advertised the stale `26.6.3`.
+  `app.py` now derives its version from `flydocs.__version__` (single in-code
+  source), and a unit test asserts `pyproject.toml` and `__version__` stay in
+  lockstep so a release can no longer drift.
+
+### Changed
+
+- **Hardened the generic post-extraction transform prompt
+  (`prompts/transform.yaml` → 1.1.0).** Request-scope (and any) LLM transforms
+  now reconcile to the state the caller's `intention` asks for: when the
+  intention requests a *current / effective / latest / as-of* view, the model
+  treats the input rows as a history and excludes entries a later record
+  supersedes (replaced, revoked, cancelled, transferred away), collapsing each
+  entity to its single current state instead of double-counting it. A companion
+  rule makes the model honor numeric invariants the intention implies (parts
+  that must sum to a declared whole, quantities that must reconcile, counts that
+  must match) by computing the totals and correcting an over/under-count before
+  emitting. This is engine-level prompt hardening — domain-agnostic, with no
+  use-case-specific wording — so every consolidation (cap tables, powers
+  matrices, balances, inventories, …) becomes more reliable without bespoke
+  intention text.
+
 ## [26.6.6] - 2026-06-12
 
 ### Fixed

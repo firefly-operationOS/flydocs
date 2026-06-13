@@ -25,11 +25,13 @@ from __future__ import annotations
 from pyfly.core import pyfly_application
 from pyfly.starters.core import enable_core_stack
 
+from flydocs import __version__
+
 
 @enable_core_stack
 @pyfly_application(
     name="flydocs",
-    version="26.6.3",
+    version=__version__,
     description=(
         "flydocs -- pure-multimodal document extraction with bounding "
         "boxes. Part of Firefly OperationOS, platform-agnostic."
