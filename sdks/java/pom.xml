@@ -20,7 +20,7 @@
 
     <groupId>com.firefly.flydocs</groupId>
     <artifactId>flydocs-sdk-parent</artifactId>
-    <version>26.6.0</version>
+    <version>26.6.8</version>
     <packaging>pom</packaging>
 
     <name>flydocs Java SDK (parent)</name>

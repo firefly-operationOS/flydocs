@@ -867,8 +867,12 @@ class PipelineOrchestrator:
         request_outputs: list[ExtractedFieldGroup] = ctx.metadata.setdefault("request_transformations", [])
         for t in transformations:
             if getattr(t, "scope", None) and t.scope.value == "request":
-                per_task_groups = [task.extracted_groups for task in tasks if task.extracted_groups]
-                produced = await self._transformation_engine.apply_request_scope(t, per_task_groups)
+                contributing = [task for task in tasks if task.extracted_groups]
+                per_task_groups = [task.extracted_groups for task in contributing]
+                sources = [task.segment.filename for task in contributing]
+                produced = await self._transformation_engine.apply_request_scope(
+                    t, per_task_groups, sources=sources
+                )
                 if produced is not None:
                     request_outputs.append(produced)
                     applied += 1

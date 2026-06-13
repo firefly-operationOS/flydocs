@@ -193,15 +193,27 @@ Use this for:
 | `prompt_id`    | `string \| null` | Optional named prompt template id from the catalog. When omitted, the default `transform` prompt renders the intention into a generic shell.  |
 | `output_group` | `string \| null` | Same semantics as the declarative type.                                                                                                       |
 | `scope`        | enum             | Same as above.                                                                                                                                |
+| `include_provenance` | `bool` (default `true`) | Surface a read-only `_provenance` block (originating `source_document`, `pages`, `confidence`, verbatim evidence quotes) and a stable `_row_id` on each input row, so the model reconciles on evidence; output rows cite `_source_rows`. Turn off for lean value-only transforms. |
+| `invariant`    | object \| null   | Optional parts-of-whole guard: `{share_field, total=100, tolerance=0.5, on_violation="repair"\|"warn"}`. After the call the engine **deterministically** sums `share_field`; on an over-sum it drops the least-trustworthy / ungrounded rows until it fits (`repair`) or logs and leaves it (`warn`). An under-sum is never altered. The caller names the field — the engine does arithmetic only, no domain logic. |
 
 ### Output contract
 
-The LLM is instructed to emit `{ "rows": [...] }` where each row is a
-JSON object whose keys match the input row's sub-field names (unless
-the intention explicitly asks to add, rename or remove keys). The
-engine materialises each returned row back into an `ExtractedField`
-with sub-fields, preserving page anchors and bbox metadata from the
-original row when key names match.
+The LLM is instructed to emit `{ "rows": [...] }` where each row mirrors the
+input row's sub-field names (unless the intention asks to add, rename or remove
+keys) and **should** carry `_source_rows` — the input `_row_id`(s) it derives
+from. The engine materialises each row back into an `ExtractedField`, computing
+honest provenance (pages/confidence) from the cited contributors.
+
+When (and only when) a transform declares an `invariant`, the engine treats it
+as an entity consolidation and flags any output row whose identity appears in no
+input row (a fabrication) so the guard removes it first — content-based, so a
+wrong citation cannot save it. Transforms **without** an invariant (translate,
+normalize, reformat) are never grounded and may freely rewrite every value.
+
+Determinism: the transform, extract and judge agents all sample at
+`temperature = 0`, and every post-call tie-break (invariant victim selection,
+entity-resolution canonicalisation, page unions) is a total order, so identical
+inputs yield identical consolidations.
 
 ### Cost & latency
 

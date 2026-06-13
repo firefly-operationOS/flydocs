@@ -36,7 +36,7 @@ from fireflyframework_agentic.agents import FireflyAgent
 from fireflyframework_agentic.prompts import PromptTemplate
 from fireflyframework_agentic.types import BinaryContent
 
-from flydocs.core.observability import DEFAULT_MIDDLEWARE, timed_agent_run
+from flydocs.core.observability import DEFAULT_MIDDLEWARE, IDP_MODEL_SETTINGS, timed_agent_run
 from flydocs.core.services.extraction.postprocess import normalise_doc
 from flydocs.core.services.extraction.schema import build_extraction_output_model
 from flydocs.core.services.extraction.text_anchor import NoOpTextAnchor, TextAnchor
@@ -360,7 +360,7 @@ class MultimodalExtractor:
             description="Multimodal IDP extractor",
             tags=["idp", "extractor"],
             middleware=list(DEFAULT_MIDDLEWARE),
-            model_settings={"max_tokens": self._MAX_OUTPUT_TOKENS},
+            model_settings={**IDP_MODEL_SETTINGS, "max_tokens": self._MAX_OUTPUT_TOKENS},
             auto_register=False,
         )
 

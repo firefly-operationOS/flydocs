@@ -27,7 +27,10 @@ public record LlmTransformation(
         @JsonProperty("output_group") @Nullable String outputGroup,
         @JsonProperty("scope") TransformationScope scope,
         @JsonProperty("intention") String intention,
-        @JsonProperty("prompt_id") @Nullable String promptId) implements Transformation {
+        @JsonProperty("prompt_id") @Nullable String promptId,
+        @JsonProperty("invariant") @Nullable PartsOfWholeInvariant invariant,
+        @JsonProperty("include_provenance") @Nullable Boolean includeProvenance)
+        implements Transformation {
 
     public LlmTransformation {
         if (id == null) {
@@ -36,5 +39,16 @@ public record LlmTransformation(
         if (scope == null) {
             scope = TransformationScope.TASK;
         }
+    }
+
+    /** Backward-compatible constructor without the reconciliation extras. */
+    public LlmTransformation(
+            String id,
+            String targetGroup,
+            @Nullable String outputGroup,
+            TransformationScope scope,
+            String intention,
+            @Nullable String promptId) {
+        this(id, targetGroup, outputGroup, scope, intention, promptId, null, null);
     }
 }

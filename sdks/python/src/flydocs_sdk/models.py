@@ -438,12 +438,25 @@ class EntityResolutionTransformation(_BaseTransformation):
     min_shared_tokens: int = _F(default=2, ge=1)
 
 
+class PartsOfWholeInvariant(_WireBase):
+    """A caller-declared "the parts must sum to a whole" constraint on an LLM
+    transformation: the ``share_field`` values must sum to ``total`` (within
+    ``tolerance``); on an over-sum the service repairs or warns. Domain-agnostic."""
+
+    share_field: str = _F(..., min_length=1)
+    total: float = _F(default=100.0, gt=0.0)
+    tolerance: float = _F(default=0.5, ge=0.0)
+    on_violation: Literal["repair", "warn"] = "repair"
+
+
 class LlmTransformation(_BaseTransformation):
     """Free-form LLM transformation of an array field group's rows."""
 
     type: Literal["llm"] = "llm"
     intention: str = _F(..., min_length=10)
     prompt_id: str | None = None
+    include_provenance: bool = True
+    invariant: PartsOfWholeInvariant | None = None
 
 
 Transformation = Annotated[
@@ -620,6 +633,7 @@ class ExtractedField(_WireBase):
     validation: FieldValidation = _F(default_factory=FieldValidation)
     judge: JudgeOutcome = _F(default_factory=JudgeOutcome)
     notes: str | None = None
+    source: str | None = None
 
 
 ExtractedField.model_rebuild()

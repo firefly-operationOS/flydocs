@@ -6,6 +6,61 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses **CalVer `YY.M.PP`** (PEP 440 may normalise patch numbers
 for the Python wheel — e.g. `26.06.00` → `26.6.0`).
 
+## [26.6.8] - 2026-06-13
+
+### Changed
+
+- **Transforms reconcile on provenance, not bare values
+  (`prompts/transform.yaml` → 1.3.0).** The post-extraction transform used to
+  flatten each row to `{field: value}`, discarding every signal the extractor
+  captured (pages, confidence, the judge's verbatim evidence quote) and then
+  stamping output rows with the first input row's metadata — laundering invented
+  rows with real-looking provenance. Now each input row carries a reserved,
+  read-only `_provenance` block (`source_document`, pages, confidence, per-field
+  evidence quotes) and a stable `_row_id`; output rows cite the `_row_id`(s) they
+  derive from via `_source_rows`, and rows carry honest provenance computed from
+  their actual contributors. The prompt is otherwise kept deliberately gentle and
+  domain-agnostic: numeric reconciliation is **not** done by the prompt (an
+  earlier draft's aggressive in-prompt "fix the sum / drop the non-member" rules
+  were removed — they over-merged unrelated consolidations) but by a
+  deterministic post-call guard (below).
+- **Request-scope consolidations keep per-row source provenance.** When rows from
+  several documents are concatenated, each row is stamped (on a copy — per-task
+  groups stay untouched) with its originating document via a new
+  `ExtractedField.source`, threaded from the orchestrator and surfaced as
+  `_provenance.source_document`.
+- **Determinism: every IDP agent now samples greedily (`temperature = 0`).** The
+  provider default is `1.0`, which made extraction and especially request-scope
+  consolidation differ run to run. A shared `IDP_MODEL_SETTINGS` is merged into
+  the extract, judge and transform agents. Paired with total-order tie-breaks in
+  the invariant victim selection and entity-resolution canonicalisation, sorted
+  page unions, and a rounded parts-of-whole sum, so the same inputs yield the
+  same consolidation.
+- **Decoupling.** The grounding / anti-fabrication machinery is now **opt-in**,
+  triggered only when a transform declares a parts-of-whole invariant — so a
+  value-rewriting transform (translate, normalize, reformat) is never penalised
+  for legitimately changing its strings. Grounding matches by distinctive
+  identity tokens (Unicode-aware, numeric ids included, boilerplate ignored)
+  rather than a Latin/4-char heuristic. `entity_resolution` no longer hardcodes
+  `dni`/Spanish name fields — the first declared `match_by` field is the strong
+  key, the rest drive variant matching. The transform prompt carries no domain or
+  language vocabulary.
+
+### Added
+
+- **Caller-declared parts-of-whole invariant on LLM transformations
+  (`PartsOfWholeInvariant`, wired end-to-end through the Java SDK and
+  orchestration).** A transformation may declare `{share_field, total, tolerance,
+  on_violation}` — purely by field name, no domain wording. After the LLM call
+  the engine deterministically sums `share_field`; on an over-sum it repairs
+  (drops the least-trustworthy / ungrounded rows until it fits) or warns. An
+  under-sum is never altered. Available from a workflow template's transform step
+  through studio (opaque passthrough) → orchestration → flydocs.
+- `LlmTransformation.include_provenance` (default on) gates the `_provenance`
+  block so non-reconciling transforms can keep a lean payload.
+- SDK parity: the Java and Python SDKs gain `PartsOfWholeInvariant`,
+  `LlmTransformation.invariant`/`include_provenance`, and `ExtractedField.source`.
+
 ## [26.6.7] - 2026-06-13
 
 ### Fixed

@@ -133,7 +133,9 @@ def _find_array_field(group: ExtractedFieldGroup) -> ExtractedField | None:
     return None
 
 
-def _normalise_dni(value: str) -> str:
+def _normalise_key(value: str) -> str:
+    """Normalise a strong exact-match key (tax id, account no., SKU): uppercase,
+    keep only alphanumerics. Domain-agnostic -- works for any identifier."""
     return "".join(ch for ch in (value or "").upper() if ch.isalnum())
 
 
@@ -175,44 +177,36 @@ def _dedupe_rows(
 ) -> list[ExtractedField]:
     """Walk rows, group them by match strategy, collapse each cluster into one canonical row."""
     clusters: list[list[ExtractedField]] = []
-    dni_key_to_cluster: dict[str, int] = {}
+    strong_key_to_cluster: dict[str, int] = {}
 
-    name_field = _select_name_field(t.match_by)
+    # The FIRST declared match_by field is the strong exact-match key (a tax id,
+    # account number, SKU, ...); the remaining fields drive fuzzy variant
+    # matching. No field name is special-cased -- the caller declares the order.
+    strong_key = t.match_by[0] if t.match_by else ""
+    name_field = _select_name_field(t.match_by, strong_key)
 
     for row in rows:
-        # Phase 1 — DNI exact match.
-        dni_value = ""
-        for field_name in t.match_by:
-            v = _row_value(row, field_name)
-            if field_name.lower() == "dni" and v:
-                dni_value = v
-                break
-        if dni_value:
-            key = _normalise_dni(dni_value)
-            if key in dni_key_to_cluster:
-                clusters[dni_key_to_cluster[key]].append(row)
+        # Phase 1 — strong exact-key match (the first match_by field).
+        key_value = _row_value(row, strong_key) if strong_key else ""
+        if key_value:
+            key = _normalise_key(key_value)
+            if key in strong_key_to_cluster:
+                clusters[strong_key_to_cluster[key]].append(row)
             else:
-                dni_key_to_cluster[key] = len(clusters)
+                strong_key_to_cluster[key] = len(clusters)
                 clusters.append([row])
             continue
 
-        # Phase 2 — name-variant match. Walk existing clusters and try
-        # to fold this row into the first compatible one.
+        # Phase 2 — variant match on the secondary field. Walk existing clusters
+        # and try to fold this row into the first compatible one.
         if name_field:
             this_name = _row_value(row, name_field)
             matched = False
             for cluster in clusters:
                 rep = cluster[0]
-                rep_dni = ""
-                for field_name in t.match_by:
-                    v = _row_value(rep, field_name)
-                    if field_name.lower() == "dni" and v:
-                        rep_dni = v
-                        break
-                # Don't merge a no-DNI row into a DNI cluster (the
-                # representative row's identity is stronger; we'd
-                # rather emit the no-DNI row separately).
-                if rep_dni:
+                # Don't merge a row lacking the strong key into a strong-key
+                # cluster: that cluster's identity is firmer, so emit separately.
+                if strong_key and _row_value(rep, strong_key):
                     continue
                 rep_name = _row_value(rep, name_field)
                 if _name_variant_match(this_name, rep_name, t.min_shared_tokens):
@@ -228,18 +222,11 @@ def _dedupe_rows(
     return [_canonicalise(cluster, t) for cluster in clusters]
 
 
-def _select_name_field(match_by: list[str]) -> str:
-    """Pick a single field name to use for the name-variant phase.
-
-    Conventional name fields come first; fall back to the first
-    non-DNI entry in ``match_by``. Returns ``""`` when no usable field
-    is found.
-    """
-    for candidate in ("nombre", "name", "razon_social", "full_name"):
-        if candidate in match_by:
-            return candidate
+def _select_name_field(match_by: list[str], strong_key: str) -> str:
+    """The field used for the fuzzy variant phase: the first ``match_by`` entry
+    that is not the strong key. Domain-agnostic -- no hardcoded field names."""
     for f in match_by:
-        if f.lower() != "dni":
+        if f != strong_key:
             return f
     return ""
 
@@ -292,31 +279,30 @@ def _canonicalise(cluster: list[ExtractedField], _t: EntityResolutionTransformat
 def _pick_canonical(candidates: list[ExtractedField]) -> ExtractedField:
     """Of N candidate sub-fields for the same name, return the 'best' value."""
 
-    def score(sub: ExtractedField) -> tuple[int, int]:
+    def score(sub: ExtractedField) -> tuple[int, int, str]:
+        # Total order: non-empty beats empty, then most-complete, then a stable
+        # lexicographic tie-break so the winner never depends on list position.
         v = sub.value
+        tie = str(v) if v is not None else ""
         if isinstance(v, str):
-            return (1, len(v.strip()))
+            return (1, len(v.strip()), tie)
         if isinstance(v, (int, float)):
-            return (1, 1)
+            return (1, 1, tie)
         if v is None or v == "":
-            return (0, 0)
+            return (0, 0, tie)
         if isinstance(v, list):
-            return (1, len(v))
-        return (1, 1)
+            return (1, len(v), tie)
+        return (1, 1, tie)
 
     return max(candidates, key=score)
 
 
 def _merge_pages(cluster: list[ExtractedField]) -> list[int]:
-    """Union of all pages across a cluster, preserving order."""
-    seen: set[int] = set()
-    out: list[int] = []
+    """Sorted union of all pages across a cluster (deterministic; never set-order)."""
+    pages: set[int] = set()
     for row in cluster:
-        for p in row.pages or []:
-            if p not in seen:
-                seen.add(p)
-                out.append(p)
-    return out
+        pages.update(row.pages or [])
+    return sorted(pages)
 
 
 __all__ = ["EntityResolutionTransformer"]

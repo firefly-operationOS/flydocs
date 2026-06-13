@@ -65,12 +65,39 @@ class EntityResolutionTransformation(_BaseTransformation):
     min_shared_tokens: int = Field(default=2, ge=1)
 
 
+class PartsOfWholeInvariant(BaseModel):
+    """A caller-declared "the parts must sum to a whole" constraint on a transform.
+
+    Domain-agnostic: name the per-row numeric ``share_field`` and the ``total``
+    those shares must add up to (e.g. ``100`` for percentages, or a capital /
+    headcount / budget figure for absolute counts). The engine does arithmetic
+    only -- it has no notion of what the rows represent. After the LLM emits its
+    rows the engine sums ``share_field`` and, when the total exceeds ``total``
+    beyond ``tolerance``, either repairs it (drops the least-trustworthy /
+    unsourced rows until it fits) or just warns, per ``on_violation``. An
+    under-sum is never "repaired" by inventing rows -- it is left as-is.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    share_field: str = Field(..., min_length=1)
+    total: float = Field(default=100.0, gt=0.0)
+    tolerance: float = Field(default=0.5, ge=0.0)
+    on_violation: Literal["repair", "warn"] = "repair"
+
+
 class LlmTransformation(_BaseTransformation):
     """Free-form LLM transformation of an array field group's rows."""
 
     type: Literal["llm"] = "llm"
     intention: str = Field(..., min_length=10)
     prompt_id: str | None = None
+    # Surface the provenance the extractor already captured (per-row id, pages,
+    # confidence, judge evidence) to the model so it reconciles on evidence and
+    # can cite which input rows each output row derives from. Domain-agnostic.
+    include_provenance: bool = True
+    # Optional parts-of-whole guard enforced deterministically after the LLM call.
+    invariant: PartsOfWholeInvariant | None = None
 
 
 Transformation = Annotated[
@@ -82,6 +109,7 @@ Transformation = Annotated[
 __all__ = [
     "EntityResolutionTransformation",
     "LlmTransformation",
+    "PartsOfWholeInvariant",
     "Transformation",
     "TransformationScope",
 ]

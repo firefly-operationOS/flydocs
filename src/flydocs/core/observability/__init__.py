@@ -29,6 +29,7 @@ from pyfly.observability.correlation import (
 
 from flydocs.core.observability.agent_middleware import (
     DEFAULT_MIDDLEWARE,
+    IDP_MODEL_SETTINGS,
     PROMPT_CACHE_MIDDLEWARE,
 )
 from flydocs.core.observability.outbound_log import (
@@ -39,6 +40,7 @@ from flydocs.core.observability.outbound_log import (
 
 __all__ = [
     "DEFAULT_MIDDLEWARE",
+    "IDP_MODEL_SETTINGS",
     "PROMPT_CACHE_MIDDLEWARE",
     "current_correlation_context",
     "get_correlation_id",

@@ -37,7 +37,8 @@ public record ExtractedField(
         @JsonProperty("bbox") @Nullable BoundingBox bbox,
         @JsonProperty("validation") FieldValidation validation,
         @JsonProperty("judge") JudgeOutcome judge,
-        @JsonProperty("notes") @Nullable String notes) {
+        @JsonProperty("notes") @Nullable String notes,
+        @JsonProperty("source") @Nullable String source) {
 
     public ExtractedField {
         pages = pages == null ? List.of() : List.copyOf(pages);

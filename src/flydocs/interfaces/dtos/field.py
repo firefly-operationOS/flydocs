@@ -135,6 +135,10 @@ class ExtractedField(BaseModel):
     validation: FieldValidation = _PydField(default_factory=FieldValidation)
     judge: JudgeOutcome = _PydField(default_factory=JudgeOutcome)
     notes: str | None = None
+    # Originating document of this value/row, stamped when rows from several
+    # documents are consolidated (request-scope transforms) so a downstream
+    # transform/consumer keeps per-row provenance. Null for single-document fields.
+    source: str | None = None
 
 
 ExtractedField.model_rebuild()

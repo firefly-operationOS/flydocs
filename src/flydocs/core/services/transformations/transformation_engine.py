@@ -96,16 +96,21 @@ class TransformationEngine:
         self,
         transformation,  # noqa: ANN001 -- discriminated union
         per_task_groups: list[list[ExtractedFieldGroup]],
+        *,
+        sources: list[str | None] | None = None,
     ) -> ExtractedFieldGroup | None:
         """Apply across every task. Return one consolidated group.
 
         Concatenates the rows of every matching ``target_group`` across
         tasks into a single synthetic group, applies the transformation
         to it, and returns the result. Per-task groups are NOT mutated
-        by this path.
+        by this path. ``sources``, when given, is a per-task label
+        (typically the originating document filename) stamped onto each
+        consolidated row's ``source`` so the transform keeps per-row
+        provenance across documents.
         """
         target_name = transformation.target_group
-        consolidated = _consolidate_groups(per_task_groups, target_name)
+        consolidated = _consolidate_groups(per_task_groups, target_name, sources)
         if consolidated is None:
             return None
         # Wrap the consolidated group in a one-element list so the
@@ -149,18 +154,23 @@ class TransformationEngine:
 
 
 def _consolidate_groups(
-    per_task_groups: list[list[ExtractedFieldGroup]], target_name: str
+    per_task_groups: list[list[ExtractedFieldGroup]],
+    target_name: str,
+    sources: list[str | None] | None = None,
 ) -> ExtractedFieldGroup | None:
     """Concat rows of every matching target group across tasks.
 
     Returns a synthetic :class:`ExtractedFieldGroup` whose single array
     field contains the union of rows. ``None`` when no task has the
-    target group.
+    target group. ``sources[i]`` (when given) labels every row taken from
+    task ``i`` with its originating document, stamped onto a copy of the
+    row so the per-task groups stay untouched.
     """
     array_field_name = ""
     all_rows: list[ExtractedField] = []
     found_any = False
-    for task_groups in per_task_groups:
+    for idx, task_groups in enumerate(per_task_groups):
+        label = sources[idx] if sources is not None and idx < len(sources) else None
         for g in task_groups:
             if g.name != target_name:
                 continue
@@ -169,7 +179,10 @@ def _consolidate_groups(
                 if isinstance(f.value, list):
                     if not array_field_name:
                         array_field_name = f.name
-                    all_rows.extend(r for r in f.value if isinstance(r, ExtractedField))
+                    for r in f.value:
+                        if not isinstance(r, ExtractedField):
+                            continue
+                        all_rows.append(r.model_copy(update={"source": label}) if label else r)
     if not found_any or not all_rows:
         return None
     array_field = ExtractedField(

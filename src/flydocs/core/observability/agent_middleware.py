@@ -70,3 +70,12 @@ PROMPT_CACHE_MIDDLEWARE = PromptCacheMiddleware(
 #: When the prompt cache is disabled via ``FLYDOCS_PROMPT_CACHE=off``
 #: the middleware list goes empty so the agent constructs without it.
 DEFAULT_MIDDLEWARE = [PROMPT_CACHE_MIDDLEWARE] if _prompt_cache_enabled() else []
+
+#: Sampling settings shared by every IDP agent (extract / judge / transform).
+#: Pinned to greedy decoding: the provider default temperature is 1.0, which
+#: makes extraction and especially request-scope consolidation sample
+#: differently run to run. Temperature 0 is not a hard determinism guarantee on
+#: hosted models, so it is paired with deterministic post-LLM reconciliation
+#: (total-order tie-breaks, the invariant guard). Merge into each agent's
+#: ``model_settings`` so a single edit changes sampling everywhere.
+IDP_MODEL_SETTINGS = {"temperature": 0.0}
