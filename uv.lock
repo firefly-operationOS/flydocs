@@ -1483,7 +1483,7 @@ security = [
 
 [[package]]
 name = "flydocs"
-version = "26.6.11"
+version = "26.6.12"
 source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },
