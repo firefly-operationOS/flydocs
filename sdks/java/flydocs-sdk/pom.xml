@@ -17,7 +17,7 @@
     <parent>
         <groupId>com.firefly.flydocs</groupId>
         <artifactId>flydocs-sdk-parent</artifactId>
-        <version>26.6.8</version>
+        <version>26.6.9</version>
     </parent>
 
     <artifactId>flydocs-sdk</artifactId>

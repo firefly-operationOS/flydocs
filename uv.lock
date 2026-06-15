@@ -1483,7 +1483,7 @@ security = [
 
 [[package]]
 name = "flydocs"
-version = "26.6.3"
+version = "26.6.9"
 source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },
@@ -3942,7 +3942,7 @@ wheels = [
 
 [[package]]
 name = "pyfly"
-version = "26.6.99"
+version = "26.6.101"
 source = { editable = "../../fireflyframework/fireflyframework-pyfly" }
 dependencies = [
     { name = "pydantic" },

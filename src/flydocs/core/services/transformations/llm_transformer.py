@@ -39,7 +39,7 @@ from fireflyframework_agentic.prompts import PromptTemplate
 from pydantic import BaseModel, Field
 
 from flydocs.core.observability import DEFAULT_MIDDLEWARE, IDP_MODEL_SETTINGS, timed_agent_run
-from flydocs.interfaces.dtos.field import ExtractedField, ExtractedFieldGroup
+from flydocs.interfaces.dtos.field import ExtractedField, ExtractedFieldGroup, JudgeOutcome
 from flydocs.interfaces.dtos.transformation import LlmTransformation
 
 logger = logging.getLogger(__name__)
@@ -145,9 +145,7 @@ class LlmTransformer:
             return None
 
         invariant = getattr(transformation, "invariant", None)
-        produced_rows = _rebuild_rows(
-            run_result.output.rows, rows, flag_ungrounded=invariant is not None
-        )
+        produced_rows = _rebuild_rows(run_result.output.rows, rows, flag_ungrounded=invariant is not None)
         if invariant is not None:
             produced_rows = _enforce_invariant(produced_rows, invariant, transformation.id)
         new_array = ExtractedField(
@@ -300,6 +298,73 @@ def _is_grounded(row: ExtractedField, input_token_sets: list[set[str]]) -> bool:
     return any(0 < df.get(t, 0) <= distinctive_max for t in row_tokens)
 
 
+def _lr_identity_tokens(lr: dict[str, Any]) -> set[str]:
+    """Identity tokens of an LLM output row: union of its STRING value tokens.
+
+    Mirrors :func:`_row_tokens` for the raw dict the model returned, so an
+    output row that omitted ``_source_rows`` can still be matched back to the
+    input row(s) it describes. Reserved context keys are never data.
+    """
+    out: set[str] = set()
+    for name, value in lr.items():
+        if name in _RESERVED_KEYS:
+            continue
+        if isinstance(value, str) and value.strip():
+            out |= _norm_tokens(value)
+    return out
+
+
+def _identity_contributors(
+    row_tokens: set[str],
+    rows: list[ExtractedField],
+    input_token_sets: list[set[str]],
+) -> list[ExtractedField]:
+    """Input rows sharing a DISTINCTIVE identity token with ``row_tokens``.
+
+    The same distinctiveness rule as :func:`_is_grounded` -- a token carried by
+    more than half the inputs is boilerplate and matches nothing -- so an uncited
+    output row recovers the real source row(s) it derives from instead of falling
+    back to ``rows[0]``. Empty when the row has no string identity to match on.
+    """
+    if not row_tokens or not input_token_sets:
+        return []
+    df: dict[str, int] = {}
+    for tokens in input_token_sets:
+        for t in tokens:
+            df[t] = df.get(t, 0) + 1
+    distinctive_max = max(1, len(input_token_sets) // 2)
+    matches: list[ExtractedField] = []
+    for row, tokens in zip(rows, input_token_sets, strict=False):
+        if any(0 < df.get(t, 0) <= distinctive_max for t in (row_tokens & tokens)):
+            matches.append(row)
+    return matches
+
+
+def _provenance_subs(
+    contributors: list[ExtractedField],
+    fallback_row: ExtractedField,
+) -> dict[str, ExtractedField]:
+    """Per-field-name provenance source across the contributing rows.
+
+    For each sub-field name, pick the best-grounded contributor cell -- one that
+    carries a bbox wins over one that does not, then higher confidence breaks the
+    tie -- so a consolidated cell points at its own real source rather than at the
+    first row's. Falls back to the template row's sub-fields only when the output
+    row resolved no contributor at all.
+    """
+    sources = contributors or [fallback_row]
+    best: dict[str, ExtractedField] = {}
+    for c in sources:
+        for sub in c.value if isinstance(c.value, list) else []:
+            if not isinstance(sub, ExtractedField):
+                continue
+            key = (sub.bbox is not None, sub.confidence or 0.0)
+            cur = best.get(sub.name)
+            if cur is None or key > (cur.bbox is not None, cur.confidence or 0.0):
+                best[sub.name] = sub
+    return best
+
+
 def _rebuild_rows(
     llm_rows: list[dict[str, Any]],
     rows: list[ExtractedField],
@@ -308,10 +373,16 @@ def _rebuild_rows(
 ) -> list[ExtractedField]:
     """Materialise LLM row dicts back into ExtractedField rows with honest provenance.
 
-    Each output row may cite ``_source_rows: [<_row_id>...]`` naming the input rows
-    it derives from; when it does, the row's pages/confidence/bbox are computed
-    from those actual contributors instead of blanket-borrowed from ``rows[0]``
-    (which previously laundered fabricated rows with real-looking provenance).
+    Provenance is threaded from the ACTUAL contributor rows, at both the row and
+    the per-cell level, so a consolidated row never wears the first input row's
+    bbox/pages/confidence/judge. A contributor set is resolved per output row in
+    priority order: (1) the input rows it cites via ``_source_rows``; (2) for a
+    pure 1:1 rewrite -- no row in the batch cites anything and the counts match --
+    the input row at the same index; (3) input rows it matches by distinctive
+    identity token (an uncited consolidation row); (4) ``rows[0]`` as a last
+    resort. Row-level pages/confidence are the union/mean of the contributors;
+    each cell's bbox/pages/confidence/judge/notes come from its best-grounded
+    contributor cell (:func:`_provenance_subs`).
 
     Grounding/flagging is OPT-IN via ``flag_ungrounded`` -- set only when the
     transformation declares a parts-of-whole invariant (an entity consolidation).
@@ -324,18 +395,23 @@ def _rebuild_rows(
     legitimately rewritten string is never penalised. Reserved keys are stripped.
     """
     template_row = rows[0]
-    template_subs = template_row.value if isinstance(template_row.value, list) else []
-    template_by_name = {s.name: s for s in template_subs if isinstance(s, ExtractedField)}
     by_id = {f"r{i + 1}": r for i, r in enumerate(rows)}
-    input_token_sets = [_row_tokens(r) for r in rows] if flag_ungrounded else []
+    input_token_sets = [_row_tokens(r) for r in rows]
+    batch_has_citations = any((lr or {}).get(_SOURCE_ROWS) for lr in llm_rows)
+    positional_ok = not batch_has_citations and len(llm_rows) == len(rows)
 
     materialised: list[ExtractedField] = []
-    for lr in llm_rows:
+    for out_idx, lr in enumerate(llm_rows):
         lr = lr or {}
         cited = lr.get(_SOURCE_ROWS) or []
         if isinstance(cited, str):
             cited = [cited]
         contributors = [by_id[c] for c in cited if c in by_id]
+        if not contributors:
+            if positional_ok:
+                contributors = [rows[out_idx]]
+            else:
+                contributors = _identity_contributors(_lr_identity_tokens(lr), rows, input_token_sets)
 
         if contributors:
             pages = _union_pages(contributors)
@@ -346,18 +422,21 @@ def _rebuild_rows(
             confidence = template_row.confidence
             bbox = template_row.bbox
 
+        prov_by_name = _provenance_subs(contributors, template_row)
         sub_fields: list[ExtractedField] = []
         for name, value in lr.items():
             if name in _RESERVED_KEYS:
                 continue
-            tmpl = template_by_name.get(name)
+            src = prov_by_name.get(name)
             sub_fields.append(
                 ExtractedField(
                     name=name,
                     value=value,
-                    pages=tmpl.pages if tmpl else pages,
-                    confidence=tmpl.confidence if tmpl else confidence,
-                    bbox=tmpl.bbox if tmpl else bbox,
+                    pages=src.pages if src else pages,
+                    confidence=src.confidence if src else confidence,
+                    bbox=src.bbox if src else bbox,
+                    judge=src.judge if src else JudgeOutcome(),
+                    notes=src.notes if src else None,
                 )
             )
         new_row = ExtractedField(
@@ -436,7 +515,8 @@ def _enforce_invariant(
         dropped += 1
     if dropped:
         logger.info(
-            "llm_transformer: transform %s invariant '%s' repaired: dropped %d row(s), sum %.2f -> %.2f (<= %.2f)",
+            "llm_transformer: transform %s invariant '%s' repaired: "
+            "dropped %d row(s), sum %.2f -> %.2f (<= %.2f)",
             transformation_id[:8],
             share_field,
             dropped,

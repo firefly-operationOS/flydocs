@@ -6,7 +6,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses **CalVer `YY.M.PP`** (PEP 440 may normalise patch numbers
 for the Python wheel — e.g. `26.06.00` → `26.6.0`).
 
-## [26.6.8] - 2026-06-13
+## [26.6.9] - 2026-06-15
+
+### Fixed
+
+- **Consolidated rows now carry per-cell provenance from their real source, not
+  the first input row's.** `_rebuild_rows` already computed each output row's
+  *row-level* pages/confidence from its cited contributors (26.6.8), but every
+  *cell* still borrowed its `bbox`/`pages`/`confidence` from `rows[0]` via a
+  single `template_by_name` map, and each cell's `judge`/`notes` were dropped to
+  the default `uncertain`/0. A cross-document consolidation (e.g. a "current cap
+  table" merged across several deeds) therefore stamped every member with the
+  *first* member's bounding box, page and confidence — so UI overlays pointed
+  every row at the same rectangle on the same page, and the row-level pages no
+  longer matched the cell-level pages. Now each output cell resolves its
+  provenance from the contributor row it actually derives from, and the judge
+  verdict + notes survive the transform.
+- **Provenance source is resolved per output row in priority order:** (1) the
+  input rows cited via `_source_rows`; (2) for a pure 1:1 rewrite — no row in the
+  batch cites anything and the counts match — the input row at the same index;
+  (3) input rows matched by a distinctive identity token (an uncited
+  consolidation row); (4) `rows[0]` as a last resort. Within a row, each field
+  takes its best-grounded contributor cell (one with a bbox wins over one
+  without, then higher confidence), so a cell points at its own source even when
+  the row merges several documents. Value-rewriting transforms are unchanged when
+  no contributor is matched.
+
 
 ### Changed
 
