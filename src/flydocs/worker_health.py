@@ -56,10 +56,10 @@ from collections.abc import Iterator
 from typing import TYPE_CHECKING
 
 import uvicorn
-from pyfly.actuator import HealthAggregator, build_actuator_routes, install_health_indicators
 from starlette.applications import Starlette
 
 if TYPE_CHECKING:
+    from pyfly.actuator import HealthAggregator
     from pyfly.context.application_context import ApplicationContext
 
     from flydocs.config import IDPSettings
@@ -78,19 +78,35 @@ def resolve_health_port(settings: IDPSettings) -> int:
 
 
 def build_health_app(
-    context: ApplicationContext | None = None,
+    context: ApplicationContext,
     aggregator: HealthAggregator | None = None,
 ) -> Starlette:
-    """Starlette app exposing pyfly's actuator routes for a worker process.
+    """Management app for a worker process: actuator + admin dashboard.
 
-    Scans the context's container for ``HealthIndicator`` beans (e.g.
-    ``database_health``, ``eda_health``) and mounts the actuator route
-    table over them, honouring the web-exposure config carried by
-    *context*.
+    Returns pyfly's full management app (``create_management_app``) so a worker
+    pod exposes the **same management surface as the API** on its health port —
+    the actuator endpoints **and** the ``/admin`` dashboard (beans, health, env,
+    config, loggers, metrics, scheduled, runtime, server, overview) — plus
+    pyfly's structured request access log. Indicator/exposure config is carried
+    by *context*; callers must invoke this after ``PyFlyApplication.startup()``.
     """
-    agg = aggregator if aggregator is not None else HealthAggregator()
-    install_health_indicators(context, agg)
-    return Starlette(routes=build_actuator_routes(context, agg))
+    from pyfly.web.adapters.starlette.management_app import create_management_app
+
+    admin_enabled = str(context.config.get("pyfly.admin.enabled", "false")).lower() in ("true", "1", "yes")
+    trace_collector = None
+    if admin_enabled:
+        from pyfly.admin.middleware.trace_collector import TraceCollectorFilter
+
+        trace_collector = TraceCollectorFilter()
+    return create_management_app(
+        context,
+        health_agg=aggregator,
+        http_exchange_recorder=None,
+        admin_trace_collector=trace_collector,
+        actuator_active=True,
+        admin_enabled=admin_enabled,
+        base_path="",
+    )
 
 
 class _NoSignalServer(uvicorn.Server):
@@ -124,10 +140,14 @@ def make_health_server(app: Starlette, *, settings: IDPSettings) -> uvicorn.Serv
 
 
 def build_worker_health_server(
-    context: ApplicationContext | None,
+    context: ApplicationContext,
     settings: IDPSettings,
 ) -> uvicorn.Server | None:
-    """Health server for a worker process, or ``None`` when disabled."""
+    """Health server for a worker process, or ``None`` when disabled.
+
+    *context* is the worker's started ``ApplicationContext`` (the CLI passes
+    ``pyfly_app.context``); the management app is built from it.
+    """
     if resolve_health_port(settings) == 0:
         return None
     return make_health_server(build_health_app(context), settings=settings)
