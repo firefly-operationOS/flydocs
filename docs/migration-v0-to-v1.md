@@ -774,7 +774,7 @@ import com.firefly.flydocs.sdk.model.WebhookEnvelope;
 **Python (v0):**
 
 ```python
-client = FlydocsClient(base_url="http://localhost:8400")
+client = FlydocsClient(base_url="http://localhost:8080")
 result = client.extract(ExtractionRequest(
     documents=[DocumentInput.from_path("invoice.pdf")],
     docs=[DocSpec(
@@ -788,7 +788,7 @@ print(result.request_id, result.model)
 **Python (v1):**
 
 ```python
-client = FlydocsClient(base_url="http://localhost:8400")
+client = FlydocsClient(base_url="http://localhost:8080")
 result = client.extract(ExtractionRequest(
     files=[FileInput.from_path("invoice.pdf")],
     document_types=[DocumentTypeSpec(
@@ -802,7 +802,7 @@ print(result.id, result.pipeline.model)
 **Java (v0):**
 
 ```java
-FlydocsClient client = FlydocsClient.builder().baseUrl("http://localhost:8400").build();
+FlydocsClient client = FlydocsClient.builder().baseUrl("http://localhost:8080").build();
 ExtractionResult result = client.extract(ExtractionRequest.of(
         List.of(DocumentInput.ofPath(Path.of("invoice.pdf"))),
         List.of(DocSpec.builder()
@@ -815,7 +815,7 @@ System.out.println(result.requestId() + " " + result.model());
 **Java (v1):**
 
 ```java
-FlydocsClient client = FlydocsClient.builder().baseUrl("http://localhost:8400").build();
+FlydocsClient client = FlydocsClient.builder().baseUrl("http://localhost:8080").build();
 ExtractionResult result = client.extract(ExtractionRequest.of(
         List.of(FileInput.ofPath(Path.of("invoice.pdf"))),
         List.of(DocumentTypeSpec.builder()

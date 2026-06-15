@@ -56,7 +56,7 @@ into the application context from `flydocs.*` properties.
 From the flydocs repo root:
 
 ```bash
-task docker:up:test     # serves http://localhost:8400 backed by a mock LLM
+task docker:up:test     # serves http://localhost:8080 backed by a mock LLM
 ```
 
 If you already have a running flydocs deployment, point `baseUrl` at it and
@@ -90,7 +90,7 @@ public class Quickstart {
         // 3. Call the service. FlydocsClientAsync is the primary integration
         //    surface; it's reactive (Project Reactor) and non-blocking.
         try (FlydocsClientAsync flydocs = FlydocsClientAsync.builder()
-                .baseUrl("http://localhost:8400")
+                .baseUrl("http://localhost:8080")
                 .build()) {
 
             ExtractionResult result = flydocs.extract(request)
@@ -127,7 +127,7 @@ the autoconfig wire everything from properties:
 ```yaml
 # application.yaml
 flydocs:
-  base-url: http://localhost:8400
+  base-url: http://localhost:8080
   api-key: ${FLYDOCS_API_KEY}                  # optional, Authorization: Bearer
   timeout: 60s
   max-attempts: 3                              # retry transient 5xx
@@ -173,7 +173,7 @@ If you can't take a reactive dependency:
 import com.firefly.flydocs.sdk.FlydocsClient;
 
 FlydocsClient flydocs = FlydocsClient.builder()
-        .baseUrl("http://localhost:8400")
+        .baseUrl("http://localhost:8080")
         .build();
 
 ExtractionResult result = flydocs.extract(request);

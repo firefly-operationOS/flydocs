@@ -242,11 +242,11 @@ spec:
       livenessProbe:
         httpGet:
           path: /actuator/health/liveness
-          port: 8400
+          port: 9090
       readinessProbe:
         httpGet:
           path: /actuator/health/readiness
-          port: 8400
+          port: 9090
 ```
 
 `/actuator/health/readiness` reflects the DB + EDA bus state via the

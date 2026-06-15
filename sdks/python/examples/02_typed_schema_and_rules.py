@@ -60,7 +60,7 @@ async def main(path: Path) -> int:
             ),
         ),
     )
-    async with AsyncClient("http://localhost:8400") as flydocs:
+    async with AsyncClient("http://localhost:8080") as flydocs:
         report = await flydocs.validate(req)
         if not report.ok:
             print("semantic validation failed:")

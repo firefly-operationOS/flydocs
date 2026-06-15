@@ -2,7 +2,7 @@
 name = "flydocs"
 # CalVer YY.MM.PP -- bumped per release. Note that PEP 440 normalises
 # ``26.05.01`` -> ``26.5.1`` in the built wheel filename.
-version = "26.6.9"
+version = "26.6.10"
 description = "Pure-multimodal Intelligent Document Processing service: structured fields + bounding boxes, validation, authenticity checks, LLM judge, and a business-rule engine. Sync + queue-backed async APIs over fireflyframework-pyfly and -agentic. Part of Firefly OperationOS, platform-agnostic by design."
 readme = "README.md"
 requires-python = ">=3.13"
@@ -19,7 +19,7 @@ dependencies = [
     # so a fresh ``uv sync`` is enough to boot the full stack. The ``web``
     # extra declares starlette + uvicorn, which the worker health server
     # imports directly; the floor carries ``pyfly.actuator.install_health_indicators``.
-    "pyfly[fastapi,web,observability,security,data-relational,postgresql,eda,redis,client,scheduling,cli]>=26.6.98",
+    "pyfly[fastapi,web,observability,security,data-relational,postgresql,eda,redis,client,scheduling,cli]>=26.6.103",
 
     # GenAI metaframework -- FireflyAgent with multimodal content (BinaryContent/ImageUrl)
     # over pydantic-ai. Pulls in the OpenAI / Anthropic / Bedrock providers via pydantic-ai-slim.
@@ -126,10 +126,12 @@ override-dependencies = [
 ]
 
 [tool.uv.sources]
-# Sibling-repo sources. The agentic framework is consumed from its published
-# git tag so a fresh clone / CI build resolves it without the sibling path.
-# pyfly stays on the local checkout (released on its own cadence).
-pyfly = { path = "../../fireflyframework/fireflyframework-pyfly", editable = true }
+# Sibling-repo sources. Both frameworks are consumed from their published git
+# tags so a fresh clone / CI build resolves them without a sibling path. The
+# (vestigial) ./vendor clone + Dockerfile BuildKit context for pyfly are now
+# no-ops — the path-rewrite sed no longer matches a git source — exactly as for
+# agentic; they can be removed in a later cleanup.
+pyfly = { git = "https://github.com/fireflyframework/fireflyframework-pyfly.git", tag = "v26.06.103" }
 fireflyframework-agentic = { git = "https://github.com/fireflyframework/fireflyframework-agentic.git", tag = "v26.05.30" }
 
 [tool.hatch.build.targets.wheel]

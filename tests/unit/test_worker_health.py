@@ -157,15 +157,15 @@ def test_resolve_health_port_defaults_to_service_port() -> None:
     # worker_health_port passed explicitly: IDPSettings is a BaseSettings, so
     # a bare constructor would absorb ambient FLYDOCS_WORKER_HEALTH_PORT from
     # the developer's shell or .env and flake this assertion.
-    assert resolve_health_port(IDPSettings(port=8400, worker_health_port=None)) == 8400
+    assert resolve_health_port(IDPSettings(port=8080, worker_health_port=None)) == 8080
 
 
 def test_resolve_health_port_override() -> None:
-    assert resolve_health_port(IDPSettings(port=8400, worker_health_port=9090)) == 9090
+    assert resolve_health_port(IDPSettings(port=8080, worker_health_port=9090)) == 9090
 
 
 def test_resolve_health_port_zero_disables() -> None:
-    assert resolve_health_port(IDPSettings(port=8400, worker_health_port=0)) == 0
+    assert resolve_health_port(IDPSettings(port=8080, worker_health_port=0)) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -174,7 +174,7 @@ def test_resolve_health_port_zero_disables() -> None:
 
 
 def test_make_health_server_config() -> None:
-    settings = IDPSettings(port=8400, worker_health_port=9090)
+    settings = IDPSettings(port=8080, worker_health_port=9090)
     server = make_health_server(build_health_app(), settings=settings)
     assert server.config.host == "0.0.0.0"
     assert server.config.port == 9090
@@ -183,17 +183,17 @@ def test_make_health_server_config() -> None:
 
 
 def test_make_health_server_rejects_disabled_port() -> None:
-    settings = IDPSettings(port=8400, worker_health_port=0)
+    settings = IDPSettings(port=8080, worker_health_port=0)
     with pytest.raises(ValueError, match="disabled"):
         make_health_server(build_health_app(), settings=settings)
 
 
 def test_build_worker_health_server_none_when_disabled() -> None:
-    assert build_worker_health_server(None, IDPSettings(port=8400, worker_health_port=0)) is None
+    assert build_worker_health_server(None, IDPSettings(port=8080, worker_health_port=0)) is None
 
 
 def test_build_worker_health_server_enabled() -> None:
-    server = build_worker_health_server(None, IDPSettings(port=8400, worker_health_port=9090))
+    server = build_worker_health_server(None, IDPSettings(port=8080, worker_health_port=9090))
     assert server is not None
     assert server.config.port == 9090
 

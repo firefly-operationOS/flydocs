@@ -20,7 +20,7 @@ What it shows:
   * Walk the new response shape (``documents[*].field_groups[*].fields``).
 
 Run from the repo root, with a flydocs service reachable at
-``http://localhost:8400`` (e.g. via ``task docker:up:test``)::
+``http://localhost:8080`` (e.g. via ``task docker:up:test``)::
 
     uv run python sdks/python/examples/01_first_extraction.py path/to/invoice.pdf
 """
@@ -56,7 +56,7 @@ async def main(path: Path) -> int:
         ],
     )
 
-    async with AsyncClient("http://localhost:8400") as flydocs:
+    async with AsyncClient("http://localhost:8080") as flydocs:
         result = await flydocs.extract(
             ExtractionRequest(
                 files=[FileInput.from_path(path)],

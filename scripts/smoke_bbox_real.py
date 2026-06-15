@@ -46,7 +46,7 @@ import httpx
 import pymupdf  # pyright: ignore[reportMissingImports]
 from PIL import Image, ImageDraw, ImageFont
 
-API = "http://localhost:8400"
+API = "http://localhost:8080"
 OUT = Path("/tmp/flydocs-viz")
 OUT.mkdir(parents=True, exist_ok=True)
 

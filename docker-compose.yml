@@ -72,7 +72,8 @@ services:
     container_name: flydocs-api
     command: ["serve"]
     ports:
-      - "${IDP_PORT:-8400}:8400"
+      - "${IDP_PORT:-8080}:8080"
+      - "${IDP_MGMT_PORT:-9090}:9090"
     # Optional .env -- compose v2 honours ``required: false`` so the stack
     # boots even without a local .env (provider keys fall back to the host
     # shell env). ``task docker:up`` also auto-creates .env from env_template.
@@ -97,7 +98,7 @@ services:
       gotenberg:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "--fail", "http://localhost:8400/actuator/health/readiness"]
+      test: ["CMD", "curl", "--fail", "http://localhost:9090/actuator/health/readiness"]
       interval: 5s
       timeout: 3s
       retries: 30
@@ -107,6 +108,10 @@ services:
     image: flydocs:latest
     container_name: flydocs-worker
     command: ["worker"]
+    # Worker health/management server (pyfly actuator) on 9090 inside the
+    # container; mapped to a distinct host port to avoid clashing with the API.
+    ports:
+      - "${IDP_WORKER_MGMT_PORT:-9091}:9090"
     env_file:
       - path: .env
         required: false
@@ -126,7 +131,7 @@ services:
       gotenberg:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "--fail", "http://localhost:8400/actuator/health/readiness"]
+      test: ["CMD", "curl", "--fail", "http://localhost:9090/actuator/health/readiness"]
       interval: 5s
       timeout: 3s
       retries: 30
@@ -144,6 +149,10 @@ services:
     image: flydocs:latest
     container_name: flydocs-bbox-worker
     command: ["bbox-worker"]
+    # Worker health/management server (pyfly actuator) on 9090 inside the
+    # container; mapped to a distinct host port to avoid clashing with the API.
+    ports:
+      - "${IDP_BBOX_WORKER_MGMT_PORT:-9092}:9090"
     env_file:
       - path: .env
         required: false
@@ -169,7 +178,7 @@ services:
       gotenberg:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "--fail", "http://localhost:8400/actuator/health/readiness"]
+      test: ["CMD", "curl", "--fail", "http://localhost:9090/actuator/health/readiness"]
       interval: 5s
       timeout: 3s
       retries: 30

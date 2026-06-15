@@ -13,7 +13,13 @@ pyfly:
   server:
     enabled: true
     host: 0.0.0.0
-    port: 8400
+    port: 8080
+  # Management server (Spring management.server.* parity): the actuator
+  # (/actuator/*) and the admin dashboard (/admin) are served on this dedicated
+  # port, NOT the business API port above. Probes / Prometheus target 9090.
+  management:
+    server:
+      port: 9090
 
   # Observability -- Prometheus metrics + OpenTelemetry tracing.
   observability:

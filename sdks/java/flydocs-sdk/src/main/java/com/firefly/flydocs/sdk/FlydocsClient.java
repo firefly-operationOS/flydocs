@@ -36,7 +36,7 @@ import org.jspecify.annotations.Nullable;
  *
  * <pre>{@code
  * FlydocsClient flydocs = FlydocsClient.builder()
- *         .baseUrl("http://localhost:8400")
+ *         .baseUrl("http://localhost:8080")
  *         .build();
  *
  * VersionInfo info        = flydocs.version();

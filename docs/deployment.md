@@ -69,7 +69,7 @@ The full list lives in [`env_template`](../env_template). The hot
 ones:
 
 ```env
-FLYDOCS_PORT=8400
+FLYDOCS_PORT=8080
 FLYDOCS_LOG_LEVEL=INFO
 
 FLYDOCS_DATABASE_URL=postgresql+asyncpg://idp:s3cret@db:5432/flydocs
@@ -206,11 +206,11 @@ step, not a request handler.
 
 ```yaml
 livenessProbe:
-  httpGet: { path: /actuator/health/liveness, port: 8400 }
+  httpGet: { path: /actuator/health/liveness, port: 9090 }
   initialDelaySeconds: 10
   periodSeconds: 30
 readinessProbe:
-  httpGet: { path: /actuator/health/readiness, port: 8400 }
+  httpGet: { path: /actuator/health/readiness, port: 9090 }
   initialDelaySeconds: 5
   periodSeconds: 5
 ```
@@ -255,7 +255,7 @@ task inside the worker process, so all three workloads take the probes
 above. Specifics:
 
 - **Port.** `FLYDOCS_WORKER_HEALTH_PORT` when set, otherwise
-  `FLYDOCS_PORT` (default 8400). `0` disables the server — useful when
+  `FLYDOCS_PORT` (default 8080). `0` disables the server — useful when
   `serve` and `worker` share a host in dev. The server binds `0.0.0.0`
   because the kubelet probes the pod IP, never loopback.
 - **Probe semantics.** Indicators discovered from the DI container

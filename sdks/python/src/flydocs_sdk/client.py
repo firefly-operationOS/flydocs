@@ -70,7 +70,7 @@ from flydocs_sdk.models import (
 class Client:
     """Synchronous client over the same endpoint set as :class:`AsyncClient`.
 
-        with Client("http://localhost:8400") as flydocs:
+        with Client("http://localhost:8080") as flydocs:
             result = flydocs.extract(request)
 
     Calling :meth:`close` (or using the context manager) shuts the
@@ -83,6 +83,7 @@ class Client:
         base_url: str,
         *,
         api_key: str | None = None,
+        management_url: str | None = None,
         timeout: float = DEFAULT_TIMEOUT_S,
         default_headers: dict[str, str] | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
@@ -92,6 +93,7 @@ class Client:
         self._inner = AsyncClient(
             base_url,
             api_key=api_key,
+            management_url=management_url,
             timeout=timeout,
             default_headers=default_headers,
             transport=transport,

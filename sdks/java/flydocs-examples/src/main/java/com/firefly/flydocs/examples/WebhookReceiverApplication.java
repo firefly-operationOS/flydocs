@@ -37,13 +37,13 @@ import org.springframework.web.bind.annotation.RestController;
  *
  * <pre>{@code
  * flydocs:
- *   base-url: http://localhost:8400        # required to enable the starter
+ *   base-url: http://localhost:8080        # required to enable the starter
  *   webhook:
  *     secret: ${FLYDOCS_WEBHOOK_SECRET}
  * }</pre>
  *
  * <pre>{@code
- * FLYDOCS_BASE_URL=http://localhost:8400 \
+ * FLYDOCS_BASE_URL=http://localhost:8080 \
  * FLYDOCS_WEBHOOK_SECRET=super-secret \
  * mvn -pl flydocs-examples spring-boot:run \
  *     -Dspring-boot.run.mainClass=com.firefly.flydocs.examples.WebhookReceiverApplication

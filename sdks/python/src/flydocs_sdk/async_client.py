@@ -80,7 +80,7 @@ class AsyncClient:
     share a connection pool with the rest of your app -- the SDK will
     not close transports it did not create.
 
-        async with AsyncClient("http://localhost:8400") as flydocs:
+        async with AsyncClient("http://localhost:8080") as flydocs:
             result = await flydocs.extract(ExtractionRequest(...))
     """
 
@@ -89,12 +89,18 @@ class AsyncClient:
         base_url: str,
         *,
         api_key: str | None = None,
+        management_url: str | None = None,
         timeout: float = DEFAULT_TIMEOUT_S,
         default_headers: dict[str, str] | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
         http_client: httpx.AsyncClient | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
+        # The actuator (/actuator/*) and admin endpoints run on pyfly's separate
+        # management port (default 9090), not the business API port. Set
+        # ``management_url`` (e.g. "http://host:9090") so ``health()`` targets it;
+        # when unset it falls back to ``base_url`` for single-port deployments.
+        self._management_url = management_url.rstrip("/") if management_url else None
         self._api_key = api_key
         self._default_headers = dict(default_headers or {})
         if http_client is not None:
@@ -143,9 +149,13 @@ class AsyncClient:
 
         ``probe`` is typically ``readiness`` or ``liveness``. Returns
         the raw actuator JSON since the shape is owned by pyfly, not
-        the flydocs DTOs.
+        the flydocs DTOs. When ``management_url`` was supplied to the client the
+        request targets the management port; otherwise it uses ``base_url``.
         """
-        data = await self._request_json("GET", f"/actuator/health/{probe}")
+        path = f"/actuator/health/{probe}"
+        if self._management_url is not None:
+            path = f"{self._management_url}{path}"
+        data = await self._request_json("GET", path)
         if not isinstance(data, dict):
             raise FlydocsClientError(f"unexpected /actuator/health/{probe} response: {data!r}")
         return data
@@ -228,7 +238,7 @@ class AsyncClient:
         :class:`TimeoutError` if the deadline elapses while the worker
         is still in flight.
 
-            async with AsyncClient("http://localhost:8400") as flydocs:
+            async with AsyncClient("http://localhost:8080") as flydocs:
                 ext = await flydocs.extractions.create(req)
                 final = await flydocs.wait_for_completion(ext.id)
                 if final.status == ExtractionStatus.SUCCEEDED:

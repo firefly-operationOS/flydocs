@@ -165,7 +165,7 @@ Two terminals — the API serves HTTP, the worker drains the EDA bus.
 
 ```bash
 # Terminal A
-task dev:serve           # uvicorn on http://localhost:8400
+task dev:serve           # uvicorn on http://localhost:8080
                          # OpenAPI:    /docs
                          # Health:     /actuator/health/readiness
                          # PyFly admin: /admin
@@ -181,7 +181,7 @@ sending traffic.
 ### 5. Your first synchronous extraction
 
 ```bash
-curl -s http://localhost:8400/api/v1/extract \
+curl -s http://localhost:8080/api/v1/extract \
   -H 'content-type: application/json' \
   -d @docs/examples/extract.json | jq '.documents[0].field_groups'
 ```
@@ -201,7 +201,7 @@ then POST it. The submit returns immediately with a `202` + an
 to your `callback_url` when it finishes:
 
 ```bash
-curl -s http://localhost:8400/api/v1/extractions \
+curl -s http://localhost:8080/api/v1/extractions \
   -H 'content-type: application/json' \
   -H 'idempotency-key: '"$(uuidgen)" \
   -d '{
@@ -228,8 +228,8 @@ Poll state if you don't want to wait for the webhook:
 
 ```bash
 EXT_ID=ext_01HEM2ZZ7M0Q8...
-curl -s http://localhost:8400/api/v1/extractions/$EXT_ID
-curl -s http://localhost:8400/api/v1/extractions/$EXT_ID/result | jq
+curl -s http://localhost:8080/api/v1/extractions/$EXT_ID
+curl -s http://localhost:8080/api/v1/extractions/$EXT_ID/result | jq
 ```
 
 The webhook payload is the unified `EventEnvelope` (`event_id`,
@@ -464,7 +464,7 @@ task deps:install        # uv sync --extra dev
 task lint:check          # ruff + pyright
 task test                # unit suite (~26 tests, <1s)
 task test:llm            # real-LLM smoke test (needs the provider key matching FLYDOCS_MODEL)
-task dev:serve           # API on :8400
+task dev:serve           # API on :8080
 task dev:worker          # async job consumer
 task migrate             # alembic upgrade head
 task docker:build        # build the production image

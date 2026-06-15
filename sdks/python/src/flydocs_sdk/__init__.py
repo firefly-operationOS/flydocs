@@ -50,7 +50,7 @@ helper for verifying outbound webhook signatures.
         ],
     )
 
-    with Client("http://localhost:8400") as flydocs:
+    with Client("http://localhost:8080") as flydocs:
         result = flydocs.extract(
             ExtractionRequest(
                 files=[FileInput.from_path("invoice.pdf")],

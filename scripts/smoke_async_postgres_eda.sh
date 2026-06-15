@@ -38,7 +38,8 @@
 set -euo pipefail
 
 PDF="${1:-$HOME/Downloads/escritura_poderes_2025.pdf}"
-API="${FLYDOCS_URL:-http://localhost:8400}"
+API="${FLYDOCS_URL:-http://localhost:8080}"
+MGMT_API="${FLYDOCS_MGMT_URL:-http://localhost:9090}"
 MODEL="${FLYDOCS_MODEL:-anthropic:claude-sonnet-4-6}"
 POLL_INTERVAL_S="${POLL_INTERVAL_S:-3}"
 POLL_MAX_S="${POLL_MAX_S:-300}"
@@ -204,7 +205,7 @@ jq '
 
 echo
 echo "[smoke] /actuator/health/readiness:"
-curl -sS "$API/actuator/health/readiness" | jq .
+curl -sS "$MGMT_API/actuator/health/readiness" | jq .
 
 echo
 echo "[smoke] final EDA cursor:"

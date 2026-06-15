@@ -72,8 +72,8 @@ async def _lifespan(app: Any):
     # escape hatch for legitimate dynamic attribute writes.
     setattr(_pyfly, "_route_metadata", getattr(app.state, "pyfly_route_metadata", []))  # noqa: B010
     setattr(_pyfly, "_docs_enabled", getattr(app.state, "pyfly_docs_enabled", False))  # noqa: B010
-    setattr(_pyfly, "_host", str(_pyfly.config.get("pyfly.web.host", "0.0.0.0")))  # noqa: B010
-    setattr(_pyfly, "_port", int(_pyfly.config.get("pyfly.server.port", 8400)))  # noqa: B010
+    setattr(_pyfly, "_host", str(_pyfly.config.get("pyfly.server.host", "0.0.0.0")))  # noqa: B010
+    setattr(_pyfly, "_port", int(_pyfly.config.get("pyfly.server.port", 8080)))  # noqa: B010
     await _pyfly.startup()
     # Re-scan HealthIndicator beans now that the container has built
     # every singleton (the eager scan inside ``create_app`` runs BEFORE

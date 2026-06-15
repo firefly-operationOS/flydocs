@@ -699,18 +699,18 @@ with `?wait_for_bboxes=true&timeout=60` on
 
 ```bash
 # 1. Submit
-curl -sS http://localhost:8400/api/v1/extractions \
+curl -sS http://localhost:8080/api/v1/extractions \
   -H 'content-type: application/json' \
   -H 'idempotency-key: '"$(uuidgen)" \
   -d @request.json
 # → 202 {"id": "ext_01HEM...", "status": "queued", ...}
 
 # 2. Poll state
-curl -sS http://localhost:8400/api/v1/extractions/ext_01HEM...
+curl -sS http://localhost:8080/api/v1/extractions/ext_01HEM...
 # → 200 {"id":"ext_01HEM...","status":"running",...}
 
 # 3. Fetch result (long-poll for grounded bboxes)
-curl -sS 'http://localhost:8400/api/v1/extractions/ext_01HEM.../result?wait_for_bboxes=true&timeout=120'
+curl -sS 'http://localhost:8080/api/v1/extractions/ext_01HEM.../result?wait_for_bboxes=true&timeout=120'
 # → 200 {"id":"ext_01HEM...","result":{...ExtractionResult...}}
 ```
 
