@@ -78,7 +78,7 @@ def _free_port() -> int:
 
 
 def test_probes_up_without_indicators() -> None:
-    client = _client(build_health_app())
+    client = _client(build_health_app(ApplicationContext(Config({}))))
     for path in ("/actuator/health", "/actuator/health/liveness", "/actuator/health/readiness"):
         resp = client.get(path)
         assert resp.status_code == 200, path
@@ -88,7 +88,7 @@ def test_probes_up_without_indicators() -> None:
 def test_down_indicator_flips_probes_to_503() -> None:
     agg = HealthAggregator()
     agg.add_indicator("database_health", _DownIndicator())
-    client = _client(build_health_app(aggregator=agg))
+    client = _client(build_health_app(ApplicationContext(Config({})), aggregator=agg))
 
     resp = client.get("/actuator/health/readiness")
     assert resp.status_code == 503
@@ -99,7 +99,7 @@ def test_down_indicator_flips_probes_to_503() -> None:
 def test_readiness_only_indicator_does_not_kill_liveness() -> None:
     agg = HealthAggregator()
     agg.add_indicator("database_health", _DownIndicator(), groups={ProbeGroup.READINESS})
-    client = _client(build_health_app(aggregator=agg))
+    client = _client(build_health_app(ApplicationContext(Config({})), aggregator=agg))
 
     assert client.get("/actuator/health/readiness").status_code == 503
     resp = client.get("/actuator/health/liveness")
@@ -113,7 +113,7 @@ def test_readiness_only_indicator_does_not_kill_liveness() -> None:
 
 
 def test_default_exposure_hides_loggers_and_metrics() -> None:
-    client = _client(build_health_app())
+    client = _client(build_health_app(ApplicationContext(Config({}))))
     assert client.get("/actuator/health").status_code == 200
     assert client.get("/actuator/loggers").status_code == 404
     assert client.get("/actuator/metrics").status_code == 404
@@ -128,6 +128,22 @@ def test_exposure_opt_in_follows_pyfly_management_config() -> None:
     assert client.get("/actuator/health").status_code == 200
     assert client.get("/actuator/metrics").status_code == 200
     assert client.get("/actuator/loggers").status_code == 404
+
+
+def test_worker_serves_admin_dashboard_when_enabled() -> None:
+    # With a context that enables the admin dashboard, the worker's management
+    # app exposes /admin alongside the actuator — same surface as the API.
+    context = ApplicationContext(Config({"pyfly": {"admin": {"enabled": True}}}))
+    client = _client(build_health_app(context))
+    assert client.get("/actuator/health").status_code == 200
+    assert client.get("/admin/").status_code in (200, 307, 308)
+
+
+def test_worker_admin_dashboard_absent_when_disabled() -> None:
+    context = ApplicationContext(Config({"pyfly": {"admin": {"enabled": False}}}))
+    client = _client(build_health_app(context))
+    assert client.get("/actuator/health").status_code == 200
+    assert client.get("/admin/").status_code == 404
 
 
 # ---------------------------------------------------------------------------
@@ -175,7 +191,7 @@ def test_resolve_health_port_zero_disables() -> None:
 
 def test_make_health_server_config() -> None:
     settings = IDPSettings(port=8080, worker_health_port=9090)
-    server = make_health_server(build_health_app(), settings=settings)
+    server = make_health_server(build_health_app(ApplicationContext(Config({}))), settings=settings)
     assert server.config.host == "0.0.0.0"
     assert server.config.port == 9090
     assert server.config.access_log is False
@@ -185,15 +201,22 @@ def test_make_health_server_config() -> None:
 def test_make_health_server_rejects_disabled_port() -> None:
     settings = IDPSettings(port=8080, worker_health_port=0)
     with pytest.raises(ValueError, match="disabled"):
-        make_health_server(build_health_app(), settings=settings)
+        make_health_server(build_health_app(ApplicationContext(Config({}))), settings=settings)
 
 
 def test_build_worker_health_server_none_when_disabled() -> None:
-    assert build_worker_health_server(None, IDPSettings(port=8080, worker_health_port=0)) is None
+    assert (
+        build_worker_health_server(
+            ApplicationContext(Config({})), IDPSettings(port=8080, worker_health_port=0)
+        )
+        is None
+    )
 
 
 def test_build_worker_health_server_enabled() -> None:
-    server = build_worker_health_server(None, IDPSettings(port=8080, worker_health_port=9090))
+    server = build_worker_health_server(
+        ApplicationContext(Config({})), IDPSettings(port=8080, worker_health_port=9090)
+    )
     assert server is not None
     assert server.config.port == 9090
 
@@ -206,7 +229,9 @@ def test_build_worker_health_server_enabled() -> None:
 @pytest.mark.asyncio
 async def test_health_server_serves_and_stops() -> None:
     port = _free_port()
-    server = build_worker_health_server(None, IDPSettings(port=port, worker_health_port=None))
+    server = build_worker_health_server(
+        ApplicationContext(Config({})), IDPSettings(port=port, worker_health_port=None)
+    )
     assert server is not None
     task = asyncio.create_task(serve_health(server), name="health-server")
     try:
@@ -239,7 +264,9 @@ async def test_bind_failure_is_a_normal_task_exception() -> None:
         blocker.listen(1)
         port = blocker.getsockname()[1]
 
-        server = build_worker_health_server(None, IDPSettings(port=port, worker_health_port=None))
+        server = build_worker_health_server(
+            ApplicationContext(Config({})), IDPSettings(port=port, worker_health_port=None)
+        )
         assert server is not None
         with pytest.raises(RuntimeError, match="health server"):
             # wait_for bounds the test: if the server ever binds successfully

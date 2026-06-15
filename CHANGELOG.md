@@ -6,6 +6,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses **CalVer `YY.M.PP`** (PEP 440 may normalise patch numbers
 for the Python wheel — e.g. `26.06.00` → `26.6.0`).
 
+## [26.6.12] - 2026-06-15
+
+### Added
+
+- **The admin dashboard is now served on the workers, not just the API.** The
+  `worker` and `bbox-worker` management servers (`worker_health.py`) now build
+  pyfly's full management app (`create_management_app`) instead of an
+  actuator-only Starlette app, so each worker's management port exposes the same
+  surface as the API — the `/admin` dashboard (beans, health, env, config,
+  loggers, metrics, scheduled, runtime, server, overview) **and** the actuator
+  endpoints — plus pyfly's structured request access log for management traffic.
+
+### Changed
+
+- **Upgraded pyfly to `v26.06.105`.** The management port now access-logs its
+  requests and its observability (metrics, `/actuator/httpexchanges`, traces)
+  reflects **both** the application and management ports.
+- **`build_health_app(context)` now requires a started context** (no actuator-only
+  fallback) and always returns the full management app.
+
 ## [26.6.11] - 2026-06-15
 
 ### Fixed
