@@ -109,7 +109,13 @@ jobs:
           if mvn -B -ntp deploy 2>&1 | tee /tmp/mvn-deploy.log; then
             exit 0
           fi
-          if grep -qiE "status code: 409|409 conflict|already exist|conflict" /tmp/mvn-deploy.log; then
+          # mvn failed: only swallow a genuine "this version is already
+          # published" 409 from GitHub Packages. The patterns are specific to
+          # the HTTP-409 wagon error (``return code is 409`` / ``status code:
+          # 409`` / ``received status code 409``) plus the "already exists"
+          # phrasing — a bare ``conflict`` match would mask unrelated failures
+          # (auth, network, corrupt artifact), so it is intentionally excluded.
+          if grep -qiE "status code: 409|return code is 409|received status code 409|409 conflict|already exists" /tmp/mvn-deploy.log; then
             echo "::warning::Java SDK version already published to GitHub Packages — idempotent re-run, treating as success."
             exit 0
           fi

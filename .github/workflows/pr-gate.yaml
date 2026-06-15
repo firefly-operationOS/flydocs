@@ -8,9 +8,10 @@
 #   4. docker-build: single-arch Docker build smoke (no push). Multi-arch
 #                    push lives in docker-publish.yaml.
 #
-# The Dockerfile uses BuildKit named contexts for the sibling pyfly +
-# fireflyframework-agentic checkouts. The matrix below clones those
-# repos into ./vendor/ and points buildx at them via --build-context.
+# pyfly + fireflyframework-agentic are consumed as git dependencies
+# (pinned tags in pyproject.toml's [tool.uv.sources]), so ``uv sync`` and
+# the Docker build resolve them straight from GitHub -- no sibling
+# checkout / BuildKit context is needed.
 
 name: PR gate
 
@@ -33,10 +34,6 @@ concurrency:
 
 env:
   PYTHON_VERSION: "3.13"
-  # Pin pyfly + agentic to a matching git ref. When the framework
-  # repos publish releases we'll switch to ``pip install ...`` here.
-  PYFLY_REF: main
-  AGENTIC_REF: main
 
 jobs:
   lint:
@@ -50,20 +47,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-      - name: Check out sibling firefly framework repos
-        run: |
-          git clone --depth=1 --branch "$PYFLY_REF" \
-            https://github.com/fireflyframework/fireflyframework-pyfly.git \
-            ./vendor/pyfly
-          git clone --depth=1 --branch "$AGENTIC_REF" \
-            https://github.com/fireflyframework/fireflyframework-agentic.git \
-            ./vendor/fireflyframework-agentic
-      - name: Repoint uv path sources at ./vendor
-        run: |
-          sed -i \
-            -e 's|path = "\.\./\.\./fireflyframework/fireflyframework-pyfly"|path = "./vendor/pyfly"|' \
-            -e 's|path = "\.\./\.\./fireflyframework/fireflyframework-agentic"|path = "./vendor/fireflyframework-agentic"|' \
-            pyproject.toml
       - name: uv sync (dev)
         run: uv sync --extra dev
       - name: ruff check
@@ -83,20 +66,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-      - name: Check out sibling firefly framework repos
-        run: |
-          git clone --depth=1 --branch "$PYFLY_REF" \
-            https://github.com/fireflyframework/fireflyframework-pyfly.git \
-            ./vendor/pyfly
-          git clone --depth=1 --branch "$AGENTIC_REF" \
-            https://github.com/fireflyframework/fireflyframework-agentic.git \
-            ./vendor/fireflyframework-agentic
-      - name: Repoint uv path sources at ./vendor
-        run: |
-          sed -i \
-            -e 's|path = "\.\./\.\./fireflyframework/fireflyframework-pyfly"|path = "./vendor/pyfly"|' \
-            -e 's|path = "\.\./\.\./fireflyframework/fireflyframework-agentic"|path = "./vendor/fireflyframework-agentic"|' \
-            pyproject.toml
       - name: uv sync (dev)
         run: uv sync --extra dev
       - name: pyright
@@ -113,20 +82,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-      - name: Check out sibling firefly framework repos
-        run: |
-          git clone --depth=1 --branch "$PYFLY_REF" \
-            https://github.com/fireflyframework/fireflyframework-pyfly.git \
-            ./vendor/pyfly
-          git clone --depth=1 --branch "$AGENTIC_REF" \
-            https://github.com/fireflyframework/fireflyframework-agentic.git \
-            ./vendor/fireflyframework-agentic
-      - name: Repoint uv path sources at ./vendor
-        run: |
-          sed -i \
-            -e 's|path = "\.\./\.\./fireflyframework/fireflyframework-pyfly"|path = "./vendor/pyfly"|' \
-            -e 's|path = "\.\./\.\./fireflyframework/fireflyframework-agentic"|path = "./vendor/fireflyframework-agentic"|' \
-            pyproject.toml
       - name: uv sync (dev)
         run: uv sync --extra dev
       - name: pytest tests/unit
@@ -161,20 +116,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-      - name: Check out sibling firefly framework repos
-        run: |
-          git clone --depth=1 --branch "$PYFLY_REF" \
-            https://github.com/fireflyframework/fireflyframework-pyfly.git \
-            ./vendor/pyfly
-          git clone --depth=1 --branch "$AGENTIC_REF" \
-            https://github.com/fireflyframework/fireflyframework-agentic.git \
-            ./vendor/fireflyframework-agentic
-      - name: Repoint uv path sources at ./vendor
-        run: |
-          sed -i \
-            -e 's|path = "\.\./\.\./fireflyframework/fireflyframework-pyfly"|path = "./vendor/pyfly"|' \
-            -e 's|path = "\.\./\.\./fireflyframework/fireflyframework-agentic"|path = "./vendor/fireflyframework-agentic"|' \
-            pyproject.toml
       - name: Cache Docling / RapidOCR model weights
         # The first run downloads ~50 MB of weights from modelscope +
         # hugging-face; cache them so subsequent runs are seconds.
@@ -235,14 +176,6 @@ jobs:
           haskell: true
           large-packages: false
           swap-storage: false
-      - name: Check out sibling firefly framework repos
-        run: |
-          git clone --depth=1 --branch "$PYFLY_REF" \
-            https://github.com/fireflyframework/fireflyframework-pyfly.git \
-            ./vendor/pyfly
-          git clone --depth=1 --branch "$AGENTIC_REF" \
-            https://github.com/fireflyframework/fireflyframework-agentic.git \
-            ./vendor/fireflyframework-agentic
       - uses: docker/setup-buildx-action@v3
       - name: docker buildx build (linux/amd64, load)
         uses: docker/build-push-action@v6
@@ -255,16 +188,12 @@ jobs:
           platforms: linux/amd64
           build-args: |
             WITH_DOCLING=${{ matrix.variant == 'docling' && 'true' || 'false' }}
-          build-contexts: |
-            pyfly=./vendor/pyfly
-            fireflyframework-agentic=./vendor/fireflyframework-agentic
           cache-from: type=gha,scope=${{ matrix.variant }}
           cache-to: type=gha,mode=max,scope=${{ matrix.variant }}
 
   # --------------------------------------------------------------------
   # SDK gates — fast, isolated. Neither SDK depends on the sibling
-  # ``pyfly`` / ``agentic`` checkouts, so they don't need the vendor
-  # clone the service lanes do.
+  # ``pyfly`` / ``agentic`` git deps, so they build standalone.
   # --------------------------------------------------------------------
 
   sdk-python:

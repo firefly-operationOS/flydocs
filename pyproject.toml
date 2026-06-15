@@ -127,10 +127,9 @@ override-dependencies = [
 
 [tool.uv.sources]
 # Sibling-repo sources. Both frameworks are consumed from their published git
-# tags so a fresh clone / CI build resolves them without a sibling path. The
-# (vestigial) ./vendor clone + Dockerfile BuildKit context for pyfly are now
-# no-ops — the path-rewrite sed no longer matches a git source — exactly as for
-# agentic; they can be removed in a later cleanup.
+# tags so a fresh clone, the CI lanes, and the Docker build all resolve them
+# straight from GitHub without a sibling path or vendored checkout. Bump the
+# pinned tag here to upgrade either framework.
 pyfly = { git = "https://github.com/fireflyframework/fireflyframework-pyfly.git", tag = "v26.06.105" }
 fireflyframework-agentic = { git = "https://github.com/fireflyframework/fireflyframework-agentic.git", tag = "v26.05.30" }
 
@@ -150,9 +149,9 @@ addopts = "-v --tb=short -m 'not llm'"
 [tool.ruff]
 target-version = "py313"
 line-length = 110
-# CI clones the sibling firefly framework repos into ``./vendor/`` so
-# the Dockerfile's BuildKit contexts resolve identically in local
-# checkouts and in GitHub Actions. We don't lint third-party code on
+# ``vendor`` stays excluded as a defensive measure: a developer may
+# locally clone the sibling firefly framework repos there when building
+# against an unreleased pyfly/agentic. We don't lint third-party code on
 # its way through our pipeline -- they have their own ruff config.
 #
 # ``scripts/`` is one-off operational tooling (live smoke runners,
