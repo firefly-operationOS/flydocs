@@ -56,7 +56,7 @@ async def main(path: Path) -> int:
         files=[FileInput.from_path(path)],
         document_types=[INVOICE_DOCUMENT_TYPE],
     )
-    async with AsyncClient("http://localhost:8400") as flydocs:
+    async with AsyncClient("http://localhost:8080") as flydocs:
         try:
             result = await flydocs.extract(req)
             print(f"extracted in sync: latency={result.pipeline.latency_ms}ms")

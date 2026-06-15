@@ -45,7 +45,7 @@ invoice = DocumentTypeSpec(
     ],
 )
 
-with Client("http://localhost:8400") as flydocs:
+with Client("http://localhost:8080") as flydocs:
     result = flydocs.extract(
         ExtractionRequest(
             files=[FileInput.from_path("invoice.pdf")],
@@ -77,7 +77,7 @@ from flydocs_sdk import (
 )
 
 async def main() -> None:
-    async with AsyncClient("http://localhost:8400") as flydocs:
+    async with AsyncClient("http://localhost:8080") as flydocs:
         ext = await flydocs.extractions.create(
             SubmitExtractionRequest(
                 files=[FileInput.from_path("invoice.pdf")],

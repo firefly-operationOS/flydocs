@@ -14,7 +14,7 @@ Runnable async-first scripts exercising every capability from the [TUTORIAL](../
 ## Running
 
 ```bash
-task docker:up:test     # spin up flydocs + mock-llm at http://localhost:8400
+task docker:up:test     # spin up flydocs + mock-llm at http://localhost:8080
 
 # Then run any example. Examples 2/3/5/6 share fixtures via PYTHONPATH:
 uv run python sdks/python/examples/01_first_extraction.py path/to/invoice.pdf

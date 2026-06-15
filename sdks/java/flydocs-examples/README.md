@@ -18,7 +18,7 @@ Plus [`ExampleHelpers`](./src/main/java/com/firefly/flydocs/examples/ExampleHelp
 Spin up a local flydocs first:
 
 ```bash
-task docker:up:test     # serves http://localhost:8400 backed by the mock LLM
+task docker:up:test     # serves http://localhost:8080 backed by the mock LLM
 ```
 
 Then run any example. The plain extractor / async / sync ones take a PDF path as `-Dexec.args`:
@@ -56,7 +56,7 @@ mvn -pl flydocs-examples compile exec:java \
 The webhook receiver is a Spring Boot app — run it with `spring-boot:run`:
 
 ```bash
-FLYDOCS_BASE_URL=http://localhost:8400 \
+FLYDOCS_BASE_URL=http://localhost:8080 \
 FLYDOCS_WEBHOOK_SECRET=super-secret \
   mvn -pl flydocs-examples spring-boot:run \
     -Dspring-boot.run.mainClass=com.firefly.flydocs.examples.WebhookReceiverApplication
@@ -66,7 +66,7 @@ Then POST a flydocs-signed envelope to `http://localhost:8080/flydocs/webhook` w
 
 ## Configuration
 
-Every example reads `FLYDOCS_BASE_URL` from the environment; if unset it defaults to `http://localhost:8400`. Point at any flydocs deployment to run against real infrastructure.
+Every example reads `FLYDOCS_BASE_URL` from the environment; if unset it defaults to `http://localhost:8080`. Point at any flydocs deployment to run against real infrastructure.
 
 The mock LLM that `task docker:up:test` brings up accepts any document and returns a fixed schema-compatible response, so the examples work end-to-end without an Anthropic / OpenAI key.
 

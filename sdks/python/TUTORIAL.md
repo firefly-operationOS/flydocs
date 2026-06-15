@@ -565,7 +565,7 @@ from flydocs_sdk import (
     AsyncClient, ExtractionStatus, FileInput, SubmitExtractionRequest,
 )
 
-async with AsyncClient("http://localhost:8400") as flydocs:
+async with AsyncClient("http://localhost:8080") as flydocs:
     ext = await flydocs.extractions.create(
         SubmitExtractionRequest(
             files=[FileInput.from_path("big-batch.pdf")],
@@ -771,7 +771,12 @@ The error also carries the full RFC 7807 view via `exc.as_problem_details()` ret
 
 **Bring your own httpx client.** `AsyncClient(..., http_client=existing)` shares your app's connection pool. The SDK never closes transports it didn't create.
 
-**Health checks.** `await flydocs.health("readiness")` returns the actuator JSON.
+**Health checks.** The actuator lives on the management port (`9090`), separate from the business API (`8080`). Point the client at it via `management_url`, then call `.health()`:
+
+```python
+flydocs = AsyncClient("http://localhost:8080", management_url="http://localhost:9090")
+await flydocs.health("readiness")   # GET http://localhost:9090/actuator/health/readiness
+```
 
 **Cost tracking.** When the service has cost tracking enabled, `result.pipeline.usage` carries per-agent and per-model token + USD breakdowns; webhook envelopes carry the same.
 
@@ -887,7 +892,7 @@ rules = [
 
 
 async def main(invoice_path: str) -> None:
-    async with AsyncClient("http://localhost:8400") as flydocs:
+    async with AsyncClient("http://localhost:8080") as flydocs:
         ext = await flydocs.extractions.create(
             SubmitExtractionRequest(
                 files=[FileInput.from_path(invoice_path)],
@@ -950,7 +955,7 @@ For scripts, batch tools, and callers that can't run an event loop, `Client` wra
 ```python
 from flydocs_sdk import Client
 
-with Client("http://localhost:8400") as flydocs:
+with Client("http://localhost:8080") as flydocs:
     result = flydocs.extract(req)
 ```
 

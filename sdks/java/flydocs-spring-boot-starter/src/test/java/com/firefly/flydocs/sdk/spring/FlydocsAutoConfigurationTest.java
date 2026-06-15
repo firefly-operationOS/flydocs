@@ -42,7 +42,7 @@ class FlydocsAutoConfigurationTest {
     @Test
     void registersAsyncAndBlockingClientsWhenBaseUrlSet() {
         runner
-                .withPropertyValues("flydocs.base-url=http://localhost:8400")
+                .withPropertyValues("flydocs.base-url=http://localhost:8080")
                 .run(ctx -> {
                     assertThat(ctx).hasSingleBean(FlydocsClientAsync.class);
                     assertThat(ctx).hasSingleBean(FlydocsClient.class);
@@ -55,7 +55,7 @@ class FlydocsAutoConfigurationTest {
     void registersWebhookVerifierWhenSecretSet() {
         runner
                 .withPropertyValues(
-                        "flydocs.base-url=http://localhost:8400",
+                        "flydocs.base-url=http://localhost:8080",
                         "flydocs.webhook.secret=super-secret")
                 .run(ctx -> {
                     assertThat(ctx).hasSingleBean(WebhookVerifier.class);
@@ -67,7 +67,7 @@ class FlydocsAutoConfigurationTest {
     void honoursTimeoutAndRetryProperties() {
         runner
                 .withPropertyValues(
-                        "flydocs.base-url=http://localhost:8400",
+                        "flydocs.base-url=http://localhost:8080",
                         "flydocs.api-key=my-key",
                         "flydocs.timeout=30s",
                         "flydocs.max-attempts=3",
@@ -88,7 +88,7 @@ class FlydocsAutoConfigurationTest {
     @Test
     void userBeanOverridesAutoConfiguration() {
         runner
-                .withPropertyValues("flydocs.base-url=http://localhost:8400")
+                .withPropertyValues("flydocs.base-url=http://localhost:8080")
                 .withUserConfiguration(CustomConfig.class)
                 .run(ctx -> {
                     assertThat(ctx).hasSingleBean(FlydocsClientAsync.class);

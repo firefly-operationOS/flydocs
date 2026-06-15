@@ -17,7 +17,7 @@ The SDK depends only on `httpx` and `pydantic`.
 From the repo root:
 
 ```bash
-task docker:up:test     # serves http://localhost:8400 backed by a mock LLM
+task docker:up:test     # serves http://localhost:8080 backed by a mock LLM
 ```
 
 If you already have a running flydocs deployment, point `base_url` at it and skip this step.
@@ -63,7 +63,7 @@ async def main() -> None:
 
     # 3. Call the service. AsyncClient is the primary integration surface;
     #    close it as a context manager.
-    async with AsyncClient("http://localhost:8400") as flydocs:
+    async with AsyncClient("http://localhost:8080") as flydocs:
         result = await flydocs.extract(request)
 
     # 4. Read the response. v1 nests model + latency under ``result.pipeline``;
@@ -107,7 +107,7 @@ If you can't run an event loop:
 ```python
 from flydocs_sdk import Client
 
-with Client("http://localhost:8400") as flydocs:
+with Client("http://localhost:8080") as flydocs:
     result = flydocs.extract(request)
 ```
 

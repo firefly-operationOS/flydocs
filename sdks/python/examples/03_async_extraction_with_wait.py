@@ -51,7 +51,7 @@ from flydocs_sdk import (
 
 
 async def main(path: Path) -> int:
-    async with AsyncClient("http://localhost:8400", timeout=30.0) as flydocs:
+    async with AsyncClient("http://localhost:8080", timeout=30.0) as flydocs:
         ext = await flydocs.extractions.create(
             SubmitExtractionRequest(
                 files=[FileInput.from_path(path)],

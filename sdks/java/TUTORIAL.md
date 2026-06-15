@@ -5,7 +5,7 @@ A complete walkthrough of the flydocs Java/Spring Boot SDK against the v1 API. E
 > **Prerequisites**
 > A flydocs service reachable at some base URL. For local development:
 > ```bash
-> task docker:up:test    # starts flydocs + a mock LLM at http://localhost:8400
+> task docker:up:test    # starts flydocs + a mock LLM at http://localhost:8080
 > ```
 > Java 25 + Maven 3.9+ on the build host.
 
@@ -72,7 +72,7 @@ import com.firefly.flydocs.sdk.model.*;
 import java.nio.file.Path;
 
 FlydocsClient flydocs = FlydocsClient.builder()
-        .baseUrl("http://localhost:8400")
+        .baseUrl("http://localhost:8080")
         .build();
 
 ExtractionRequest req = ExtractionRequest.builder()
@@ -368,7 +368,7 @@ when the SDK is on the classpath and the base URL is configured.
 ```yaml
 # application.yaml
 flydocs:
-  base-url: http://localhost:8400
+  base-url: http://localhost:8080
   api-key: ${FLYDOCS_API_KEY}                  # optional, Authorization: Bearer
   timeout: 60s
   max-attempts: 3                              # retry transient 5xx + timeouts
@@ -420,7 +420,7 @@ test, non-Spring app):
 
 ```java
 FlydocsClientAsync flydocs = FlydocsClientAsync.builder()
-        .baseUrl("http://localhost:8400")
+        .baseUrl("http://localhost:8080")
         .apiKey(System.getenv("FLYDOCS_API_KEY"))
         .timeout(Duration.ofSeconds(60))
         .maxAttempts(3)                        // retry 5xx + timeouts
@@ -445,7 +445,7 @@ yourself; let Spring handle it when you use the starter.
 
 ```java
 try (FlydocsClient flydocs = FlydocsClient.builder()
-        .baseUrl("http://localhost:8400")
+        .baseUrl("http://localhost:8080")
         .maxAttempts(3)
         .build()) {
     ExtractionResult result = flydocs.extract(req);
@@ -463,7 +463,7 @@ import com.firefly.flydocs.sdk.FlydocsClientAsync;
 import reactor.core.publisher.Mono;
 
 FlydocsClientAsync flydocs = FlydocsClientAsync.builder()
-        .baseUrl("http://localhost:8400")
+        .baseUrl("http://localhost:8080")
         .build();
 
 Mono<ExtractionResult> result = flydocs.extract(req, "my-idempotency-key", "my-correlation-id");

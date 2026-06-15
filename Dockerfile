@@ -162,7 +162,9 @@ RUN find /app -type f -exec chmod a+r {} + \
 ENV PYTHONPATH=/app/src
 
 USER idp
-EXPOSE 8400
+# 8080 = business API (pyfly.server.port); 9090 = management (actuator + admin,
+# pyfly.management.server.port) and the worker health server.
+EXPOSE 8080 9090
 
 ENTRYPOINT ["/app/docker-entrypoint.sh"]
 CMD ["serve"]

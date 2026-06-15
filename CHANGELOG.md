@@ -6,6 +6,42 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses **CalVer `YY.M.PP`** (PEP 440 may normalise patch numbers
 for the Python wheel — e.g. `26.06.00` → `26.6.0`).
 
+## [26.6.10] - 2026-06-15
+
+### Changed
+
+- **Adopted pyfly's separate management port (app `8080`, management `9090`).**
+  Upgraded to pyfly `v26.06.103`, which serves the actuator (`/actuator/*`) and
+  the admin dashboard (`/admin`) on a dedicated management port
+  (`pyfly.management.server.port`, default `9090`) instead of the business API
+  port. flydocs now runs the API on **`8080`** (`pyfly.server.port`, was `8400`)
+  and exposes actuator/admin/health on **`9090`**:
+  - `pyfly.yaml`, `IDPSettings.port` and `FLYDOCS_PORT` default to `8080`;
+    `pyfly.management.server.port: 9090` is configured explicitly.
+  - `Dockerfile` exposes `8080` + `9090`; `docker-compose` maps both for the API
+    and exposes each worker's management port (`9091`/`9092`), and every
+    health-check now probes `:9090/actuator/health/readiness`.
+  - Worker health server (`worker_health_port`) defaults to `9090` to match.
+  - **Migration:** point load balancers / clients at `:8080` for the API and
+    Kubernetes probes / Prometheus at `:9090`. Set
+    `PYFLY_MANAGEMENT_SERVER_PORT=8080` to collapse back to a single port.
+
+- **`pyfly` is now consumed from its published GitHub tag.** `[tool.uv.sources]`
+  pins `pyfly` to `git tag v26.06.103` (matching the `fireflyframework-agentic`
+  pattern) instead of the local editable path; the dependency floor is
+  `>=26.6.103`.
+
+### Fixed
+
+- `main.py` read the removed `pyfly.web.host` key; it now reads
+  `pyfly.server.host` (Spring `server.address` parity).
+
+### Added
+
+- **Python SDK:** `Client` / `AsyncClient` accept an optional `management_url`
+  so `health()` can target the management port (`:9090`) while API calls use the
+  business `base_url` (`:8080`); back-compatible — unset falls back to `base_url`.
+
 ## [26.6.9] - 2026-06-15
 
 ### Fixed

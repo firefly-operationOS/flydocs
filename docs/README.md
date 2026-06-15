@@ -127,7 +127,7 @@ DTOs documented here. Two paths:
 
 ```bash
 # Against a running service:
-curl -s http://localhost:8400/openapi.json | jq
+curl -s http://localhost:8080/openapi.json | jq
 
 # Or via the task target (writes to ./openapi.json):
 task openapi

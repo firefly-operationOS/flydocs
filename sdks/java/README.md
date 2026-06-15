@@ -68,7 +68,7 @@ Then in your project's `pom.xml`:
 ```yaml
 # application.yaml
 flydocs:
-  base-url: http://localhost:8400
+  base-url: http://localhost:8080
   api-key: ${FLYDOCS_API_KEY}             # optional; sent as Authorization: Bearer …
   timeout: 60s
   max-attempts: 3                          # retry transient 5xx with exponential backoff
@@ -99,7 +99,7 @@ import com.firefly.flydocs.sdk.model.*;
 import java.nio.file.Path;
 
 FlydocsClient flydocs = FlydocsClient.builder()
-        .baseUrl("http://localhost:8400")
+        .baseUrl("http://localhost:8080")
         .apiKey(System.getenv("FLYDOCS_API_KEY"))
         .build();
 
@@ -133,7 +133,7 @@ import com.firefly.flydocs.sdk.model.*;
 import java.time.Duration;
 
 FlydocsClientAsync flydocs = FlydocsClientAsync.builder()
-        .baseUrl("http://localhost:8400")
+        .baseUrl("http://localhost:8080")
         .build();
 
 flydocs.extractions().create(submitRequest, "my-app:invoice:42")
@@ -260,7 +260,7 @@ cd sdks/java
 mvn verify                                              # core + starter unit tests
 
 # Live integration tests against a running service (tag-gated):
-FLYDOCS_BASE_URL=http://localhost:8400 \
+FLYDOCS_BASE_URL=http://localhost:8080 \
   mvn -pl flydocs-sdk test -Dgroups=integration
 ```
 

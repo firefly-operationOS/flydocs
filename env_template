@@ -8,12 +8,18 @@
 # Service
 # ----------------------------------------------------------------------------
 FLYDOCS_LOG_LEVEL=INFO
-FLYDOCS_PORT=8400
+# Business API port (pyfly.server.port). The actuator (/actuator/*) and the
+# admin dashboard (/admin) are served on the separate management port 9090
+# (pyfly.management.server.port), not this port.
+FLYDOCS_PORT=8080
 # Port for the HTTP health server the worker modes (``flydocs worker`` /
 # ``flydocs bbox-worker``) run for Kubernetes httpGet probes against
-# /actuator/health/{liveness,readiness}. Unset reuses FLYDOCS_PORT;
-# 0 disables it (dev setups running serve + worker on the same host).
-#FLYDOCS_WORKER_HEALTH_PORT=8400
+# /actuator/health/{liveness,readiness}. Defaults to the management port 9090
+# (matching where serve-mode exposes the actuator); 0 disables it (dev setups
+# running serve + worker on the same host, where serve already owns 9090).
+#FLYDOCS_WORKER_HEALTH_PORT=9090
+# Override the management (actuator + admin) port if 9090 clashes locally.
+#PYFLY_MANAGEMENT_SERVER_PORT=9090
 
 # ----------------------------------------------------------------------------
 # Persistence

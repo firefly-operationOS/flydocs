@@ -17,13 +17,13 @@ The repo ships with a docker-compose stack that brings up the service, a Postgre
 ```bash
 git clone https://github.com/firefly-operationOS/flydocs.git
 cd flydocs
-task docker:up:test          # serves http://localhost:8400 backed by a mock LLM
+task docker:up:test          # serves http://localhost:8080 backed by a mock LLM
 ```
 
 While it boots, verify the readiness probe:
 
 ```bash
-curl http://localhost:8400/actuator/health/readiness
+curl http://localhost:9090/actuator/health/readiness
 # {"status":"UP","components":{"database_health":...,"eda_health":...}}
 ```
 
@@ -35,7 +35,7 @@ B64=$(base64 < invoice.pdf | tr -d '\n')
 
 # 2. POST a minimal ExtractionRequest. ``document_types[]`` declares what to extract;
 #    ``files[]`` carries the binary. Everything else has sensible defaults.
-curl -sS http://localhost:8400/api/v1/extract \
+curl -sS http://localhost:8080/api/v1/extract \
   -H 'Content-Type: application/json' \
   -d @- <<JSON | jq
 {
@@ -115,7 +115,7 @@ That's the **mandatory pipeline** — multimodal extract + bbox. Everything else
 
 | Symptom                                                                      | Likely cause                                                              |
 |-------------------------------------------------------------------------------|---------------------------------------------------------------------------|
-| `curl: (7) Failed to connect to localhost port 8400`                          | Service not up yet. `docker compose ps` and check `task docker:logs`.     |
+| `curl: (7) Failed to connect to localhost port 8080`                          | Service not up yet. `docker compose ps` and check `task docker:logs`.     |
 | `400 Bad Request` / `422 invalid_base64`                                      | `content_base64` not strict base64 (e.g. literal newlines). Use `base64 \| tr -d '\\n'`. |
 | `413 file_too_large`                                                            | File over `FLYDOCS_MAX_BYTES`. Split or compress.                          |
 | `408 timeout`                                                                    | Pipeline exceeded the sync ceiling. Retry through `POST /api/v1/extractions`. |

@@ -63,6 +63,6 @@ final class ExampleHelpers {
     /** Default base URL when {@code FLYDOCS_BASE_URL} is unset. */
     static String defaultBaseUrl() {
         String env = System.getenv("FLYDOCS_BASE_URL");
-        return env != null && !env.isEmpty() ? env : "http://localhost:8400";
+        return env != null && !env.isEmpty() ? env : "http://localhost:8080";
     }
 }

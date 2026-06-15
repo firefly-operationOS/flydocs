@@ -56,7 +56,7 @@ import reactor.util.retry.Retry;
  *
  * <pre>{@code
  * FlydocsClientAsync flydocs = FlydocsClientAsync.builder()
- *         .baseUrl("http://localhost:8400")
+ *         .baseUrl("http://localhost:8080")
  *         .timeout(Duration.ofSeconds(60))
  *         .build();
  *

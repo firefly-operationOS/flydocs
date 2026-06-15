@@ -7,7 +7,8 @@
 version: "3"
 
 vars:
-  PORT: '{{.PORT | default "8400"}}'
+  PORT: '{{.PORT | default "8080"}}'
+  MGMT_PORT: '{{.MGMT_PORT | default "9090"}}'
   COMPOSE: docker compose
   COMPOSE_TEST: docker compose -f docker-compose.yml -f docker-compose.test.yml
 
@@ -145,7 +146,7 @@ tasks:
       - '{{.COMPOSE}} up -d --build'
       - 'echo "API   -> http://localhost:{{.PORT}}"'
       - 'echo "docs  -> http://localhost:{{.PORT}}/docs"'
-      - 'echo "health-> http://localhost:{{.PORT}}/actuator/health"'
+      - 'echo "health-> http://localhost:{{.MGMT_PORT}}/actuator/health"'
 
   docker:logs:
     desc: Tail logs from every container.
@@ -179,17 +180,17 @@ tasks:
   health:
     desc: Curl the /actuator/health endpoint of the running API.
     cmds:
-      - 'curl -fsS http://localhost:{{.PORT}}/actuator/health | jq .'
+      - 'curl -fsS http://localhost:{{.MGMT_PORT}}/actuator/health | jq .'
 
   health:readiness:
     desc: Curl /actuator/health/readiness -- shows the database + EDA components.
     cmds:
-      - 'curl -fsS http://localhost:{{.PORT}}/actuator/health/readiness | jq .'
+      - 'curl -fsS http://localhost:{{.MGMT_PORT}}/actuator/health/readiness | jq .'
 
   health:liveness:
     desc: Curl /actuator/health/liveness -- cheap, no broker pings.
     cmds:
-      - 'curl -fsS http://localhost:{{.PORT}}/actuator/health/liveness | jq .'
+      - 'curl -fsS http://localhost:{{.MGMT_PORT}}/actuator/health/liveness | jq .'
 
   eda:outbox:
     desc: |

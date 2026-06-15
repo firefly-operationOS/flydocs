@@ -39,7 +39,7 @@ import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
  * Activate explicitly:</p>
  *
  * <pre>{@code
- * FLYDOCS_BASE_URL=http://localhost:8400 \
+ * FLYDOCS_BASE_URL=http://localhost:8080 \
  *   mvn -pl flydocs-sdk test -Dgroups=integration
  * }</pre>
  */

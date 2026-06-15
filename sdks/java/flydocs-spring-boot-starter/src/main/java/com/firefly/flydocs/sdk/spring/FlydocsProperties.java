@@ -36,7 +36,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public class FlydocsProperties {
 
     /**
-     * Base URL of the flydocs service, e.g. {@code http://localhost:8400}.
+     * Base URL of the flydocs service, e.g. {@code http://localhost:8080}.
      * Required.
      */
     @Nullable

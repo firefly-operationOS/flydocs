@@ -40,7 +40,7 @@ from typing import Any
 
 import httpx
 
-API = os.environ.get("FLYDOCS_API", "http://localhost:8400")
+API = os.environ.get("FLYDOCS_API", "http://localhost:8080")
 
 DEED_PDF = Path("/Users/ancongui/Downloads/resolicituddedocumentacin/2023.03.17_Escrit. consitiucion_DF&IS_registrada.pdf")
 PACTO_PDF = Path("/Users/ancongui/Downloads/resolicituddedocumentacin/2023.04.21_DF&IS_-_Pacto_de_Socios_Anexos_firmado.pdf")
