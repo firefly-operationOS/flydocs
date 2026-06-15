@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses **CalVer `YY.M.PP`** (PEP 440 may normalise patch numbers
 for the Python wheel — e.g. `26.06.00` → `26.6.0`).
 
+## [26.6.11] - 2026-06-15
+
+### Fixed
+
+- **A malformed persisted extraction no longer dumps a raw traceback in the
+  worker log.** `ExtractionWorker._process` reconstructed the typed request
+  (`_build_request` → pydantic `model_validate`) *outside* its `try/except`, so an
+  invalid stored `schema_json`/`options_json` raised a `ValidationError` that
+  escaped to the poll loop's `logger.exception(...)` and printed a full stack
+  trace. The reconstruction now runs inside the guarded block, where
+  `_is_permanent()` classifies it as terminal and the job is marked
+  `permanent_error` and logged cleanly — no traceback.
+
+### Changed
+
+- **Upgraded pyfly to `v26.06.104`** for framework-level clean error reporting:
+  expected client/domain faults (validation, business-rule, auth — the 4xx
+  family) are now logged at WARNING without a stack trace across the CQRS handlers
+  and the web request log, and the pyfly CLI prints a clean `Error: ...` line
+  instead of a traceback (`--debug` / `PYFLY_DEBUG` restores the full trace).
+  Dependency pin and floor moved to `v26.06.104` / `>=26.6.104`.
+
 ## [26.6.10] - 2026-06-15
 
 ### Changed

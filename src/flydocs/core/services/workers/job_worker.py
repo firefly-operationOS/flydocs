@@ -241,30 +241,35 @@ class ExtractionWorker:
             extraction_id=row.id,
             attempt=attempts,
         )
-        request = self._build_request(row)
-        # Capture the original intent BEFORE we mutate the request: we
-        # need to know whether the caller wanted bbox refinement so we
-        # can publish the post-processing event afterwards, even if we
-        # skip the inline node below.
-        wants_bbox_refine = bool(getattr(request.options.stages, "bbox_refine", False))
-        if wants_bbox_refine:
-            # Architectural decision: on the async path, skip the inline
-            # bbox_refine node entirely. The dedicated BboxRefineWorker
-            # picks up the post-processing event we publish below and
-            # grounds bboxes there. Running both wastes minutes of CPU
-            # and LLM tokens on duplicate work — and when the inline
-            # step times out (which it does on multi-PDF bundles) the
-            # pipeline framework marks the node as failed, which is
-            # misleading because the out-of-band path recovers
-            # transparently. The :class:`BboxRefiner` is idempotent
-            # (already-grounded fields are skipped on re-run), so even
-            # if both paths execute the work won't double up — but
-            # bypassing inline saves the latency outright.
-            stages_skipped = request.options.stages.model_copy(update={"bbox_refine": False})
-            options_skipped = request.options.model_copy(update={"stages": stages_skipped})
-            request = request.model_copy(update={"options": options_skipped})
         started = time.monotonic()
         try:
+            # Reconstruct the typed request from the persisted row INSIDE the
+            # try: a malformed schema/options payload makes pydantic raise a
+            # ValidationError, which _is_permanent() treats as a terminal
+            # failure (marked permanent_error) — instead of escaping to the
+            # poll loop's logger.exception() and dumping a raw traceback.
+            request = self._build_request(row)
+            # Capture the original intent BEFORE we mutate the request: we
+            # need to know whether the caller wanted bbox refinement so we
+            # can publish the post-processing event afterwards, even if we
+            # skip the inline node below.
+            wants_bbox_refine = bool(getattr(request.options.stages, "bbox_refine", False))
+            if wants_bbox_refine:
+                # Architectural decision: on the async path, skip the inline
+                # bbox_refine node entirely. The dedicated BboxRefineWorker
+                # picks up the post-processing event we publish below and
+                # grounds bboxes there. Running both wastes minutes of CPU
+                # and LLM tokens on duplicate work — and when the inline
+                # step times out (which it does on multi-PDF bundles) the
+                # pipeline framework marks the node as failed, which is
+                # misleading because the out-of-band path recovers
+                # transparently. The :class:`BboxRefiner` is idempotent
+                # (already-grounded fields are skipped on re-run), so even
+                # if both paths execute the work won't double up — but
+                # bypassing inline saves the latency outright.
+                stages_skipped = request.options.stages.model_copy(update={"bbox_refine": False})
+                options_skipped = request.options.model_copy(update={"stages": stages_skipped})
+                request = request.model_copy(update={"options": options_skipped})
             result = await asyncio.wait_for(
                 self._orchestrator.execute(request, extraction_id=row.id),
                 timeout=self._settings.async_timeout_s,

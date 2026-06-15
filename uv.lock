@@ -1483,7 +1483,7 @@ security = [
 
 [[package]]
 name = "flydocs"
-version = "26.6.10"
+version = "26.6.11"
 source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },
@@ -1539,7 +1539,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.10.0" },
     { name = "pydantic-ai-slim", extras = ["anthropic", "openai", "bedrock"], specifier = ">=1.56.0" },
     { name = "pydantic-settings", specifier = ">=2.7.0" },
-    { name = "pyfly", extras = ["fastapi", "web", "observability", "security", "data-relational", "postgresql", "eda", "redis", "client", "scheduling", "cli"], git = "https://github.com/fireflyframework/fireflyframework-pyfly.git?tag=v26.06.103" },
+    { name = "pyfly", extras = ["fastapi", "web", "observability", "security", "data-relational", "postgresql", "eda", "redis", "client", "scheduling", "cli"], git = "https://github.com/fireflyframework/fireflyframework-pyfly.git?tag=v26.06.104" },
     { name = "pymupdf", specifier = ">=1.24" },
     { name = "pypdf", specifier = ">=4.3.0" },
     { name = "pyright", marker = "extra == 'dev'", specifier = ">=1.1" },
@@ -3942,8 +3942,8 @@ wheels = [
 
 [[package]]
 name = "pyfly"
-version = "26.6.103"
-source = { git = "https://github.com/fireflyframework/fireflyframework-pyfly.git?tag=v26.06.103#67244e4fc23ce8bee1f40b0f819c2c8858161804" }
+version = "26.6.104"
+source = { git = "https://github.com/fireflyframework/fireflyframework-pyfly.git?tag=v26.06.104#a921a67fd0184b2caf05813bd3f7e6048e22b976" }
 dependencies = [
     { name = "pydantic" },
     { name = "pyyaml" },
