@@ -32,6 +32,7 @@ on:
       - "LICENSE"
       - ".gitignore"
       - "docs/**"
+      - ".github/**"
   workflow_dispatch:
     inputs:
       tag_suffix:
@@ -45,8 +46,14 @@ permissions:
   id-token: write
   attestations: write
 
+# Serialize by COMMIT, not ref: a release pushes the same commit to ``main`` and
+# as a ``v*`` tag, firing two runs that would otherwise build + push to GHCR
+# concurrently and race on shared layer blobs / the buildx cache (blob "not
+# found", 502s, "another job may be creating this cache"). Keying on the SHA puts
+# the tag-run and the main-run for the same release in one group so they serialize
+# (cancel-in-progress: false → both complete, in order).
 concurrency:
-  group: docker-publish-${{ github.ref }}
+  group: docker-publish-${{ github.sha }}
   cancel-in-progress: false
 
 env:

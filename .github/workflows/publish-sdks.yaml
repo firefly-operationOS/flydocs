@@ -99,7 +99,22 @@ jobs:
         # ``flydocs-spring-boot-starter``. ``flydocs-examples`` has
         # ``maven.deploy.skip=true`` so it builds (compile-check) but
         # never gets pushed to a repository.
-        run: mvn -B -ntp deploy
+        #
+        # Idempotent: GitHub Packages forbids re-deploying an existing release
+        # version (HTTP 409), so a re-run of an already-published tag must not
+        # fail the workflow. Treat a 409/"already exists" as success; any other
+        # failure still fails the step.
+        run: |
+          set -o pipefail
+          if mvn -B -ntp deploy 2>&1 | tee /tmp/mvn-deploy.log; then
+            exit 0
+          fi
+          if grep -qiE "status code: 409|409 conflict|already exist|conflict" /tmp/mvn-deploy.log; then
+            echo "::warning::Java SDK version already published to GitHub Packages — idempotent re-run, treating as success."
+            exit 0
+          fi
+          echo "::error::Java SDK deploy failed (not an already-published 409)."
+          exit 1
 
   # --------------------------------------------------------------------
   # Python → GitHub Release assets (+ optional PyPI)
