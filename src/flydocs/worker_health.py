@@ -140,10 +140,14 @@ def make_health_server(app: Starlette, *, settings: IDPSettings) -> uvicorn.Serv
 
 
 def build_worker_health_server(
-    context: ApplicationContext | None,
+    context: ApplicationContext,
     settings: IDPSettings,
 ) -> uvicorn.Server | None:
-    """Health server for a worker process, or ``None`` when disabled."""
+    """Health server for a worker process, or ``None`` when disabled.
+
+    *context* is the worker's started ``ApplicationContext`` (the CLI passes
+    ``pyfly_app.context``); the management app is built from it.
+    """
     if resolve_health_port(settings) == 0:
         return None
     return make_health_server(build_health_app(context), settings=settings)
