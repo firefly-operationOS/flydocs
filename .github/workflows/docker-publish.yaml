@@ -13,10 +13,9 @@
 #                 GHCR rejects upper-case namespaces -- ``firefly-operationOS``
 #                 → ``firefly-operationos``).
 #
-# The Dockerfile uses BuildKit named contexts for the pyfly +
-# fireflyframework-agentic sibling repos. We clone them into ./vendor/
-# and pass them via ``build-contexts:`` so the same Dockerfile works
-# both locally (siblings on disk) and in CI.
+# pyfly + fireflyframework-agentic are git dependencies (pinned tags in
+# pyproject.toml's [tool.uv.sources]); the Dockerfile's ``uv sync`` fetches
+# them straight from GitHub, so no sibling checkout / build-context is needed.
 
 name: Docker publish (multi-arch)
 
@@ -34,11 +33,6 @@ on:
       - "docs/**"
       - ".github/**"
   workflow_dispatch:
-    inputs:
-      tag_suffix:
-        description: "Optional extra tag (will be sanitised)."
-        required: false
-        default: ""
 
 permissions:
   contents: read
@@ -58,8 +52,6 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
-  PYFLY_REF: main
-  AGENTIC_REF: main
 
 jobs:
   publish:
@@ -115,15 +107,6 @@ jobs:
           owner="${GITHUB_REPOSITORY_OWNER,,}"
           name="${GITHUB_REPOSITORY##*/}"
           echo "image=${{ env.REGISTRY }}/${owner}/${name}" >> "$GITHUB_OUTPUT"
-
-      - name: Check out sibling firefly framework repos
-        run: |
-          git clone --depth=1 --branch "$PYFLY_REF" \
-            https://github.com/fireflyframework/fireflyframework-pyfly.git \
-            ./vendor/pyfly
-          git clone --depth=1 --branch "$AGENTIC_REF" \
-            https://github.com/fireflyframework/fireflyframework-agentic.git \
-            ./vendor/fireflyframework-agentic
 
       - uses: docker/setup-qemu-action@v3
         with:
@@ -182,9 +165,6 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             WITH_DOCLING=${{ matrix.with_docling }}
-          build-contexts: |
-            pyfly=./vendor/pyfly
-            fireflyframework-agentic=./vendor/fireflyframework-agentic
           cache-from: type=gha,scope=${{ matrix.variant }}
           cache-to: type=gha,mode=max,scope=${{ matrix.variant }}
 

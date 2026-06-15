@@ -16,16 +16,14 @@
 #
 # Multi-stage Docker build for flydocs.
 #
-# Sibling-path deps (pyfly, fireflyframework-agentic) are passed in as
-# named BuildKit contexts so the build context stays scoped to this
-# directory.
+# pyfly + fireflyframework-agentic are consumed as git dependencies
+# (pinned tags in pyproject.toml's [tool.uv.sources]), so ``uv sync``
+# resolves them straight from GitHub at build time. The build therefore
+# needs network access + git (both provided in the builder stage) but no
+# sibling checkout on disk and no BuildKit named contexts.
 #
 # Usage:
-#     docker buildx build \
-#         --build-context pyfly=../../fireflyframework/fireflyframework-pyfly \
-#         --build-context fireflyframework-agentic=../../fireflyframework/fireflyframework-agentic \
-#         --tag flydocs:latest \
-#         .
+#     docker buildx build --tag flydocs:latest .
 #
 # See docker-compose.yml for the canonical invocation.
 
@@ -55,28 +53,15 @@ RUN apt-get update \
 ENV UV_PROJECT_ENVIRONMENT=/app/.venv \
     UV_LINK_MODE=copy
 
-# Stage sibling sources (only what uv needs to install the editable wheel).
-COPY --from=pyfly                     /pyproject.toml  /build/pyfly/pyproject.toml
-COPY --from=pyfly                     /README.md       /build/pyfly/README.md
-COPY --from=pyfly                     /src             /build/pyfly/src
-
-COPY --from=fireflyframework-agentic  /pyproject.toml          /build/fireflyframework-agentic/pyproject.toml
-COPY --from=fireflyframework-agentic  /README.md               /build/fireflyframework-agentic/README.md
-COPY --from=fireflyframework-agentic  /LICENSE                 /build/fireflyframework-agentic/LICENSE
-COPY --from=fireflyframework-agentic  /fireflyframework_agentic /build/fireflyframework-agentic/fireflyframework_agentic
-
 # Stage the project manifests for layer caching. README.md is required by
 # hatchling because pyproject.toml declares ``readme = "README.md"``.
+# pyfly + fireflyframework-agentic are git sources in pyproject.toml
+# (pinned tags), so the ``uv sync`` calls below fetch them from GitHub --
+# no sibling sources are staged into the image.
 WORKDIR /app
 COPY pyproject.toml /app/pyproject.toml
 COPY README.md      /app/README.md
 COPY uv.lock*       /app/
-
-# Rewrite path-source entries so uv resolves siblings inside the container.
-RUN sed -i \
-        -e 's|path = "\.\./\.\./fireflyframework/fireflyframework-pyfly"|path = "/build/pyfly"|' \
-        -e 's|path = "\.\./\.\./fireflyframework/fireflyframework-agentic"|path = "/build/fireflyframework-agentic"|' \
-        /app/pyproject.toml
 
 # Compose the optional-extras list once so both ``uv sync`` calls stay
 # in lock-step. Docling adds PyTorch + Hugging Face models; everything
