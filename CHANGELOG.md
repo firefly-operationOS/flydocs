@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses **CalVer `YY.M.PP`** (PEP 440 may normalise patch numbers
 for the Python wheel — e.g. `26.06.00` → `26.6.0`).
 
+## [26.6.13] - 2026-06-16
+
+### Changed
+
+- **Upgrade pyfly to `v26.06.106`.** Picks up the admin-dashboard fix where the
+  Overview **Thread Count** gauge rendered the active thread count as a
+  percentage (e.g. `8%` for 8 threads, clamping anything over 100 to `100%`).
+  The gauge now shows the raw count. This surfaces on both the API and the
+  worker management dashboards.
+
 ## [26.6.12] - 2026-06-15
 
 ### Added
