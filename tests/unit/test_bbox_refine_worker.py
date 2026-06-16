@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import io
 from dataclasses import dataclass, field
@@ -283,3 +284,153 @@ async def test_permanent_error_marks_failed_no_republish() -> None:
     names = [name for name, _ in repo.calls]
     assert "fail_bbox_refinement" in names
     assert publisher.published == []  # never republish on permanent
+
+
+# ----------------------------------------------- parallel per-document refine
+
+
+class _RecordingRefiner:
+    """Refiner double that records how many ``refine`` calls overlap.
+
+    Each call increments a live counter, yields the event loop while
+    "working", then decrements -- so ``max_active`` captures the peak
+    concurrency the worker actually drove across the documents.
+    """
+
+    def __init__(self) -> None:
+        self.active = 0
+        self.max_active = 0
+        self.calls = 0
+        self.completed = 0
+
+    async def refine(self, *, groups: Any, **_: Any) -> None:
+        self.calls += 1
+        self.active += 1
+        self.max_active = max(self.max_active, self.active)
+        try:
+            await asyncio.sleep(0.05)
+        finally:
+            self.active -= 1
+            self.completed += 1
+
+
+def _result_with_n_docs(n: int) -> ExtractionResult:
+    docs = []
+    for i in range(n):
+        field_ = ExtractedField(
+            name="customer_name",
+            value="Acme Corporation",
+            pages=[1],
+            bbox=BoundingBox(xmin=0.05, ymin=0.05, xmax=0.95, ymax=0.95),
+        )
+        group = ExtractedFieldGroup(name="customer", fields=[field_])
+        docs.append(Document(type="invoice", pages=[1], field_groups=[group], source_file=f"doc{i}.pdf"))
+    return ExtractionResult(
+        id="ext_RESULT0000000000000000000000",
+        files=[],
+        documents=docs,
+        pipeline=PipelineMeta(model="anthropic:claude-sonnet-4-6", latency_ms=1000),
+    )
+
+
+def _ext_with_n_docs(n: int) -> _StubExtraction:
+    pdf = _real_pdf()
+    files = [
+        {
+            "filename": f"doc{i}.pdf",
+            "content_base64": base64.b64encode(pdf).decode(),
+            "content_type": "application/pdf",
+        }
+        for i in range(n)
+    ]
+    return _StubExtraction(
+        schema_json={"files": files},
+        result_json=_result_with_n_docs(n).model_dump(mode="json", by_alias=True),
+    )
+
+
+def _worker_with(repo: _StubRepo, refiner: Any, settings: IDPSettings) -> BboxRefineWorker:
+    return BboxRefineWorker(
+        repository=repo,  # type: ignore[arg-type]
+        event_publisher=_StubPublisher(),  # type: ignore[arg-type]
+        webhook=_StubWebhook(),  # type: ignore[arg-type]
+        normalizer=_make_normalizer(),
+        refiner=refiner,
+        settings=settings,
+    )
+
+
+@pytest.mark.asyncio
+async def test_documents_are_refined_concurrently() -> None:
+    """Several documents in one extraction refine in parallel, not one-by-one."""
+    refiner = _RecordingRefiner()
+    repo = _StubRepo(_ext_with_n_docs(3))
+    worker = _worker_with(repo, refiner, IDPSettings())
+
+    await worker._process(repo.ext.id)
+
+    assert refiner.calls == 3
+    assert refiner.max_active > 1  # sequential code peaks at 1
+
+
+@pytest.mark.asyncio
+async def test_document_concurrency_is_capped_by_setting() -> None:
+    """Concurrency never exceeds ``bbox_refine_doc_concurrency`` but does reach it."""
+    refiner = _RecordingRefiner()
+    repo = _StubRepo(_ext_with_n_docs(4))
+    worker = _worker_with(repo, refiner, IDPSettings(bbox_refine_doc_concurrency=2))
+
+    await worker._process(repo.ext.id)
+
+    assert refiner.calls == 4
+    assert refiner.max_active == 2  # capped at the limit, and reaches it
+
+
+@pytest.mark.asyncio
+async def test_completion_waits_for_every_document_before_callback() -> None:
+    """The barrier guarantee: the bbox leg is only completed once EVERY
+    document has finished refining -- so the post-processing callback fires
+    exactly once, after the last document."""
+    refiner = _RecordingRefiner()
+    repo = _StubRepo(_ext_with_n_docs(5))
+    worker = _worker_with(repo, refiner, IDPSettings())
+
+    await worker._process(repo.ext.id)
+
+    # All five refined, and completion happened (once) only after all of them.
+    assert refiner.completed == 5
+    complete_calls = [name for name, _ in repo.calls if name == "complete_bbox_refinement"]
+    assert complete_calls == ["complete_bbox_refinement"]
+    assert repo.ext.post_processing_bbox_status == "succeeded"
+
+
+class _FlakyRefiner(_RecordingRefiner):
+    """Refines normally but raises on the document whose group is poisoned."""
+
+    async def refine(self, *, groups: Any, **kw: Any) -> None:
+        await super().refine(groups=groups, **kw)
+        if groups and groups[0].name == "boom":
+            raise RuntimeError("refiner exploded")
+
+
+@pytest.mark.asyncio
+async def test_one_document_failure_fails_the_job_without_stranding_siblings() -> None:
+    """A refine error still fails the leg (so it retries / goes permanent),
+    and every sibling document settles first -- the barrier leaves no task
+    running after we leave."""
+    refiner = _FlakyRefiner()
+    repo = _StubRepo(_ext_with_n_docs(3))
+    result = ExtractionResult.model_validate(repo.ext.result_json)
+    result.documents[1].field_groups[0].name = "boom"  # poison the middle doc
+    repo.ext.result_json = result.model_dump(mode="json", by_alias=True)
+    worker = _worker_with(repo, refiner, IDPSettings())
+
+    await worker._process(repo.ext.id)
+
+    # All three were awaited (no orphaned in-flight task), but the leg failed.
+    assert refiner.completed == 3
+    assert refiner.active == 0
+    names = [name for name, _ in repo.calls]
+    assert "complete_bbox_refinement" not in names
+    # First attempt of 3 -> retryable RuntimeError -> republished, not failed.
+    assert "fail_bbox_refinement" not in names

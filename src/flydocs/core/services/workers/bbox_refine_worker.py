@@ -314,19 +314,44 @@ class BboxRefineWorker:
 
         language_hint = (row.options_json or {}).get("language_hint")
 
-        for document in result.documents:
+        # Refine the documents concurrently rather than strictly one-by-one:
+        # each document is independent (its own field_groups, mutated in
+        # place), and the refiner pushes its CPU-bound word collection to a
+        # thread, so overlapping docs cut the wall-clock from the sum of
+        # per-doc latencies to ~the slowest one. A semaphore bounds the fan-out
+        # (OCR is CPU-bound; each doc multiplies in-flight LLM calls).
+        # ``gather`` is the barrier that makes "the last document finished"
+        # well-defined: it returns only once every task has settled, so the
+        # caller fires the completion + webhook exactly once, afterwards.
+        semaphore = asyncio.Semaphore(max(1, self._settings.bbox_refine_doc_concurrency))
+
+        async def _refine_one(document: Any) -> None:
             if not document.field_groups:
-                continue
+                return
             mapped = by_filename.get(document.source_file or "")
             if mapped is None:
-                continue
-            await self._refiner.refine(
-                document_bytes=mapped.bytes,
-                media_type=mapped.media_type,
-                page_count=mapped.page_count,
-                groups=document.field_groups,
-                language_hint=language_hint,
-            )
+                return
+            async with semaphore:
+                await self._refiner.refine(
+                    document_bytes=mapped.bytes,
+                    media_type=mapped.media_type,
+                    page_count=mapped.page_count,
+                    groups=document.field_groups,
+                    language_hint=language_hint,
+                )
+
+        # ``return_exceptions=True`` so one document's failure never strands
+        # its siblings mid-flight; we await them all (the barrier) and then
+        # re-raise the first error, preserving the existing per-job
+        # retry/permanent-failure semantics (and the original exception type
+        # that ``_is_permanent`` inspects).
+        outcomes = await asyncio.gather(
+            *(_refine_one(document) for document in result.documents),
+            return_exceptions=True,
+        )
+        for outcome in outcomes:
+            if isinstance(outcome, BaseException):
+                raise outcome
         return result
 
     def _backoff_delay(self, attempts: int) -> float:
