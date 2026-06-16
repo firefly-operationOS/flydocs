@@ -2,7 +2,7 @@
 name = "flydocs"
 # CalVer YY.MM.PP -- bumped per release. Note that PEP 440 normalises
 # ``26.05.01`` -> ``26.5.1`` in the built wheel filename.
-version = "26.6.12"
+version = "26.6.13"
 description = "Pure-multimodal Intelligent Document Processing service: structured fields + bounding boxes, validation, authenticity checks, LLM judge, and a business-rule engine. Sync + queue-backed async APIs over fireflyframework-pyfly and -agentic. Part of Firefly OperationOS, platform-agnostic by design."
 readme = "README.md"
 requires-python = ">=3.13"
@@ -19,7 +19,7 @@ dependencies = [
     # so a fresh ``uv sync`` is enough to boot the full stack. The ``web``
     # extra declares starlette + uvicorn, which the worker health server
     # imports directly; the floor carries ``pyfly.actuator.install_health_indicators``.
-    "pyfly[fastapi,web,observability,security,data-relational,postgresql,eda,redis,client,scheduling,cli]>=26.6.105",
+    "pyfly[fastapi,web,observability,security,data-relational,postgresql,eda,redis,client,scheduling,cli]>=26.6.106",
 
     # GenAI metaframework -- FireflyAgent with multimodal content (BinaryContent/ImageUrl)
     # over pydantic-ai. Pulls in the OpenAI / Anthropic / Bedrock providers via pydantic-ai-slim.
@@ -130,7 +130,7 @@ override-dependencies = [
 # tags so a fresh clone, the CI lanes, and the Docker build all resolve them
 # straight from GitHub without a sibling path or vendored checkout. Bump the
 # pinned tag here to upgrade either framework.
-pyfly = { git = "https://github.com/fireflyframework/fireflyframework-pyfly.git", tag = "v26.06.105" }
+pyfly = { git = "https://github.com/fireflyframework/fireflyframework-pyfly.git", tag = "v26.06.106" }
 fireflyframework-agentic = { git = "https://github.com/fireflyframework/fireflyframework-agentic.git", tag = "v26.05.30" }
 
 [tool.hatch.build.targets.wheel]
