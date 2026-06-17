@@ -78,6 +78,14 @@ class IDPSettings(BaseSettings):
     # default ceiling is generous.
     bbox_refine_max_attempts: int = 3
     bbox_refine_timeout_s: int = 600
+    # Max documents of a single extraction refined concurrently. The refine
+    # leg fans out one task per document (OCR + per-page matcher), so a
+    # multi-document extraction no longer runs strictly one doc at a time.
+    # Bounded because OCR is CPU-bound and each doc multiplies in-flight LLM
+    # calls. Set this per deployment to roughly the pod's CPU limit + 1 (the
+    # +1 keeps the cores busy across the LLM-matcher I/O waits); lower it under
+    # provider rate limits.
+    bbox_refine_doc_concurrency: int = 4
 
     # -- Extraction -----------------------------------------------------
     model: str = "anthropic:claude-sonnet-4-6"

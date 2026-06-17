@@ -6,6 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses **CalVer `YY.M.PP`** (PEP 440 may normalise patch numbers
 for the Python wheel — e.g. `26.06.00` → `26.6.0`).
 
+## [26.6.14] - 2026-06-16
+
+### Changed
+
+- **The bbox-refine post-processing leg now refines a multi-document
+  extraction's documents concurrently instead of strictly one at a time.**
+  `BboxRefineWorker._refine_extraction_result` fanned out one `await` per
+  document in a sequential loop, so a cross-document extraction (e.g. a cap
+  table merged across several deeds) paid the *sum* of every document's
+  OCR + per-page-matcher latency — a 5-document, ~290-page job ran ~700s and
+  blew the 600s `bbox_refine_timeout_s`, timing out on all 3 attempts and
+  re-doing every document from scratch each retry. Documents are independent
+  (each mutates its own `field_groups`) and the refiner already pushes its
+  CPU-bound word collection to a thread, so the leg now runs them through a
+  bounded `asyncio.gather`: wall-clock drops from the sum to ~the slowest
+  document. A new `FLYDOCS_BBOX_REFINE_DOC_CONCURRENCY` (default `4`) caps the
+  fan-out (OCR is CPU-bound; each doc multiplies in-flight LLM calls) — set it
+  per deployment to roughly the pod's CPU limit + 1. The
+  `gather` is the barrier that keeps "the last document finished" well-defined:
+  the completion transition + post-processing webhook still fire exactly once,
+  after every document has settled. Per-job retry / permanent-failure
+  semantics are unchanged — one document's failure still fails the leg, with
+  no sibling task left running.
+
 ## [26.6.13] - 2026-06-16
 
 ### Changed

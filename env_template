@@ -153,6 +153,14 @@ FLYDOCS_BBOX_REFINE_TESSERACT_LANG=spa+eng
 #   * ``llm`` -- one LLM call per page over every field.
 #   * ``fuzzy`` -- rapidfuzz only, no LLM fallback.
 FLYDOCS_BBOX_REFINE_MATCHER=hybrid
+# Max documents of one extraction refined concurrently. The refine leg fans
+# out a task per document (OCR + per-page matcher), so a multi-document
+# extraction no longer runs strictly one doc at a time -- wall-clock drops
+# from the sum of per-doc latencies to ~the slowest one. Bounded because OCR
+# is CPU-bound and each doc multiplies in-flight LLM calls.
+# Set this to roughly the pod's CPU limit + 1 (the +1 keeps the cores busy
+# across the LLM-matcher I/O waits); lower it under provider rate limits.
+FLYDOCS_BBOX_REFINE_DOC_CONCURRENCY=4
 
 # ----------------------------------------------------------------------------
 # Security (optional -- only used if you front the service with an auth gate)
