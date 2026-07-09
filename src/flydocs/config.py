@@ -234,8 +234,14 @@ class IDPSettings(BaseSettings):
     # ``repair_model`` pins the pass to its own model (``None`` = the
     # request model). Runs BEFORE judge_escalation, so the full re-run
     # only fires when targeted repair was not enough.
+    # ``repair_include_flagged`` widens the failure predicate to judge
+    # ``flag_for_review`` fields (matching what the escalation counter
+    # counts). Flagged-but-PASS fields are often ambiguous-but-correct,
+    # so set it to false to restrict repair to hard failures (judge FAIL
+    # or a validator error) and save those extra passes.
     repair_model: str | None = None
     repair_timeout_s: int = 300
+    repair_include_flagged: bool = True
 
     # -- Webhook --------------------------------------------------------
     # The result webhook delivers the full extraction (split docs + fields +

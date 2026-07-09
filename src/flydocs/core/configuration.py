@@ -372,6 +372,7 @@ class IDPCoreConfiguration:
             judge=judge,
             field_validator=field_validator,
             default_model=settings.repair_model,
+            include_flagged=settings.repair_include_flagged,
         )
 
     # ------------------------------------------------------------------

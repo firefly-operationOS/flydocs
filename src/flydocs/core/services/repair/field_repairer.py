@@ -61,21 +61,25 @@ class FailingField:
     evidence: str
 
 
-def collect_failing_fields(groups: list[ExtractedFieldGroup]) -> list[FailingField]:
+def collect_failing_fields(
+    groups: list[ExtractedFieldGroup], *, include_flagged: bool = True
+) -> list[FailingField]:
     """Top-level fields whose judge verdict or validation failed.
 
     A field fails when ``judge.status == FAIL``, ``judge.flag_for_review``
-    is set, or ``validation.valid`` is false. The evidence string joins
-    the judge's reasoning with every validator error message. Array
-    fields carry ``valid=False`` with an empty parent error list (the
-    messages live on the row sub-fields), so the evidence for arrays is
-    harvested from the rows.
+    is set (unless ``include_flagged`` is false -- flagged-but-PASS fields
+    are usually ambiguous-but-correct, so cost-sensitive deployments can
+    restrict repair to hard failures), or ``validation.valid`` is false.
+    The evidence string joins the judge's reasoning with every validator
+    error message. Array fields carry ``valid=False`` with an empty parent
+    error list (the messages live on the row sub-fields), so the evidence
+    for arrays is harvested from the rows.
     """
     failures: list[FailingField] = []
     for group in groups:
         for field in group.fields:
             reasons: list[str] = []
-            if field.judge.status == JudgeStatus.FAIL or field.judge.flag_for_review:
+            if field.judge.status == JudgeStatus.FAIL or (include_flagged and field.judge.flag_for_review):
                 reasons.append(field.judge.evidence or field.judge.notes or "judge rejected the value")
             if not field.validation.valid:
                 messages = [e.message for e in field.validation.errors]
@@ -117,11 +121,13 @@ class FieldRepairer:
         judge: Judge,
         field_validator: FieldValidator,
         default_model: str | None,
+        include_flagged: bool = True,
     ) -> None:
         self._extractor = extractor
         self._judge = judge
         self._field_validator = field_validator
         self._default_model = default_model
+        self._include_flagged = include_flagged
 
     async def maybe_repair(self, ctx: Any, request: ExtractionRequest) -> RepairInfo | None:
         """Return a :class:`RepairInfo` when at least one field was flagged, else ``None``.
@@ -136,7 +142,7 @@ class FieldRepairer:
 
         async def _repair_task(task: Any) -> None:
             nonlocal flagged
-            failures = collect_failing_fields(task.extracted_groups)
+            failures = collect_failing_fields(task.extracted_groups, include_flagged=self._include_flagged)
             if not failures:
                 return
             flagged += len(failures)

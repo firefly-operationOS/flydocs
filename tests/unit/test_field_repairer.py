@@ -169,6 +169,38 @@ def test_collect_failing_fields_includes_flag_for_review() -> None:
     assert [(f.group, f.field) for f in failures] == [("identity", "number")]
 
 
+def test_collect_failing_fields_can_exclude_flagged_pass_fields() -> None:
+    """include_flagged=False restricts collection to hard failures: a PASS
+    field that is merely flag_for_review (ambiguous-but-correct) is skipped."""
+    flagged = ExtractedField(
+        name="number",
+        value="X123",
+        judge=JudgeOutcome(status=JudgeStatus.PASS, flag_for_review=True),
+    )
+    hard_fail = _judge_failed_field("iban", "ES00", "checksum")
+    groups = [ExtractedFieldGroup(name="identity", fields=[flagged, hard_fail])]
+    failures = collect_failing_fields(groups, include_flagged=False)
+    assert [(f.group, f.field) for f in failures] == [("identity", "iban")]
+
+
+@pytest.mark.asyncio
+async def test_maybe_repair_skips_flagged_pass_fields_when_configured() -> None:
+    flagged = ExtractedField(
+        name="number",
+        value="X123",
+        judge=JudgeOutcome(status=JudgeStatus.PASS, flag_for_review=True),
+    )
+    task = _task([ExtractedFieldGroup(name="identity", fields=[flagged])])
+    extractor = MagicMock()
+    extractor.extract_repair = AsyncMock(return_value=[])
+
+    repairer = _repairer(extractor, MagicMock(judge=AsyncMock()), include_flagged=False)
+    info = await repairer.maybe_repair(_ctx([task]), _request())
+
+    assert info is None
+    extractor.extract_repair.assert_not_awaited()
+
+
 def test_collect_failing_fields_empty_when_all_clean() -> None:
     groups = [ExtractedFieldGroup(name="identity", fields=[_clean_field("name", "JOHN")])]
     assert collect_failing_fields(groups) == []
@@ -227,12 +259,14 @@ def _repairer(
     judge: Any,
     *,
     default_model: str | None = None,
+    include_flagged: bool = True,
 ) -> FieldRepairer:
     return FieldRepairer(
         extractor=extractor,
         judge=judge,
         field_validator=FieldValidator(),
         default_model=default_model,
+        include_flagged=include_flagged,
     )
 
 
