@@ -25,7 +25,11 @@ Repaired values are re-verified (validators always; judge subset
 re-check when the judge stage is enabled) and replace the originals
 only when they come back clean -- with the judge on, that means an
 explicit PASS, and a null candidate never replaces a value. The repair
-is monotonic: it can fix fields, never degrade them.
+is monotonic at the field level: a field is only replaced by a verified
+candidate. Array fields are the caveat: they are re-extracted and
+accepted whole, so a previously-correct row may be replaced by a new
+verifier-passing value -- ``RepairInfo.rows_changed`` records how many
+rows differ per repaired array so table repairs can be diffed.
 
 Opt-in via ``options.stages.repair``. Runs after judge and BEFORE
 judge_escalation, so the expensive full re-run only fires when targeted
@@ -144,6 +148,7 @@ class FieldRepairer:
         flagged = 0
         skipped_tasks = 0
         repaired_paths: list[str] = []
+        rows_changed: dict[str, int] = {}
         # Same rationale as bbox_refine_doc_concurrency: each repaired task
         # multiplies in-flight LLM calls; lower it under provider rate limits.
         semaphore = asyncio.Semaphore(max(1, self._task_concurrency))
@@ -171,11 +176,12 @@ class FieldRepairer:
                 return
             try:
                 async with semaphore:
-                    accepted = await self._repair_one(task, failures, request, model)
+                    accepted, task_rows_changed = await self._repair_one(task, failures, request, model)
             except Exception as exc:  # noqa: BLE001 -- repair must never break the pipeline
                 logger.warning("repair failed for %s: %s; keeping original fields", task.task_id, exc)
                 return
             repaired_paths.extend(accepted)
+            rows_changed.update(task_rows_changed)
 
         await asyncio.gather(*(_repair_task(t) for t in tasks))
 
@@ -188,6 +194,7 @@ class FieldRepairer:
             fields_repaired=len(repaired_paths),
             repaired_fields=sorted(repaired_paths),
             tasks_skipped=skipped_tasks,
+            rows_changed=rows_changed,
         )
         logger.info(
             "repair flagged=%d repaired=%d skipped_tasks=%d model=%s",
@@ -204,8 +211,9 @@ class FieldRepairer:
         failures: list[FailingField],
         request: ExtractionRequest,
         model: str | None,
-    ) -> list[str]:
-        """Repair one task; return the ``group.field`` paths that were accepted."""
+    ) -> tuple[list[str], dict[str, int]]:
+        """Repair one task; return the accepted ``group.field`` paths and,
+        for accepted array fields, how many rows differ from the original."""
         failing_keys = {(f.group, f.field) for f in failures}
         subset = _subset_spec(task.doc_spec, failing_keys)
         repaired_groups = await self._extractor.extract_repair(
@@ -218,7 +226,7 @@ class FieldRepairer:
             model=model,
         )
         if not repaired_groups:
-            return []
+            return [], {}
 
         # Re-verify: validators always (deterministic, free); judge subset
         # re-check only when the caller enabled the judge stage.
@@ -238,6 +246,7 @@ class FieldRepairer:
         }
         judged = request.options.stages.judge
         accepted: list[str] = []
+        rows_changed: dict[str, int] = {}
         for group in task.extracted_groups:
             for index, field in enumerate(group.fields):
                 key = (group.name, field.name)
@@ -246,9 +255,14 @@ class FieldRepairer:
                 candidate = repaired_by_key.get(key)
                 if candidate is None or not _is_clean(candidate, require_judge_pass=judged):
                     continue
+                path = f"{group.name}.{field.name}"
+                if isinstance(field.value, list) and isinstance(candidate.value, list):
+                    changed = _changed_row_count(field.value, candidate.value)
+                    if changed:
+                        rows_changed[path] = changed
                 group.fields[index] = candidate
-                accepted.append(f"{group.name}.{field.name}")
-        return accepted
+                accepted.append(path)
+        return accepted, rows_changed
 
 
 def _is_clean(field: ExtractedField, *, require_judge_pass: bool) -> bool:
@@ -267,6 +281,26 @@ def _is_clean(field: ExtractedField, *, require_judge_pass: bool) -> bool:
     if require_judge_pass:
         return field.judge.status == JudgeStatus.PASS and not field.judge.flag_for_review
     return field.judge.status != JudgeStatus.FAIL and not field.judge.flag_for_review
+
+
+def _changed_row_count(old_rows: list[Any], new_rows: list[Any]) -> int:
+    """Rows of a repaired array whose content differs from the original.
+
+    Compared positionally by (name, value) signature -- rows have no
+    stable keys, so an inserted or dropped row also counts as a change.
+    """
+    changed = sum(
+        1 for old, new in zip(old_rows, new_rows) if _row_signature(old) != _row_signature(new)
+    )
+    return changed + abs(len(old_rows) - len(new_rows))
+
+
+def _row_signature(row: Any) -> Any:
+    if isinstance(row, ExtractedField):
+        if isinstance(row.value, list):
+            return (row.name, tuple(_row_signature(sub) for sub in row.value))
+        return (row.name, row.value)
+    return row
 
 
 def _subset_spec(doc: DocumentTypeSpec, failing_keys: set[tuple[str, str]]) -> DocumentTypeSpec:

@@ -443,6 +443,43 @@ async def test_maybe_repair_falls_back_to_request_model() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Array audit
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_maybe_repair_records_changed_rows_for_arrays() -> None:
+    """Arrays are accepted whole, so previously-correct rows may be replaced;
+    rows_changed records how many rows differ so QA can diff table repairs."""
+    old_rows = [
+        ExtractedField(name="row", value=[ExtractedField(name="a", value="1")]),
+        ExtractedField(name="row", value=[ExtractedField(name="b", value="-3")]),
+    ]
+    array_field = ExtractedField(
+        name="line_items",
+        value=old_rows,
+        validation=FieldValidation(valid=False, errors=[]),
+    )
+    task = _task([ExtractedFieldGroup(name="items", fields=[array_field])])
+    new_rows = [
+        ExtractedField(name="row", value=[ExtractedField(name="a", value="1")]),  # untouched
+        ExtractedField(name="row", value=[ExtractedField(name="b", value="3")]),  # fixed
+    ]
+    extractor = MagicMock()
+    extractor.extract_repair = AsyncMock(
+        return_value=[
+            ExtractedFieldGroup(name="items", fields=[ExtractedField(name="line_items", value=new_rows)])
+        ]
+    )
+
+    repairer = _repairer(extractor, MagicMock(judge=AsyncMock()))
+    info = await repairer.maybe_repair(_ctx([task]), _request(judge=False))
+
+    assert info is not None and info.fields_repaired == 1
+    assert info.rows_changed == {"items.line_items": 1}
+
+
+# ---------------------------------------------------------------------------
 # Scope cap
 # ---------------------------------------------------------------------------
 
