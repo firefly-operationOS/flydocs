@@ -354,9 +354,10 @@ to lean on:
    content_authenticity for high-volume bulk runs; reserve them for
    high-risk paths.
 2. **Model choice.** `FLYDOCS_MODEL` is the default; override per
-   request via `options.model`. Lighter models (haiku, gpt-4o-mini)
-   are fine for high-volume extraction; reserve the heavier ones for
-   adversarial or low-confidence cases.
+   request via `options.model` (stages pinned via a
+   `FLYDOCS_<STAGE>_MODEL` keep their model regardless). Lighter
+   models (haiku, gpt-4o-mini) are fine for high-volume extraction;
+   reserve the heavier ones for adversarial or low-confidence cases.
 3. **Fallback.** `FLYDOCS_FALLBACK_MODEL` is used when the primary
    errors out. Setting it to a cheaper model avoids double-paying for
    a single failed call — and gives you a graceful degradation path.

@@ -22,11 +22,14 @@ originals only when they pass re-verification.
 
 from __future__ import annotations
 
+import asyncio
 import base64
+import io
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
+import pypdf
 import pytest
 
 from flydocs.config import IDPSettings
@@ -169,6 +172,38 @@ def test_collect_failing_fields_includes_flag_for_review() -> None:
     assert [(f.group, f.field) for f in failures] == [("identity", "number")]
 
 
+def test_collect_failing_fields_can_exclude_flagged_pass_fields() -> None:
+    """include_flagged=False restricts collection to hard failures: a PASS
+    field that is merely flag_for_review (ambiguous-but-correct) is skipped."""
+    flagged = ExtractedField(
+        name="number",
+        value="X123",
+        judge=JudgeOutcome(status=JudgeStatus.PASS, flag_for_review=True),
+    )
+    hard_fail = _judge_failed_field("iban", "ES00", "checksum")
+    groups = [ExtractedFieldGroup(name="identity", fields=[flagged, hard_fail])]
+    failures = collect_failing_fields(groups, include_flagged=False)
+    assert [(f.group, f.field) for f in failures] == [("identity", "iban")]
+
+
+@pytest.mark.asyncio
+async def test_maybe_repair_skips_flagged_pass_fields_when_configured() -> None:
+    flagged = ExtractedField(
+        name="number",
+        value="X123",
+        judge=JudgeOutcome(status=JudgeStatus.PASS, flag_for_review=True),
+    )
+    task = _task([ExtractedFieldGroup(name="identity", fields=[flagged])])
+    extractor = MagicMock()
+    extractor.extract_repair = AsyncMock(return_value=[])
+
+    repairer = _repairer(extractor, MagicMock(judge=AsyncMock()), include_flagged=False)
+    info = await repairer.maybe_repair(_ctx([task]), _request())
+
+    assert info is None
+    extractor.extract_repair.assert_not_awaited()
+
+
 def test_collect_failing_fields_empty_when_all_clean() -> None:
     groups = [ExtractedFieldGroup(name="identity", fields=[_clean_field("name", "JOHN")])]
     assert collect_failing_fields(groups) == []
@@ -227,12 +262,18 @@ def _repairer(
     judge: Any,
     *,
     default_model: str | None = None,
+    include_flagged: bool = True,
+    max_failing_fraction: float = 1.0,
+    task_concurrency: int = 4,
 ) -> FieldRepairer:
     return FieldRepairer(
         extractor=extractor,
         judge=judge,
         field_validator=FieldValidator(),
         default_model=default_model,
+        include_flagged=include_flagged,
+        max_failing_fraction=max_failing_fraction,
+        task_concurrency=task_concurrency,
     )
 
 
@@ -401,6 +442,214 @@ async def test_maybe_repair_falls_back_to_request_model() -> None:
     repairer = _repairer(extractor, MagicMock(judge=AsyncMock()), default_model=None)
     await repairer.maybe_repair(_ctx([task], model_id="request-model"), _request())
     assert extractor.extract_repair.await_args.kwargs["model"] == "request-model"
+
+
+# ---------------------------------------------------------------------------
+# Page-sliced repair
+# ---------------------------------------------------------------------------
+
+
+def _pdf(pages: int) -> bytes:
+    writer = pypdf.PdfWriter()
+    for _ in range(pages):
+        writer.add_blank_page(width=72, height=72)
+    buf = io.BytesIO()
+    writer.write(buf)
+    return buf.getvalue()
+
+
+def _paged_task(groups: list[ExtractedFieldGroup], *, pages: int) -> Any:
+    task = _task(groups)
+    task.slice_bytes = _pdf(pages)
+    task.slice_pages = pages
+    return task
+
+
+@pytest.mark.asyncio
+async def test_repair_slices_pdf_to_failing_pages_and_remaps_candidate() -> None:
+    """A failure localized on page 3 of 5 re-sends only pages 2-4 (one page
+    of margin); the accepted candidate's slice-relative pages are shifted
+    back to document coordinates."""
+    failing = _judge_failed_field("number", "X123", "misread")
+    failing.pages = [3]
+    task = _paged_task([ExtractedFieldGroup(name="identity", fields=[failing])], pages=5)
+    extractor = MagicMock()
+    extractor.extract_repair = AsyncMock(
+        return_value=[
+            ExtractedFieldGroup(
+                name="identity", fields=[ExtractedField(name="number", value="Y456", pages=[2])]
+            )
+        ]
+    )
+
+    repairer = _repairer(extractor, MagicMock(judge=AsyncMock()))
+    info = await repairer.maybe_repair(_ctx([task]), _request(judge=False))
+
+    kwargs = extractor.extract_repair.await_args.kwargs
+    assert kwargs["page_count"] == 3
+    assert len(pypdf.PdfReader(io.BytesIO(kwargs["document_bytes"])).pages) == 3
+    assert info is not None and info.fields_repaired == 1
+    assert task.extracted_groups[0].fields[0].pages == [3]
+
+
+@pytest.mark.asyncio
+async def test_repair_sends_full_document_when_failing_pages_unknown() -> None:
+    """Null-value failures carry pages=[]; without provenance the repair
+    falls back to the full segment slice."""
+    failing = _judge_failed_field("number", "X123", "misread")  # pages=[] by default
+    task = _paged_task([ExtractedFieldGroup(name="identity", fields=[failing])], pages=5)
+    extractor = MagicMock()
+    extractor.extract_repair = AsyncMock(return_value=[])
+
+    repairer = _repairer(extractor, MagicMock(judge=AsyncMock()))
+    await repairer.maybe_repair(_ctx([task]), _request(judge=False))
+
+    kwargs = extractor.extract_repair.await_args.kwargs
+    assert kwargs["document_bytes"] == task.slice_bytes
+    assert kwargs["page_count"] == 5
+
+
+@pytest.mark.asyncio
+async def test_repair_sends_full_document_for_non_pdf_media() -> None:
+    failing = _judge_failed_field("number", "X123", "misread")
+    failing.pages = [3]
+    task = _paged_task([ExtractedFieldGroup(name="identity", fields=[failing])], pages=5)
+    task.segment = SimpleNamespace(media_type="image/png")
+    extractor = MagicMock()
+    extractor.extract_repair = AsyncMock(return_value=[])
+
+    repairer = _repairer(extractor, MagicMock(judge=AsyncMock()))
+    await repairer.maybe_repair(_ctx([task]), _request(judge=False))
+
+    kwargs = extractor.extract_repair.await_args.kwargs
+    assert kwargs["document_bytes"] == task.slice_bytes
+    assert kwargs["page_count"] == 5
+
+
+# ---------------------------------------------------------------------------
+# Array audit
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_maybe_repair_records_changed_rows_for_arrays() -> None:
+    """Arrays are accepted whole, so previously-correct rows may be replaced;
+    rows_changed records how many rows differ so QA can diff table repairs."""
+    old_rows = [
+        ExtractedField(name="row", value=[ExtractedField(name="a", value="1")]),
+        ExtractedField(name="row", value=[ExtractedField(name="b", value="-3")]),
+    ]
+    array_field = ExtractedField(
+        name="line_items",
+        value=old_rows,
+        validation=FieldValidation(valid=False, errors=[]),
+    )
+    task = _task([ExtractedFieldGroup(name="items", fields=[array_field])])
+    new_rows = [
+        ExtractedField(name="row", value=[ExtractedField(name="a", value="1")]),  # untouched
+        ExtractedField(name="row", value=[ExtractedField(name="b", value="3")]),  # fixed
+    ]
+    extractor = MagicMock()
+    extractor.extract_repair = AsyncMock(
+        return_value=[
+            ExtractedFieldGroup(name="items", fields=[ExtractedField(name="line_items", value=new_rows)])
+        ]
+    )
+
+    repairer = _repairer(extractor, MagicMock(judge=AsyncMock()))
+    info = await repairer.maybe_repair(_ctx([task]), _request(judge=False))
+
+    assert info is not None and info.fields_repaired == 1
+    assert info.rows_changed == {"items.line_items": 1}
+
+
+# ---------------------------------------------------------------------------
+# Scope cap
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_maybe_repair_skips_task_above_max_failing_fraction() -> None:
+    """When most fields failed the extraction is globally untrustworthy:
+    targeted repair is skipped and judge_escalation's full re-run (whose
+    trigger rate is unchanged) is the right tool."""
+    task = _task(
+        [
+            ExtractedFieldGroup(
+                name="identity",
+                fields=[
+                    _judge_failed_field("number", "X123", "misread"),
+                    _judge_failed_field("name", "J0HN", "misread"),
+                ],
+            )
+        ]
+    )
+    extractor = MagicMock()
+    extractor.extract_repair = AsyncMock(return_value=[])
+
+    repairer = _repairer(extractor, MagicMock(judge=AsyncMock()), max_failing_fraction=0.5)
+    info = await repairer.maybe_repair(_ctx([task]), _request())
+
+    extractor.extract_repair.assert_not_awaited()
+    assert info is not None and info.triggered
+    assert info.fields_flagged == 2
+    assert info.fields_repaired == 0
+    assert info.tasks_skipped == 1
+
+
+@pytest.mark.asyncio
+async def test_maybe_repair_runs_when_failing_fraction_at_or_below_cap() -> None:
+    task = _task(
+        [
+            ExtractedFieldGroup(
+                name="identity",
+                fields=[
+                    _clean_field("name", "JOHN"),
+                    _judge_failed_field("number", "X123", "misread"),
+                ],
+            )
+        ]
+    )
+    extractor = MagicMock()
+    extractor.extract_repair = AsyncMock(return_value=[])
+
+    repairer = _repairer(extractor, MagicMock(judge=AsyncMock()), max_failing_fraction=0.5)
+    info = await repairer.maybe_repair(_ctx([task]), _request())
+
+    extractor.extract_repair.assert_awaited_once()
+    assert info is not None and info.tasks_skipped == 0
+
+
+# ---------------------------------------------------------------------------
+# Concurrency bound
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_maybe_repair_bounds_concurrent_task_repairs() -> None:
+    tasks = [
+        _task([ExtractedFieldGroup(name="identity", fields=[_judge_failed_field("number", "X", "bad")])])
+        for _ in range(3)
+    ]
+    in_flight = 0
+    peak = 0
+
+    async def _tracked_repair(**_: Any) -> list[ExtractedFieldGroup]:
+        nonlocal in_flight, peak
+        in_flight += 1
+        peak = max(peak, in_flight)
+        await asyncio.sleep(0.01)
+        in_flight -= 1
+        return []
+
+    extractor = MagicMock()
+    extractor.extract_repair = AsyncMock(side_effect=_tracked_repair)
+
+    repairer = _repairer(extractor, MagicMock(judge=AsyncMock()), task_concurrency=1)
+    await repairer.maybe_repair(_ctx(tasks), _request())
+
+    assert extractor.extract_repair.await_count == 3
+    assert peak == 1
 
 
 # ---------------------------------------------------------------------------

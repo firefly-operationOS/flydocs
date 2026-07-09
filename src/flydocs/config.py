@@ -234,8 +234,17 @@ class IDPSettings(BaseSettings):
     # ``repair_model`` pins the pass to its own model (``None`` = the
     # request model). Runs BEFORE judge_escalation, so the full re-run
     # only fires when targeted repair was not enough.
+    # ``repair_include_flagged=false`` restricts repair to hard failures
+    # (judge FAIL or a validator error), skipping ambiguous flagged-PASS
+    # fields. ``repair_max_failing_fraction`` caps scope: above it the doc
+    # is globally untrustworthy, so repair steps aside for judge_escalation
+    # (1.0 disables). ``repair_task_concurrency`` bounds parallel repairs
+    # under provider rate limits, mirroring ``bbox_refine_doc_concurrency``.
     repair_model: str | None = None
     repair_timeout_s: int = 300
+    repair_include_flagged: bool = True
+    repair_max_failing_fraction: float = 0.5
+    repair_task_concurrency: int = 4
 
     # -- Webhook --------------------------------------------------------
     # The result webhook delivers the full extraction (split docs + fields +

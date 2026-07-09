@@ -372,6 +372,9 @@ class IDPCoreConfiguration:
             judge=judge,
             field_validator=field_validator,
             default_model=settings.repair_model,
+            include_flagged=settings.repair_include_flagged,
+            max_failing_fraction=settings.repair_max_failing_fraction,
+            task_concurrency=settings.repair_task_concurrency,
         )
 
     # ------------------------------------------------------------------

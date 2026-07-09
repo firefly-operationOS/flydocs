@@ -25,7 +25,11 @@ Repaired values are re-verified (validators always; judge subset
 re-check when the judge stage is enabled) and replace the originals
 only when they come back clean -- with the judge on, that means an
 explicit PASS, and a null candidate never replaces a value. The repair
-is monotonic: it can fix fields, never degrade them.
+is monotonic at the field level: a field is only replaced by a verified
+candidate. Array fields are the caveat: they are re-extracted and
+accepted whole, so a previously-correct row may be replaced by a new
+verifier-passing value -- ``RepairInfo.rows_changed`` records how many
+rows differ per repaired array so table repairs can be diffed.
 
 Opt-in via ``options.stages.repair``. Runs after judge and BEFORE
 judge_escalation, so the expensive full re-run only fires when targeted
@@ -41,6 +45,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from flydocs.core.services.extraction.extractor import MultimodalExtractor
+from flydocs.core.services.extraction.pdf_slicer import PageRange, slice_pdf
 from flydocs.core.services.judge import Judge
 from flydocs.core.services.validation.field_validator import FieldValidator
 from flydocs.interfaces.dtos.document_type import DocumentTypeSpec
@@ -59,23 +64,30 @@ class FailingField:
     field: str
     value: Any
     evidence: str
+    # 1-indexed slice-relative pages the value was reported on; empty when
+    # unknown (typical for null-value failures, whose page is discarded).
+    pages: tuple[int, ...] = ()
 
 
-def collect_failing_fields(groups: list[ExtractedFieldGroup]) -> list[FailingField]:
+def collect_failing_fields(
+    groups: list[ExtractedFieldGroup], *, include_flagged: bool = True
+) -> list[FailingField]:
     """Top-level fields whose judge verdict or validation failed.
 
     A field fails when ``judge.status == FAIL``, ``judge.flag_for_review``
-    is set, or ``validation.valid`` is false. The evidence string joins
-    the judge's reasoning with every validator error message. Array
-    fields carry ``valid=False`` with an empty parent error list (the
-    messages live on the row sub-fields), so the evidence for arrays is
-    harvested from the rows.
+    is set (unless ``include_flagged`` is false -- flagged-but-PASS fields
+    are usually ambiguous-but-correct, so cost-sensitive deployments can
+    restrict repair to hard failures), or ``validation.valid`` is false.
+    The evidence string joins the judge's reasoning with every validator
+    error message. Array fields carry ``valid=False`` with an empty parent
+    error list (the messages live on the row sub-fields), so the evidence
+    for arrays is harvested from the rows.
     """
     failures: list[FailingField] = []
     for group in groups:
         for field in group.fields:
             reasons: list[str] = []
-            if field.judge.status == JudgeStatus.FAIL or field.judge.flag_for_review:
+            if field.judge.status == JudgeStatus.FAIL or (include_flagged and field.judge.flag_for_review):
                 reasons.append(field.judge.evidence or field.judge.notes or "judge rejected the value")
             if not field.validation.valid:
                 messages = [e.message for e in field.validation.errors]
@@ -89,9 +101,20 @@ def collect_failing_fields(groups: list[ExtractedFieldGroup]) -> list[FailingFie
                         field=field.name,
                         value=field.value,
                         evidence="; ".join(reasons),
+                        pages=_field_pages(field),
                     )
                 )
     return failures
+
+
+def _field_pages(field: ExtractedField) -> tuple[int, ...]:
+    """Every page the field (or, for arrays, its rows) was reported on."""
+    pages = set(field.pages)
+    if isinstance(field.value, list):
+        for sub in field.value:
+            if isinstance(sub, ExtractedField):
+                pages.update(_field_pages(sub))
+    return tuple(sorted(pages))
 
 
 def _row_error_messages(rows: list[Any]) -> list[str]:
@@ -117,11 +140,17 @@ class FieldRepairer:
         judge: Judge,
         field_validator: FieldValidator,
         default_model: str | None,
+        include_flagged: bool = True,
+        max_failing_fraction: float = 0.5,
+        task_concurrency: int = 4,
     ) -> None:
         self._extractor = extractor
         self._judge = judge
         self._field_validator = field_validator
         self._default_model = default_model
+        self._include_flagged = include_flagged
+        self._max_failing_fraction = max_failing_fraction
+        self._task_concurrency = task_concurrency
 
     async def maybe_repair(self, ctx: Any, request: ExtractionRequest) -> RepairInfo | None:
         """Return a :class:`RepairInfo` when at least one field was flagged, else ``None``.
@@ -132,20 +161,42 @@ class FieldRepairer:
         tasks: list[Any] = ctx.metadata.get("tasks", [])
         model = self._default_model or ctx.metadata.get("model_id")
         flagged = 0
+        skipped_tasks = 0
         repaired_paths: list[str] = []
+        rows_changed: dict[str, int] = {}
+        # Same rationale as bbox_refine_doc_concurrency: each repaired task
+        # multiplies in-flight LLM calls; lower it under provider rate limits.
+        semaphore = asyncio.Semaphore(max(1, self._task_concurrency))
 
         async def _repair_task(task: Any) -> None:
-            nonlocal flagged
-            failures = collect_failing_fields(task.extracted_groups)
+            nonlocal flagged, skipped_tasks
+            failures = collect_failing_fields(task.extracted_groups, include_flagged=self._include_flagged)
             if not failures:
                 return
             flagged += len(failures)
+            total = sum(len(group.fields) for group in task.extracted_groups)
+            if total and len(failures) / total > self._max_failing_fraction:
+                # The extraction is globally untrustworthy: a focused pass
+                # would re-extract nearly everything on top of the eventual
+                # escalation re-run. Leave the FAIL verdicts in place so
+                # judge_escalation triggers as before.
+                skipped_tasks += 1
+                logger.info(
+                    "repair skipped for %s: %d/%d fields failing exceeds max fraction %.2f",
+                    task.task_id,
+                    len(failures),
+                    total,
+                    self._max_failing_fraction,
+                )
+                return
             try:
-                accepted = await self._repair_one(task, failures, request, model)
+                async with semaphore:
+                    accepted, task_rows_changed = await self._repair_one(task, failures, request, model)
             except Exception as exc:  # noqa: BLE001 -- repair must never break the pipeline
                 logger.warning("repair failed for %s: %s; keeping original fields", task.task_id, exc)
                 return
             repaired_paths.extend(accepted)
+            rows_changed.update(task_rows_changed)
 
         await asyncio.gather(*(_repair_task(t) for t in tasks))
 
@@ -157,11 +208,14 @@ class FieldRepairer:
             fields_flagged=flagged,
             fields_repaired=len(repaired_paths),
             repaired_fields=sorted(repaired_paths),
+            tasks_skipped=skipped_tasks,
+            rows_changed=rows_changed,
         )
         logger.info(
-            "repair flagged=%d repaired=%d model=%s",
+            "repair flagged=%d repaired=%d skipped_tasks=%d model=%s",
             info.fields_flagged,
             info.fields_repaired,
+            info.tasks_skipped,
             model,
         )
         return info
@@ -172,28 +226,30 @@ class FieldRepairer:
         failures: list[FailingField],
         request: ExtractionRequest,
         model: str | None,
-    ) -> list[str]:
-        """Repair one task; return the ``group.field`` paths that were accepted."""
+    ) -> tuple[list[str], dict[str, int]]:
+        """Repair one task; return the accepted ``group.field`` paths and,
+        for accepted array fields, how many rows differ from the original."""
         failing_keys = {(f.group, f.field) for f in failures}
         subset = _subset_spec(task.doc_spec, failing_keys)
+        doc_bytes, page_count, page_offset = _repair_slice(task, failures)
         repaired_groups = await self._extractor.extract_repair(
-            document_bytes=task.slice_bytes,
+            document_bytes=doc_bytes,
             media_type=task.segment.media_type,
-            page_count=task.slice_pages,
+            page_count=page_count,
             doc=subset,
             failing_fields_text=_failures_text(failures),
             language_hint=request.options.language_hint,
             model=model,
         )
         if not repaired_groups:
-            return []
+            return [], {}
 
         # Re-verify: validators always (deterministic, free); judge subset
         # re-check only when the caller enabled the judge stage.
         self._field_validator.validate(subset.field_groups, repaired_groups)
         if request.options.stages.judge:
             await self._judge.judge(
-                document_bytes=task.slice_bytes,
+                document_bytes=doc_bytes,
                 media_type=task.segment.media_type,
                 doc=subset,
                 extracted_groups=repaired_groups,
@@ -206,6 +262,7 @@ class FieldRepairer:
         }
         judged = request.options.stages.judge
         accepted: list[str] = []
+        rows_changed: dict[str, int] = {}
         for group in task.extracted_groups:
             for index, field in enumerate(group.fields):
                 key = (group.name, field.name)
@@ -214,9 +271,16 @@ class FieldRepairer:
                 candidate = repaired_by_key.get(key)
                 if candidate is None or not _is_clean(candidate, require_judge_pass=judged):
                     continue
+                if page_offset:
+                    _shift_pages(candidate, page_offset)
+                path = f"{group.name}.{field.name}"
+                if isinstance(field.value, list) and isinstance(candidate.value, list):
+                    changed = _changed_row_count(field.value, candidate.value)
+                    if changed:
+                        rows_changed[path] = changed
                 group.fields[index] = candidate
-                accepted.append(f"{group.name}.{field.name}")
-        return accepted
+                accepted.append(path)
+        return accepted, rows_changed
 
 
 def _is_clean(field: ExtractedField, *, require_judge_pass: bool) -> bool:
@@ -235,6 +299,66 @@ def _is_clean(field: ExtractedField, *, require_judge_pass: bool) -> bool:
     if require_judge_pass:
         return field.judge.status == JudgeStatus.PASS and not field.judge.flag_for_review
     return field.judge.status != JudgeStatus.FAIL and not field.judge.flag_for_review
+
+
+def _repair_slice(task: Any, failures: list[FailingField]) -> tuple[bytes, int, int]:
+    """Bytes, page count and page offset for the focused repair pass.
+
+    The dominant repair cost is the input pages, not the schema subset,
+    so when every failing field carries page provenance the segment PDF
+    is sliced to the failing span plus one page of margin. Falls back to
+    the full segment slice when the media is not PDF, any failing field
+    has no known pages (nulled values lose theirs), the span would not
+    actually shrink the document, or slicing fails.
+    """
+    full = (task.slice_bytes, task.slice_pages, 0)
+    if task.segment.media_type != "application/pdf":
+        return full
+    if not failures or any(not f.pages for f in failures):
+        return full
+    pages = sorted({page for f in failures for page in f.pages})
+    start = max(1, pages[0] - 1)
+    end = min(task.slice_pages, pages[-1] + 1)
+    if end - start + 1 >= task.slice_pages:
+        return full
+    try:
+        sliced = slice_pdf(task.slice_bytes, PageRange(start=start, end=end))
+    except Exception as exc:  # noqa: BLE001 -- slicing is an optimization, never fatal
+        logger.warning("repair page slicing failed for %s: %s; using full slice", task.task_id, exc)
+        return full
+    return sliced, end - start + 1, start - 1
+
+
+def _shift_pages(field: ExtractedField, offset: int) -> None:
+    """Map slice-relative page numbers of an accepted candidate back to
+    segment coordinates (recursing into array rows and sub-fields)."""
+    field.pages = [page + offset for page in field.pages]
+    if isinstance(field.value, list):
+        for sub in field.value:
+            if isinstance(sub, ExtractedField):
+                _shift_pages(sub, offset)
+
+
+def _changed_row_count(old_rows: list[Any], new_rows: list[Any]) -> int:
+    """Rows of a repaired array whose content differs from the original.
+
+    Compared positionally by (name, value) signature -- rows have no
+    stable keys, so an inserted or dropped row also counts as a change.
+    """
+    changed = sum(
+        1
+        for old, new in zip(old_rows, new_rows, strict=False)
+        if _row_signature(old) != _row_signature(new)
+    )
+    return changed + abs(len(old_rows) - len(new_rows))
+
+
+def _row_signature(row: Any) -> Any:
+    if isinstance(row, ExtractedField):
+        if isinstance(row.value, list):
+            return (row.name, tuple(_row_signature(sub) for sub in row.value))
+        return (row.name, row.value)
+    return row
 
 
 def _subset_spec(doc: DocumentTypeSpec, failing_keys: set[tuple[str, str]]) -> DocumentTypeSpec:

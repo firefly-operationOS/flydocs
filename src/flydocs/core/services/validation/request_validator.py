@@ -100,13 +100,13 @@ class RequestValidator:
     share one instance.
     """
 
-    def validate(self, request: ExtractionRequest) -> ValidationReport:
+    def validate(self, request: ExtractionRequest, *, sync: bool = False) -> ValidationReport:
         report = ValidationReport()
         self._check_files(request, report)
         self._check_document_types(request, report)
         self._check_rule_references(request, report)
         self._check_rule_dag(request, report)
-        self._check_stage_consistency(request, report)
+        self._check_stage_consistency(request, report, sync=sync)
         return report
 
     # -- file-level checks (multi-file shape) ----------------------------
@@ -338,7 +338,9 @@ class RequestValidator:
 
     # -- stage / toggle consistency --------------------------------------
 
-    def _check_stage_consistency(self, request: ExtractionRequest, report: ValidationReport) -> None:
+    def _check_stage_consistency(
+        self, request: ExtractionRequest, report: ValidationReport, *, sync: bool = False
+    ) -> None:
         stages = request.options.stages
 
         # rule_engine on but no rules => the stage is a no-op. Warn.
@@ -382,6 +384,24 @@ class RequestValidator:
                         "only one DocumentTypeSpec -- the splitter will short-circuit."
                     ),
                     path="options.stages.splitter",
+                )
+            )
+
+        # repair on a synchronous request => the extra LLM pass eats into
+        # the hard sync wall (FLYDOCS_SYNC_TIMEOUT_S) and raises the odds
+        # of a 408. Warn; the async API has the budget for it.
+        if sync and stages.repair:
+            report.issues.append(
+                ValidationIssue(
+                    severity="warning",
+                    code="repair_sync_latency",
+                    message=(
+                        "stages.repair adds an extra LLM pass per failing "
+                        "field; synchronous requests are hard-capped at "
+                        "FLYDOCS_SYNC_TIMEOUT_S and are likely to return "
+                        "408 -- prefer the async POST /api/v1/extractions."
+                    ),
+                    path="options.stages.repair",
                 )
             )
 

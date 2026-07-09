@@ -437,7 +437,7 @@ for validators to fire.
 |------------------------|----------|-----------------------|--------------------------------------------------------------------|
 | `return_bboxes`        | boolean  | `true`                | `false` strips bboxes from the response (cheaper to transfer).      |
 | `language_hint`        | string?  | `null`                | ISO 639-1, ≤ 16 chars. Guides multilingual OCR / extraction.        |
-| `model`                | string?  | `null` (env default)  | Per-request primary model id (`anthropic:claude-sonnet-4-6`, …).    |
+| `model`                | string?  | `null` (env default)  | Per-request primary model id (`anthropic:claude-sonnet-4-6`, …). Applies only to stages without a pinned `FLYDOCS_<STAGE>_MODEL`; a pinned stage keeps its model. |
 | `declared_media_type`  | string?  | `null`                | Override sniffing; rare.                                            |
 | `stages`               | object   | server defaults       | See `StageToggles` below.                                           |
 | `escalation`           | object?  | `null`                | `{ threshold, model }`. Required when `stages.judge_escalation=true`. |
