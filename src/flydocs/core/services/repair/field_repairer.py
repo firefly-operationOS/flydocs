@@ -23,8 +23,9 @@ specific mistake instead of re-rolling the dice on everything.
 
 Repaired values are re-verified (validators always; judge subset
 re-check when the judge stage is enabled) and replace the originals
-only when they come back clean -- the repair is monotonic: it can fix
-fields, never degrade them.
+only when they come back clean -- with the judge on, that means an
+explicit PASS, and a null candidate never replaces a value. The repair
+is monotonic: it can fix fields, never degrade them.
 
 Opt-in via ``options.stages.repair``. Runs after judge and BEFORE
 judge_escalation, so the expensive full re-run only fires when targeted
@@ -65,7 +66,10 @@ def collect_failing_fields(groups: list[ExtractedFieldGroup]) -> list[FailingFie
 
     A field fails when ``judge.status == FAIL``, ``judge.flag_for_review``
     is set, or ``validation.valid`` is false. The evidence string joins
-    the judge's reasoning with every validator error message.
+    the judge's reasoning with every validator error message. Array
+    fields carry ``valid=False`` with an empty parent error list (the
+    messages live on the row sub-fields), so the evidence for arrays is
+    harvested from the rows.
     """
     failures: list[FailingField] = []
     for group in groups:
@@ -74,7 +78,10 @@ def collect_failing_fields(groups: list[ExtractedFieldGroup]) -> list[FailingFie
             if field.judge.status == JudgeStatus.FAIL or field.judge.flag_for_review:
                 reasons.append(field.judge.evidence or field.judge.notes or "judge rejected the value")
             if not field.validation.valid:
-                reasons.extend(e.message for e in field.validation.errors)
+                messages = [e.message for e in field.validation.errors]
+                if not messages and isinstance(field.value, list):
+                    messages = _row_error_messages(field.value)
+                reasons.extend(messages or ["failed validation"])
             if reasons:
                 failures.append(
                     FailingField(
@@ -85,6 +92,19 @@ def collect_failing_fields(groups: list[ExtractedFieldGroup]) -> list[FailingFie
                     )
                 )
     return failures
+
+
+def _row_error_messages(rows: list[Any]) -> list[str]:
+    """Validator messages stamped on the row sub-fields of an array field."""
+    messages: list[str] = []
+    for row in rows:
+        if not isinstance(row, ExtractedField) or not isinstance(row.value, list):
+            continue
+        for sub_field in row.value:
+            if not isinstance(sub_field, ExtractedField):
+                continue
+            messages.extend(f"{sub_field.name}: {e.message}" for e in sub_field.validation.errors)
+    return messages
 
 
 class FieldRepairer:
@@ -184,6 +204,7 @@ class FieldRepairer:
         repaired_by_key: dict[tuple[str, str], ExtractedField] = {
             (group.name, field.name): field for group in repaired_groups for field in group.fields
         }
+        judged = request.options.stages.judge
         accepted: list[str] = []
         for group in task.extracted_groups:
             for index, field in enumerate(group.fields):
@@ -191,17 +212,28 @@ class FieldRepairer:
                 if key not in failing_keys:
                     continue
                 candidate = repaired_by_key.get(key)
-                if candidate is None or not _is_clean(candidate):
+                if candidate is None or not _is_clean(candidate, require_judge_pass=judged):
                     continue
                 group.fields[index] = candidate
                 accepted.append(f"{group.name}.{field.name}")
         return accepted
 
 
-def _is_clean(field: ExtractedField) -> bool:
-    """A repaired field is accepted only when re-verification passed."""
+def _is_clean(field: ExtractedField, *, require_judge_pass: bool) -> bool:
+    """A repaired field is accepted only when re-verification passed.
+
+    A ``None`` value never replaces the original -- a repair that found
+    nothing must not erase data. When the judge stage is on, the
+    candidate needs an explicit PASS: a field the judge omitted keeps
+    the default UNCERTAIN outcome and would otherwise slip through
+    unverified.
+    """
+    if field.value is None:
+        return False
     if not field.validation.valid:
         return False
+    if require_judge_pass:
+        return field.judge.status == JudgeStatus.PASS and not field.judge.flag_for_review
     return field.judge.status != JudgeStatus.FAIL and not field.judge.flag_for_review
 
 
@@ -221,6 +253,14 @@ def _failures_text(failures: list[FailingField]) -> str:
     lines = []
     for f in failures:
         lines.append(
-            f"- ``{f.group}.{f.field}``: previous value {f.value!r} -- rejected because: {f.evidence}"
+            f"- ``{f.group}.{f.field}``: previous value {_value_summary(f.value)} "
+            f"-- rejected because: {f.evidence}"
         )
     return "\n".join(lines)
+
+
+def _value_summary(value: Any) -> str:
+    """Human-readable value for the repair prompt; arrays stay compact."""
+    if isinstance(value, list):
+        return f"<array with {len(value)} row(s)>"
+    return repr(value)

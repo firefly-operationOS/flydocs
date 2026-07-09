@@ -168,6 +168,40 @@ def test_collect_failing_fields_empty_when_all_clean() -> None:
     assert collect_failing_fields(groups) == []
 
 
+def test_collect_failing_fields_includes_arrays_with_empty_error_list() -> None:
+    """_validate_array stamps the parent valid=False with errors=[]; the
+    evidence must be harvested from the row sub-fields instead."""
+    bad_sub = ExtractedField(
+        name="quantity",
+        value="-3",
+        validation=FieldValidation(
+            valid=False,
+            errors=[FieldValidationError(rule=ValidationRule.MINIMUM, message="value below minimum 0")],
+        ),
+    )
+    row = ExtractedField(name="row", value=[bad_sub])
+    array_field = ExtractedField(
+        name="line_items",
+        value=[row],
+        validation=FieldValidation(valid=False, errors=[]),  # exactly what _validate_array produces
+    )
+    groups = [ExtractedFieldGroup(name="items", fields=[array_field])]
+    failures = collect_failing_fields(groups)
+    assert [(f.group, f.field) for f in failures] == [("items", "line_items")]
+    assert "value below minimum 0" in failures[0].evidence
+
+
+def test_failures_text_renders_array_values_compactly() -> None:
+    from flydocs.core.services.repair.field_repairer import FailingField, _failures_text
+
+    row = ExtractedField(name="row", value=[ExtractedField(name="a", value="1")])
+    text = _failures_text(
+        [FailingField(group="items", field="line_items", value=[row], evidence="bad rows")]
+    )
+    assert "ExtractedField(" not in text
+    assert "1 row(s)" in text
+
+
 # ---------------------------------------------------------------------------
 # Repair round-trip
 # ---------------------------------------------------------------------------
@@ -302,6 +336,46 @@ async def test_maybe_repair_without_judge_stage_uses_validator_only() -> None:
     assert info is not None and info.fields_repaired == 1
     assert task.extracted_groups[0].fields[0].value == "X123"
     judge.judge.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_maybe_repair_rejects_candidate_the_judge_never_graded() -> None:
+    """With the judge stage ON, a candidate the judge omitted keeps the
+    default UNCERTAIN outcome and must NOT replace the original."""
+    original = _judge_failed_field("number", "X123", "misread")
+    task = _task([ExtractedFieldGroup(name="identity", fields=[original])])
+    extractor = MagicMock()
+    extractor.extract_repair = AsyncMock(
+        return_value=[
+            ExtractedFieldGroup(name="identity", fields=[ExtractedField(name="number", value="Z999")])
+        ]
+    )
+    judge = MagicMock()
+    judge.judge = AsyncMock(side_effect=lambda *, extracted_groups, **_: extracted_groups)  # stamps nothing
+
+    repairer = _repairer(extractor, judge)
+    info = await repairer.maybe_repair(_ctx([task]), _request())
+
+    assert info is not None and info.fields_repaired == 0
+    assert task.extracted_groups[0].fields[0].value == "X123"
+
+
+@pytest.mark.asyncio
+async def test_maybe_repair_never_replaces_a_value_with_none() -> None:
+    """A null candidate (repair found nothing) must not erase the original."""
+    original = _validator_failed_field("number", "bad!", "pattern mismatch")
+    task = _task([ExtractedFieldGroup(name="identity", fields=[original])])
+    extractor = MagicMock()
+    extractor.extract_repair = AsyncMock(
+        return_value=[
+            ExtractedFieldGroup(name="identity", fields=[ExtractedField(name="number", value=None)])
+        ]
+    )
+    repairer = _repairer(extractor, MagicMock(judge=AsyncMock()))
+    info = await repairer.maybe_repair(_ctx([task]), _request(judge=False))
+
+    assert info is not None and info.fields_repaired == 0
+    assert task.extracted_groups[0].fields[0].value == "bad!"
 
 
 @pytest.mark.asyncio
