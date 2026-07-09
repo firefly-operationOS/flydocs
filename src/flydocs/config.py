@@ -90,6 +90,26 @@ class IDPSettings(BaseSettings):
     # -- Extraction -----------------------------------------------------
     model: str = "anthropic:claude-sonnet-4-6"
     fallback_model: str | None = "openai:gpt-4o"
+
+    # -- Per-stage model routing ----------------------------------------
+    # Pin an individual pipeline stage to its own model id. ``None``
+    # (default) means the stage runs on the shared request model
+    # (``options.model`` or ``FLYDOCS_MODEL``). A pinned stage wins over
+    # ``options.model`` so operator stage-tuning survives per-request
+    # overrides. Typical policy: cheap models for splitter/classifier,
+    # the default for extract, a stronger model for judge.
+    splitter_model: str | None = None
+    classifier_model: str | None = None
+    extract_model: str | None = None
+    visual_authenticity_model: str | None = None
+    content_authenticity_model: str | None = None
+    judge_model: str | None = None
+    rule_engine_model: str | None = None
+    # ``transform_model`` and ``bbox_matcher_model`` are constructor-level:
+    # the transformation engine and the bbox LLM matcher receive their
+    # model at bean construction, not per pipeline call.
+    transform_model: str | None = None
+    bbox_matcher_model: str | None = None
     # Optional pre-extraction text rendering. ``"none"`` (default) sends
     # the binary only. ``"docling"`` runs Docling
     # over the document and splices the resulting Markdown into the
