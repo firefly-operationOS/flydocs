@@ -346,7 +346,9 @@ def _changed_row_count(old_rows: list[Any], new_rows: list[Any]) -> int:
     stable keys, so an inserted or dropped row also counts as a change.
     """
     changed = sum(
-        1 for old, new in zip(old_rows, new_rows) if _row_signature(old) != _row_signature(new)
+        1
+        for old, new in zip(old_rows, new_rows, strict=False)
+        if _row_signature(old) != _row_signature(new)
     )
     return changed + abs(len(old_rows) - len(new_rows))
 
