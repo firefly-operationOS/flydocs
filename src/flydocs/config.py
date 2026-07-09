@@ -207,6 +207,17 @@ class IDPSettings(BaseSettings):
     escalation_threshold: float = 0.0
     escalation_model: str | None = None
 
+    # -- Closed-loop targeted repair ------------------------------------
+    # When ``stages.repair`` is on, fields that failed the judge re-check
+    # or a deterministic validator are re-extracted in ONE focused pass
+    # that quotes the failure evidence back to the model. Repaired values
+    # replace the originals only when they pass re-verification.
+    # ``repair_model`` pins the pass to its own model (``None`` = the
+    # request model). Runs BEFORE judge_escalation, so the full re-run
+    # only fires when targeted repair was not enough.
+    repair_model: str | None = None
+    repair_timeout_s: int = 300
+
     # -- Webhook --------------------------------------------------------
     # The result webhook delivers the full extraction (split docs + fields +
     # rule evaluations) to the consumer, which persists it synchronously before
