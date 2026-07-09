@@ -67,7 +67,9 @@ FLYDOCS_MAX_BYTES=33554432
 # are re-extracted once with the failure evidence quoted back to the
 # model. Default model for the repair pass; unset falls back to the
 # global FLYDOCS_MODEL. A stronger model than the extractor is
-# recommended -- it is fixing what the extractor got wrong.
+# recommended -- it is fixing what the extractor got wrong. Note the
+# repair pass consumes part of the FLYDOCS_ASYNC_TIMEOUT_S budget on
+# async jobs -- raise that budget if you also raise this timeout.
 FLYDOCS_REPAIR_MODEL=anthropic:claude-opus-4-8
 FLYDOCS_REPAIR_TIMEOUT_S=300
 
