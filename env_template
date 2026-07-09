@@ -54,6 +54,18 @@ FLYDOCS_JOBS_TOPIC=flydocs.extractions
 FLYDOCS_MODEL=anthropic:claude-sonnet-4-6
 FLYDOCS_FALLBACK_MODEL=openai:gpt-4o
 
+# Default models for each pipeline stage. Any stage left unset falls back
+# to the global FLYDOCS_MODEL (or the request's ``options.model``).
+FLYDOCS_SPLITTER_MODEL=anthropic:claude-sonnet-4-6
+FLYDOCS_CLASSIFIER_MODEL=anthropic:claude-sonnet-4-6
+FLYDOCS_EXTRACT_MODEL=anthropic:claude-sonnet-4-6
+FLYDOCS_VISUAL_AUTHENTICITY_MODEL=anthropic:claude-sonnet-4-6
+FLYDOCS_CONTENT_AUTHENTICITY_MODEL=anthropic:claude-sonnet-4-6
+FLYDOCS_JUDGE_MODEL=anthropic:claude-opus-4-8
+FLYDOCS_RULE_ENGINE_MODEL=anthropic:claude-sonnet-4-6
+FLYDOCS_TRANSFORM_MODEL=anthropic:claude-sonnet-4-6
+FLYDOCS_BBOX_MATCHER_MODEL=anthropic:claude-sonnet-4-6
+
 # Maximum pages per single extraction request. Documents above this go through
 # the async API only. The document bytes are sent directly to the multimodal
 # LLM -- no local rasterisation, so format is whatever the provider accepts

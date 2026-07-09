@@ -230,19 +230,20 @@ class IDPCoreConfiguration:
         single strategy with no cascade.
         """
         kind = (settings.bbox_refine_matcher or "hybrid").lower()
+        matcher_model = settings.bbox_matcher_model or settings.model
         if kind == "hybrid":
             return HybridValueMatcher(
                 fuzzy=ValueMatcher(settings=settings),
                 llm=LlmValueMatcher(
                     template=prompts.bbox_matcher,
-                    model=settings.model,
+                    model=matcher_model,
                     threshold=settings.bbox_refine_threshold,
                 ),
             )
         if kind == "llm":
             return LlmValueMatcher(
                 template=prompts.bbox_matcher,
-                model=settings.model,
+                model=matcher_model,
                 threshold=settings.bbox_refine_threshold,
             )
         if kind == "fuzzy":
@@ -331,7 +332,10 @@ class IDPCoreConfiguration:
         ``@service`` that autowires this bean alongside the
         ``EntityResolutionTransformer``.
         """
-        return LlmTransformer(template=prompts.transform, model=settings.model)
+        return LlmTransformer(
+            template=prompts.transform,
+            model=settings.transform_model or settings.model,
+        )
 
     @bean
     def rule_engine(self, settings: IDPSettings, prompts: PromptCatalog) -> RuleEngine:
