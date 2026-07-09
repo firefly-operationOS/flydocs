@@ -55,6 +55,7 @@ class MultimodalExtractor:
         *,
         template: PromptTemplate,
         retry_arrays_template: PromptTemplate | None = None,
+        repair_template: PromptTemplate | None = None,
         model: str,
         fallback_model: str | None = None,
         agent_name: str = "flydocs-extractor",
@@ -62,6 +63,7 @@ class MultimodalExtractor:
     ) -> None:
         self._template = template
         self._retry_arrays_template = retry_arrays_template
+        self._repair_template = repair_template
         self._model = model
         self._fallback_model = fallback_model
         self._agent_name = agent_name
@@ -180,6 +182,48 @@ class MultimodalExtractor:
         )
         result = await timed_agent_run(agent, content, op="extract.retry_arrays", model=model_id)
         return normalise_doc(result.output, doc), model_id
+
+    async def extract_repair(
+        self,
+        *,
+        document_bytes: bytes,
+        media_type: str,
+        page_count: int,
+        doc: DocumentTypeSpec,
+        failing_fields_text: str,
+        language_hint: str | None = None,
+        model: str | None = None,
+    ) -> list[ExtractedFieldGroup]:
+        """Focused repair pass: re-extract only the failing fields.
+
+        ``doc`` is the SUBSET spec containing just the fields that failed
+        verification; ``failing_fields_text`` quotes each previous value
+        and the reason it was rejected. Uses the dedicated
+        :pyattr:`_repair_template` (``flydocs/extract_repair``).
+        Returns ``[]`` when no repair template is configured.
+        """
+        if self._repair_template is None:
+            return []
+        prompt = self._repair_template.render(
+            failing_fields_text=failing_fields_text,
+            page_count=page_count,
+        )
+        model_id = model or self._model
+        output_model = build_extraction_output_model(doc)
+        agent = self._build_agent(model_id, output_model, instructions=prompt.system)
+        # Same shape as the retry-arrays pass: short action-oriented user
+        # text plus the (subset) schema so the LLM knows the contract.
+        schema_json = self._schema_payload(doc)
+        user_text = f"{prompt.user.strip()}\n\nSchema:\n```json\n{schema_json}\n```"
+        if language_hint:
+            user_text = f"{user_text}\n\nDocument language hint: {language_hint}"
+        content = self._build_user_content(
+            user_text=user_text,
+            document_bytes=document_bytes,
+            media_type=media_type,
+        )
+        result = await timed_agent_run(agent, content, op="extract.repair", model=model_id)
+        return normalise_doc(result.output, doc)
 
     async def _extract_once(
         self,
