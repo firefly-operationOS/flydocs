@@ -55,7 +55,7 @@ reflect exactly what executed.
 |     9 | `visual_authenticity`  | no         | LLM evaluates caller-defined visual validators (signature present, stamp present, …).                                                     | 180 s           |
 |    10 | `content_authenticity` | no         | LLM audit: dates consistent, totals add up, expected boilerplate, tampering signals.                                                      | 180 s           |
 |    11 | `judge`                | no         | Second LLM pass re-grades every extracted value against the source.                                                                       | 300 s           |
-|    12 | `repair`               | no         | Targeted repair: re-extract ONLY the fields that failed the judge or a validator, quoting the failure evidence; accept per field only when the re-check passes. | 300 s           |
+|    12 | `repair`               | no         | Targeted repair: re-extract ONLY the fields the judge marked FAIL or flag_for_review, or that failed a validator, quoting the failure evidence; accept per field only when the re-check passes. For PDFs with known failing pages the pass runs on a sub-slice of those pages (plus one page of margin). | 300 s           |
 |    13 | `judge_escalation`     | no         | When the judge's failure rate exceeds `escalation_threshold`, re-run extract + judge with `escalation_model` and keep the better result.  | 600 s           |
 |    14 | `transform`            | no         | Caller-declared post-extraction transformations: declarative entity resolution + free-form LLM transformations. See [transformations.md](transformations.md). | 600 s           |
 |    15 | `rules`                | no         | LLM evaluates the business-rule DAG, level by level.                                                                                      | 180 s           |
@@ -79,6 +79,16 @@ Other short-circuits:
 - `repair` is silently skipped when both `judge` and
   `field_validation` are off (no failure signals to act on); the
   request validator emits a `repair_no_verification_stage` warning.
+  Per task, repair also steps aside when more than
+  `FLYDOCS_REPAIR_MAX_FAILING_FRACTION` of the fields are failing --
+  the extraction is globally untrustworthy and `judge_escalation`'s
+  full re-run is the right tool (`RepairInfo.tasks_skipped` records
+  it). Concurrent task repairs are bounded by
+  `FLYDOCS_REPAIR_TASK_CONCURRENCY`, and
+  `FLYDOCS_REPAIR_INCLUDE_FLAGGED=false` restricts repair to hard
+  failures. On the sync channel the validator emits a
+  `repair_sync_latency` warning -- the pass eats into the
+  `FLYDOCS_SYNC_TIMEOUT_S` wall.
 - `judge_escalation` is silently skipped when `judge` is off.
 - `transform` is silently a no-op when `options.transformations` is
   empty even with the toggle on.
