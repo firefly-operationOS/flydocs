@@ -252,15 +252,7 @@ def _failures_text(failures: list[FailingField]) -> str:
     """Render the per-field failure evidence block for the repair prompt."""
     lines = []
     for f in failures:
-        lines.append(
-            f"- ``{f.group}.{f.field}``: previous value {_value_summary(f.value)} "
-            f"-- rejected because: {f.evidence}"
-        )
+        # Arrays stay compact -- a full repr of the nested rows would flood the prompt.
+        value = f"<array with {len(f.value)} row(s)>" if isinstance(f.value, list) else repr(f.value)
+        lines.append(f"- ``{f.group}.{f.field}``: previous value {value} -- rejected because: {f.evidence}")
     return "\n".join(lines)
-
-
-def _value_summary(value: Any) -> str:
-    """Human-readable value for the repair prompt; arrays stay compact."""
-    if isinstance(value, list):
-        return f"<array with {len(value)} row(s)>"
-    return repr(value)
