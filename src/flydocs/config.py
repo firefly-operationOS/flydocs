@@ -234,21 +234,12 @@ class IDPSettings(BaseSettings):
     # ``repair_model`` pins the pass to its own model (``None`` = the
     # request model). Runs BEFORE judge_escalation, so the full re-run
     # only fires when targeted repair was not enough.
-    # ``repair_include_flagged`` widens the failure predicate to judge
-    # ``flag_for_review`` fields (matching what the escalation counter
-    # counts). Flagged-but-PASS fields are often ambiguous-but-correct,
-    # so set it to false to restrict repair to hard failures (judge FAIL
-    # or a validator error) and save those extra passes.
-    # ``repair_max_failing_fraction`` caps the repair scope per task:
-    # above this failing-field fraction the extraction is globally
-    # untrustworthy and a focused pass would re-extract nearly everything
-    # on top of the eventual escalation re-run, so repair steps aside and
-    # judge_escalation (whose trigger rate is unchanged) takes over.
-    # 1.0 disables the cap.
-    # ``repair_task_concurrency`` bounds how many tasks are repaired at
-    # once (each repair is one extract call plus an optional judge
-    # re-check); lower it under provider rate limits, mirroring
-    # ``bbox_refine_doc_concurrency``.
+    # ``repair_include_flagged=false`` restricts repair to hard failures
+    # (judge FAIL or a validator error), skipping ambiguous flagged-PASS
+    # fields. ``repair_max_failing_fraction`` caps scope: above it the doc
+    # is globally untrustworthy, so repair steps aside for judge_escalation
+    # (1.0 disables). ``repair_task_concurrency`` bounds parallel repairs
+    # under provider rate limits, mirroring ``bbox_refine_doc_concurrency``.
     repair_model: str | None = None
     repair_timeout_s: int = 300
     repair_include_flagged: bool = True
