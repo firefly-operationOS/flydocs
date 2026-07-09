@@ -174,6 +174,7 @@ def _orchestrator(settings: IDPSettings, extractor: Any, judge: Any) -> Pipeline
         rule_engine=MagicMock(),
         judge_escalator=MagicMock(),
         transformation_engine=MagicMock(),
+        field_repairer=MagicMock(),
         settings=settings,
         default_model="default-model",
     )
