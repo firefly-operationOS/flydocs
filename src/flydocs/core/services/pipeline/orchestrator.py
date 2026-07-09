@@ -800,10 +800,12 @@ class PipelineOrchestrator:
             return {"repair_triggered": False}
         ctx.metadata["repair"] = info
         # Repaired values carry fresh judge/validation verdicts but their
-        # bboxes came from a new LLM pass -- re-grade the geometry.
-        for task in ctx.metadata["tasks"]:
-            if task.extracted_groups:
-                self._bbox_validator.validate_groups(task.extracted_groups)
+        # bboxes came from a new LLM pass -- re-grade the geometry. Skip
+        # when every candidate was rejected (groups are unchanged).
+        if info.fields_repaired:
+            for task in ctx.metadata["tasks"]:
+                if task.extracted_groups:
+                    self._bbox_validator.validate_groups(task.extracted_groups)
         return {"repair_triggered": True, "fields_repaired": info.fields_repaired}
 
     async def _step_judge_escalation(self, ctx: PipelineContext, _inputs: dict[str, Any]) -> Any:

@@ -121,9 +121,7 @@ def _ctx(tasks: list[Any], model_id: str = "base-model") -> Any:
     return SimpleNamespace(metadata={"tasks": tasks, "model_id": model_id})
 
 
-def _request(
-    *, repair: bool = True, judge: bool = True, field_validation: bool = True
-) -> ExtractionRequest:
+def _request(*, repair: bool = True, judge: bool = True, field_validation: bool = True) -> ExtractionRequest:
     return ExtractionRequest(
         intention="test",
         files=[FileInput(filename="doc.pdf", content_base64=_DUMMY, expected_type="passport")],
