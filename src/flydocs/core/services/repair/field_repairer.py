@@ -182,9 +182,7 @@ class FieldRepairer:
 
         failing_keys = {(f.group, f.field) for f in failures}
         repaired_by_key: dict[tuple[str, str], ExtractedField] = {
-            (group.name, field.name): field
-            for group in repaired_groups
-            for field in group.fields
+            (group.name, field.name): field for group in repaired_groups for field in group.fields
         }
         accepted: list[str] = []
         for group in task.extracted_groups:
@@ -222,5 +220,7 @@ def _failures_text(failures: list[FailingField]) -> str:
     """Render the per-field failure evidence block for the repair prompt."""
     lines = []
     for f in failures:
-        lines.append(f"- ``{f.group}.{f.field}``: previous value {f.value!r} -- rejected because: {f.evidence}")
+        lines.append(
+            f"- ``{f.group}.{f.field}``: previous value {f.value!r} -- rejected because: {f.evidence}"
+        )
     return "\n".join(lines)

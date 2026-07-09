@@ -22,6 +22,7 @@ originals only when they pass re-verification.
 
 from __future__ import annotations
 
+import base64
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -49,8 +50,6 @@ from flydocs.interfaces.dtos.field import (
 )
 from flydocs.interfaces.enums.field_type import FieldType
 from flydocs.interfaces.enums.status import JudgeStatus, ValidationRule
-
-import base64
 
 _DUMMY = base64.b64encode(b"%PDF-1.4").decode("ascii")
 
@@ -307,9 +306,7 @@ async def test_maybe_repair_without_judge_stage_uses_validator_only() -> None:
 
 @pytest.mark.asyncio
 async def test_maybe_repair_falls_back_to_request_model() -> None:
-    task = _task(
-        [ExtractedFieldGroup(name="identity", fields=[_judge_failed_field("number", "X", "bad")])]
-    )
+    task = _task([ExtractedFieldGroup(name="identity", fields=[_judge_failed_field("number", "X", "bad")])])
     extractor = MagicMock()
     extractor.extract_repair = AsyncMock(return_value=[])
     repairer = _repairer(extractor, MagicMock(judge=AsyncMock()), default_model=None)
@@ -325,3 +322,109 @@ async def test_maybe_repair_falls_back_to_request_model() -> None:
 def test_prompt_catalog_ships_extract_repair_template() -> None:
     catalog = PromptCatalog.from_resources()
     assert catalog.extract_repair is not None
+
+
+# ---------------------------------------------------------------------------
+# Orchestrator wiring
+# ---------------------------------------------------------------------------
+
+
+def _fake_normalizer() -> Any:
+    row = SimpleNamespace(
+        bytes=b"%PDF-1.4",
+        media_type="application/pdf",
+        page_count=1,
+        filename="doc.pdf",
+        derived_from=[],
+    )
+    normalizer = MagicMock()
+    normalizer.normalise = AsyncMock(return_value=[row])
+    return normalizer
+
+
+def _orchestrator(repairer: Any) -> Any:
+    from flydocs.config import IDPSettings
+    from flydocs.core.services.pipeline.orchestrator import PipelineOrchestrator
+
+    groups = [ExtractedFieldGroup(name="identity", fields=[])]
+    extractor = MagicMock()
+    extractor.extract = AsyncMock(return_value=(groups, "base-model"))
+    judge = MagicMock()
+    judge.judge = AsyncMock(return_value=None)
+    return PipelineOrchestrator(
+        extractor=extractor,
+        splitter=MagicMock(),
+        classifier=MagicMock(),
+        field_validator=MagicMock(validate=MagicMock(return_value=None)),
+        bbox_validator=MagicMock(validate_groups=MagicMock(return_value=None)),
+        bbox_refiner=MagicMock(),
+        binary_normalizer=_fake_normalizer(),
+        visual_checker=MagicMock(),
+        content_checker=MagicMock(),
+        judge=judge,
+        rule_engine=MagicMock(),
+        judge_escalator=MagicMock(),
+        transformation_engine=MagicMock(),
+        field_repairer=repairer,
+        settings=IDPSettings(),
+        default_model="base-model",
+    )
+
+
+def _wiring_request(*, repair: bool, judge: bool = True) -> ExtractionRequest:
+    return ExtractionRequest(
+        intention="test",
+        files=[FileInput(filename="doc.pdf", content_base64=_DUMMY, expected_type="passport")],
+        document_types=[_doc_spec()],
+        options=ExtractionOptions(stages=StageToggles(judge=judge, repair=repair)),
+    )
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_runs_repair_node_and_reports_audit_block() -> None:
+    from flydocs.interfaces.dtos.extract import RepairInfo
+
+    repairer = MagicMock()
+    repairer.maybe_repair = AsyncMock(
+        return_value=RepairInfo(
+            triggered=True,
+            model="repair-model",
+            fields_flagged=2,
+            fields_repaired=1,
+            repaired_fields=["identity.number"],
+        )
+    )
+    orchestrator = _orchestrator(repairer)
+    result = await orchestrator.execute(_wiring_request(repair=True))
+    repairer.maybe_repair.assert_awaited_once()
+    assert result.pipeline.repair is not None
+    assert result.pipeline.repair.fields_repaired == 1
+    assert "repair" in [t.node for t in result.pipeline.trace]
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_skips_repair_node_when_toggle_off() -> None:
+    repairer = MagicMock()
+    repairer.maybe_repair = AsyncMock()
+    orchestrator = _orchestrator(repairer)
+    result = await orchestrator.execute(_wiring_request(repair=False))
+    repairer.maybe_repair.assert_not_awaited()
+    assert result.pipeline.repair is None
+    assert "repair" not in [t.node for t in result.pipeline.trace]
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_skips_repair_without_any_signal_stage() -> None:
+    """repair needs judge or field_validation verdicts to act on."""
+    repairer = MagicMock()
+    repairer.maybe_repair = AsyncMock()
+    orchestrator = _orchestrator(repairer)
+    request = ExtractionRequest(
+        intention="test",
+        files=[FileInput(filename="doc.pdf", content_base64=_DUMMY, expected_type="passport")],
+        document_types=[_doc_spec()],
+        options=ExtractionOptions(stages=StageToggles(judge=False, field_validation=False, repair=True)),
+    )
+    result = await orchestrator.execute(request)
+    repairer.maybe_repair.assert_not_awaited()
+    assert "repair" not in [t.node for t in result.pipeline.trace]
