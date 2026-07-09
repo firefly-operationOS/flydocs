@@ -121,12 +121,16 @@ def _ctx(tasks: list[Any], model_id: str = "base-model") -> Any:
     return SimpleNamespace(metadata={"tasks": tasks, "model_id": model_id})
 
 
-def _request(*, judge: bool = True) -> ExtractionRequest:
+def _request(
+    *, repair: bool = True, judge: bool = True, field_validation: bool = True
+) -> ExtractionRequest:
     return ExtractionRequest(
         intention="test",
         files=[FileInput(filename="doc.pdf", content_base64=_DUMMY, expected_type="passport")],
         document_types=[_doc_spec()],
-        options=ExtractionOptions(stages=StageToggles(judge=judge, repair=True)),
+        options=ExtractionOptions(
+            stages=StageToggles(judge=judge, repair=repair, field_validation=field_validation)
+        ),
     )
 
 
@@ -442,15 +446,6 @@ def _orchestrator(repairer: Any) -> Any:
     )
 
 
-def _wiring_request(*, repair: bool, judge: bool = True) -> ExtractionRequest:
-    return ExtractionRequest(
-        intention="test",
-        files=[FileInput(filename="doc.pdf", content_base64=_DUMMY, expected_type="passport")],
-        document_types=[_doc_spec()],
-        options=ExtractionOptions(stages=StageToggles(judge=judge, repair=repair)),
-    )
-
-
 @pytest.mark.asyncio
 async def test_orchestrator_runs_repair_node_and_reports_audit_block() -> None:
     repairer = MagicMock()
@@ -464,7 +459,7 @@ async def test_orchestrator_runs_repair_node_and_reports_audit_block() -> None:
         )
     )
     orchestrator = _orchestrator(repairer)
-    result = await orchestrator.execute(_wiring_request(repair=True))
+    result = await orchestrator.execute(_request())
     repairer.maybe_repair.assert_awaited_once()
     assert result.pipeline.repair is not None
     assert result.pipeline.repair.fields_repaired == 1
@@ -476,7 +471,7 @@ async def test_orchestrator_skips_repair_node_when_toggle_off() -> None:
     repairer = MagicMock()
     repairer.maybe_repair = AsyncMock()
     orchestrator = _orchestrator(repairer)
-    result = await orchestrator.execute(_wiring_request(repair=False))
+    result = await orchestrator.execute(_request(repair=False))
     repairer.maybe_repair.assert_not_awaited()
     assert result.pipeline.repair is None
     assert "repair" not in [t.node for t in result.pipeline.trace]
@@ -488,12 +483,6 @@ async def test_orchestrator_skips_repair_without_any_signal_stage() -> None:
     repairer = MagicMock()
     repairer.maybe_repair = AsyncMock()
     orchestrator = _orchestrator(repairer)
-    request = ExtractionRequest(
-        intention="test",
-        files=[FileInput(filename="doc.pdf", content_base64=_DUMMY, expected_type="passport")],
-        document_types=[_doc_spec()],
-        options=ExtractionOptions(stages=StageToggles(judge=False, field_validation=False, repair=True)),
-    )
-    result = await orchestrator.execute(request)
+    result = await orchestrator.execute(_request(judge=False, field_validation=False))
     repairer.maybe_repair.assert_not_awaited()
     assert "repair" not in [t.node for t in result.pipeline.trace]
