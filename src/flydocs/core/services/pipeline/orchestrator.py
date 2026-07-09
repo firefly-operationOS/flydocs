@@ -20,7 +20,7 @@ or many entries) flows through the same stages:
 
     load -> discover? -> classify? -> plan_tasks -> extract ->
     bbox_validation -> field_validation? -> visual? -> content? ->
-    judge? -> judge_escalation? -> rules? -> assemble
+    judge? -> repair? -> judge_escalation? -> rules? -> assemble
 
 The discover stage (``stages.splitter``) enumerates every distinct
 sub-document inside a file, so a single uploaded PDF that happens to
@@ -78,6 +78,7 @@ from flydocs.core.services.escalation import JudgeEscalator
 from flydocs.core.services.extraction.extractor import MultimodalExtractor
 from flydocs.core.services.extraction.pdf_slicer import PageRange, slice_pdf
 from flydocs.core.services.judge import Judge
+from flydocs.core.services.repair import FieldRepairer
 from flydocs.core.services.rules import RuleEngine
 from flydocs.core.services.splitting import DiscoveredSegment, DocumentSplitter
 from flydocs.core.services.transformations import TransformationEngine
@@ -97,6 +98,7 @@ from flydocs.interfaces.dtos.extract import (
     FileSummary,
     PipelineError,
     PipelineMeta,
+    RepairInfo,
     TraceEntry,
     UsageBreakdown,
 )
@@ -231,6 +233,7 @@ class PipelineOrchestrator:
         rule_engine: RuleEngine,
         judge_escalator: JudgeEscalator,
         transformation_engine: TransformationEngine,
+        field_repairer: FieldRepairer,
         settings: IDPSettings,
         default_model: str,
     ) -> None:
@@ -246,6 +249,7 @@ class PipelineOrchestrator:
         self._judge = judge
         self._rule_engine = rule_engine
         self._judge_escalator = judge_escalator
+        self._field_repairer = field_repairer
         self._transformation_engine = transformation_engine
         self._settings = settings
         self._default_model = default_model
@@ -362,6 +366,18 @@ class PipelineOrchestrator:
                 timeout_seconds=self._settings.judge_timeout_s,
             )
             chain.append("judge")
+
+        # Targeted repair. Runs AFTER judge (so it sees the verdicts) and
+        # BEFORE judge_escalation, so the expensive full re-run only fires
+        # when the focused per-field repair was not enough. Needs at least
+        # one verification stage to produce failure signals.
+        if stages.repair and (stages.judge or stages.field_validation):
+            builder.add_node(
+                "repair",
+                CallableStep(self._step_repair),
+                timeout_seconds=self._settings.repair_timeout_s,
+            )
+            chain.append("repair")
 
         if stages.judge and stages.judge_escalation:
             builder.add_node(
@@ -774,6 +790,25 @@ class PipelineOrchestrator:
         await asyncio.gather(*(_judge_one(t) for t in tasks))
         return {"judged": True}
 
+    async def _step_repair(self, ctx: PipelineContext, _inputs: dict[str, Any]) -> Any:
+        request: ExtractionRequest = ctx.metadata["request"]
+        try:
+            info = await self._field_repairer.maybe_repair(ctx, request)
+        except Exception as exc:  # noqa: BLE001
+            self._record_error(ctx, "repair", "REPAIR_ERROR", exc)
+            return {"failed": True}
+        if info is None:
+            return {"repair_triggered": False}
+        ctx.metadata["repair"] = info
+        # Repaired values carry fresh judge/validation verdicts but their
+        # bboxes came from a new LLM pass -- re-grade the geometry. Skip
+        # when every candidate was rejected (groups are unchanged).
+        if info.fields_repaired:
+            for task in ctx.metadata["tasks"]:
+                if task.extracted_groups:
+                    self._bbox_validator.validate_groups(task.extracted_groups)
+        return {"repair_triggered": True, "fields_repaired": info.fields_repaired}
+
     async def _step_judge_escalation(self, ctx: PipelineContext, _inputs: dict[str, Any]) -> Any:
         request: ExtractionRequest = ctx.metadata["request"]
         tasks: list[_ExtractionTask] = ctx.metadata["tasks"]
@@ -997,6 +1032,7 @@ class PipelineOrchestrator:
         ]
 
         escalation: EscalationInfo | None = ctx.metadata.get("escalation")
+        repair: RepairInfo | None = ctx.metadata.get("repair")
         usage_breakdown = _usage_breakdown(
             request_id=result_id,
             pipeline_result=pipeline_result,
@@ -1012,6 +1048,7 @@ class PipelineOrchestrator:
             trace=trace,
             errors=pipeline_errors,
             escalation=escalation,
+            repair=repair,
             usage=usage_breakdown,
         )
         # Determine overall status: ``partial`` when at least one task

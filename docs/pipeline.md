@@ -55,10 +55,11 @@ reflect exactly what executed.
 |     9 | `visual_authenticity`  | no         | LLM evaluates caller-defined visual validators (signature present, stamp present, …).                                                     | 180 s           |
 |    10 | `content_authenticity` | no         | LLM audit: dates consistent, totals add up, expected boilerplate, tampering signals.                                                      | 180 s           |
 |    11 | `judge`                | no         | Second LLM pass re-grades every extracted value against the source.                                                                       | 300 s           |
-|    12 | `judge_escalation`     | no         | When the judge's failure rate exceeds `escalation_threshold`, re-run extract + judge with `escalation_model` and keep the better result.  | 600 s           |
-|    13 | `transform`            | no         | Caller-declared post-extraction transformations: declarative entity resolution + free-form LLM transformations. See [transformations.md](transformations.md). | 600 s           |
-|    14 | `rules`                | no         | LLM evaluates the business-rule DAG, level by level.                                                                                      | 180 s           |
-|    15 | `assemble`             | yes        | Pure Python: compose the `ExtractionResult`.                                                                                              | 5 s             |
+|    12 | `repair`               | no         | Targeted repair: re-extract ONLY the fields that failed the judge or a validator, quoting the failure evidence; accept per field only when the re-check passes. | 300 s           |
+|    13 | `judge_escalation`     | no         | When the judge's failure rate exceeds `escalation_threshold`, re-run extract + judge with `escalation_model` and keep the better result.  | 600 s           |
+|    14 | `transform`            | no         | Caller-declared post-extraction transformations: declarative entity resolution + free-form LLM transformations. See [transformations.md](transformations.md). | 600 s           |
+|    15 | `rules`                | no         | LLM evaluates the business-rule DAG, level by level.                                                                                      | 180 s           |
+|    16 | `assemble`             | yes        | Pure Python: compose the `ExtractionResult`.                                                                                              | 5 s             |
 
 Optional stages are caller-toggled through `ExtractionOptions.stages`.
 Other short-circuits:
@@ -75,6 +76,9 @@ Other short-circuits:
 - `bbox_refine` runs **inline only for sync** requests. On the async
   path `ExtractionWorker` skips it and delegates refinement to the
   dedicated `BboxRefineWorker` (out-of-band, idempotent).
+- `repair` is silently skipped when both `judge` and
+  `field_validation` are off (no failure signals to act on); the
+  request validator emits a `repair_no_verification_stage` warning.
 - `judge_escalation` is silently skipped when `judge` is off.
 - `transform` is silently a no-op when `options.transformations` is
   empty even with the toggle on.
@@ -91,6 +95,7 @@ FLYDOCS_BBOX_REFINE_INLINE_TIMEOUT_S=900
 FLYDOCS_CLASSIFIER_TIMEOUT_S=180
 FLYDOCS_SPLITTER_TIMEOUT_S=180
 FLYDOCS_JUDGE_ESCALATION_TIMEOUT_S=600
+FLYDOCS_REPAIR_TIMEOUT_S=300
 FLYDOCS_TRANSFORM_TIMEOUT_S=600
 ```
 
@@ -140,7 +145,7 @@ builder.add_node("bbox_validation", CallableStep(self._step_bbox_validation), ti
 
 if stages.field_validation:
     builder.add_node("field_validation", ...)
-# ...visual_authenticity, content_authenticity, judge, judge_escalation, rules...
+# ...visual_authenticity, content_authenticity, judge, repair, judge_escalation, rules...
 
 builder.add_node("assemble", CallableStep(self._step_assemble), timeout_seconds=5)
 builder.chain(*chain)        # linear order

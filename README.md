@@ -271,8 +271,8 @@ DAG for each call so the audit trail reflects exactly what executed.
                 ┌──────────────────────────────────────────────────────────────────┐
    POST  ──────▶│ load → discover? → classify? → plan_tasks → extract →            │──────▶ JSON
  (PDF/PNG/…)    │ bbox_validation → bbox_refine? → field_validation? →             │  (fields + bbox
-                │ visual_auth? → content_auth? → judge? → judge_escalation? →      │   + verdicts)
-                │ transform? → rules? → assemble                                   │
+                │ visual_auth? → content_auth? → judge? → repair? →                │   + verdicts)
+                │ judge_escalation? → transform? → rules? → assemble               │
                 └──────────────────────────────────────────────────────────────────┘
                               │
                               │  per-segment concurrency (asyncio.gather)

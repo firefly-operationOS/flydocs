@@ -249,6 +249,24 @@ def test_splitter_single_doc_is_warning_only(validator: RequestValidator) -> Non
     assert "splitter_single_doc" in codes
 
 
+# -- warning: repair on without any verification stage ------------------------
+
+
+def test_repair_without_verification_stage_is_warning_only(validator: RequestValidator) -> None:
+    options = ExtractionOptions(stages=StageToggles(repair=True, judge=False, field_validation=False))
+    report = validator.validate(_request(options=options))
+    assert not report.has_errors
+    codes = [i.code for i in report.warnings]
+    assert "repair_no_verification_stage" in codes
+
+
+def test_repair_with_judge_produces_no_warning(validator: RequestValidator) -> None:
+    options = ExtractionOptions(stages=StageToggles(repair=True, judge=True))
+    report = validator.validate(_request(options=options))
+    codes = [i.code for i in report.warnings]
+    assert "repair_no_verification_stage" not in codes
+
+
 # -- warning: visual_authenticity on but no visual checks --------------------
 
 
