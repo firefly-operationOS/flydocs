@@ -59,29 +59,20 @@ FLYDOCS_FALLBACK_MODEL=openai:gpt-4o
 # (or the request's ``options.model`` when the caller sets one). A pinned
 # stage wins over ``options.model``.
 #
-# Recommended policy (uncomment to adopt): cheap models where the task is
-# mechanical, the default where quality matters, a stronger model where
-# verification pays for itself.
-#
-# Structural, low-difficulty tasks -- page-range detection, picking one
-# doctype from a declared list, residual bbox value matching:
-# FLYDOCS_SPLITTER_MODEL=anthropic:claude-haiku-4-5
-# FLYDOCS_CLASSIFIER_MODEL=anthropic:claude-haiku-4-5
-# FLYDOCS_BBOX_MATCHER_MODEL=anthropic:claude-haiku-4-5
-# Binary presence checks (signature/stamp/photo) -- simple verdicts:
-# FLYDOCS_VISUAL_AUTHENTICITY_MODEL=anthropic:claude-haiku-4-5
-#
-# Core quality drivers -- keep on the global default (sonnet-tier);
-# uncomment only to diverge from FLYDOCS_MODEL:
+# Recommended policy (uncomment to adopt): sonnet-tier is the floor for
+# every stage; the judge gets a stronger model because verification by a
+# model *different* from the extractor catches errors the extractor is
+# systematically blind to (pairs with FLYDOCS_ESCALATION_MODEL for the
+# judge-triggered re-run):
+# FLYDOCS_SPLITTER_MODEL=anthropic:claude-sonnet-4-6
+# FLYDOCS_CLASSIFIER_MODEL=anthropic:claude-sonnet-4-6
 # FLYDOCS_EXTRACT_MODEL=anthropic:claude-sonnet-4-6
+# FLYDOCS_VISUAL_AUTHENTICITY_MODEL=anthropic:claude-sonnet-4-6
 # FLYDOCS_CONTENT_AUTHENTICITY_MODEL=anthropic:claude-sonnet-4-6
+# FLYDOCS_JUDGE_MODEL=anthropic:claude-opus-4-8
 # FLYDOCS_RULE_ENGINE_MODEL=anthropic:claude-sonnet-4-6
 # FLYDOCS_TRANSFORM_MODEL=anthropic:claude-sonnet-4-6
-#
-# Verification -- a strong model *different* from the extractor catches
-# errors the extractor is systematically blind to; pairs with
-# FLYDOCS_ESCALATION_MODEL for the judge-triggered re-run:
-# FLYDOCS_JUDGE_MODEL=anthropic:claude-opus-4-8
+# FLYDOCS_BBOX_MATCHER_MODEL=anthropic:claude-sonnet-4-6
 
 # Maximum pages per single extraction request. Documents above this go through
 # the async API only. The document bytes are sent directly to the multimodal
