@@ -14,10 +14,6 @@
 
 """Closed-loop targeted repair -- focused re-extraction of failing fields."""
 
-from flydocs.core.services.repair.field_repairer import (
-    FailingField,
-    FieldRepairer,
-    collect_failing_fields,
-)
+from flydocs.core.services.repair.field_repairer import FieldRepairer
 
-__all__ = ["FailingField", "FieldRepairer", "collect_failing_fields"]
+__all__ = ["FieldRepairer"]

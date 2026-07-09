@@ -32,8 +32,12 @@ import pytest
 from flydocs.config import IDPSettings
 from flydocs.core.services.extraction.prompts import PromptCatalog
 from flydocs.core.services.pipeline.orchestrator import PipelineOrchestrator
-from flydocs.core.services.repair import FailingField, FieldRepairer, collect_failing_fields
-from flydocs.core.services.repair.field_repairer import _failures_text
+from flydocs.core.services.repair import FieldRepairer
+from flydocs.core.services.repair.field_repairer import (
+    FailingField,
+    _failures_text,
+    collect_failing_fields,
+)
 from flydocs.core.services.validation.field_validator import FieldValidator
 from flydocs.interfaces.dtos.document_type import DocumentTypeSpec
 from flydocs.interfaces.dtos.extract import (
