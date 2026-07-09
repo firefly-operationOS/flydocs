@@ -30,6 +30,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from flydocs.config import IDPSettings
+from flydocs.core.configuration import IDPCoreConfiguration
+from flydocs.core.services.extraction.prompts import PromptCatalog
 from flydocs.core.services.pipeline.orchestrator import (
     PipelineOrchestrator,
     _stage_models,
@@ -95,6 +97,26 @@ def test_stage_models_per_stage_setting_wins_over_request_model() -> None:
     assert resolved["classifier"] == "classifier-pin"
     for stage in set(_STAGES) - {"judge", "classifier"}:
         assert resolved[stage] == "request-override"
+
+
+def test_bbox_matcher_bean_uses_pinned_model_with_global_fallback() -> None:
+    config = IDPCoreConfiguration()
+    prompts = PromptCatalog.from_resources()
+    pinned = config.bbox_value_matcher(
+        IDPSettings(bbox_refine_matcher="llm", bbox_matcher_model="matcher-pin"), prompts
+    )
+    assert pinned._model == "matcher-pin"
+    fallback = config.bbox_value_matcher(IDPSettings(bbox_refine_matcher="llm"), prompts)
+    assert fallback._model == IDPSettings().model
+
+
+def test_llm_transformer_bean_uses_pinned_model_with_global_fallback() -> None:
+    config = IDPCoreConfiguration()
+    prompts = PromptCatalog.from_resources()
+    pinned = config.llm_transformer(IDPSettings(transform_model="transform-pin"), prompts)
+    assert pinned._model == "transform-pin"
+    fallback = config.llm_transformer(IDPSettings(), prompts)
+    assert fallback._model == IDPSettings().model
 
 
 def _doc_spec() -> DocumentTypeSpec:
