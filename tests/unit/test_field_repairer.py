@@ -33,11 +33,7 @@ from flydocs.config import IDPSettings
 from flydocs.core.services.extraction.prompts import PromptCatalog
 from flydocs.core.services.pipeline.orchestrator import PipelineOrchestrator
 from flydocs.core.services.repair import FieldRepairer
-from flydocs.core.services.repair.field_repairer import (
-    FailingField,
-    _failures_text,
-    collect_failing_fields,
-)
+from flydocs.core.services.repair.field_repairer import collect_failing_fields
 from flydocs.core.services.validation.field_validator import FieldValidator
 from flydocs.interfaces.dtos.document_type import DocumentTypeSpec
 from flydocs.interfaces.dtos.extract import (
@@ -203,9 +199,22 @@ def test_collect_failing_fields_includes_arrays_with_empty_error_list() -> None:
     assert "value below minimum 0" in failures[0].evidence
 
 
-def test_failures_text_renders_array_values_compactly() -> None:
-    row = ExtractedField(name="row", value=[ExtractedField(name="a", value="1")])
-    text = _failures_text([FailingField(group="items", field="line_items", value=[row], evidence="bad rows")])
+@pytest.mark.asyncio
+async def test_maybe_repair_renders_array_evidence_compactly() -> None:
+    """The repair prompt summarizes array values instead of dumping DTO reprs."""
+    array_field = ExtractedField(
+        name="line_items",
+        value=[ExtractedField(name="row", value=[ExtractedField(name="a", value="1")])],
+        validation=FieldValidation(valid=False, errors=[]),
+    )
+    task = _task([ExtractedFieldGroup(name="items", fields=[array_field])])
+    extractor = MagicMock()
+    extractor.extract_repair = AsyncMock(return_value=[])
+
+    repairer = _repairer(extractor, MagicMock(judge=AsyncMock()))
+    await repairer.maybe_repair(_ctx([task]), _request(judge=False))
+
+    text = extractor.extract_repair.await_args.kwargs["failing_fields_text"]
     assert "ExtractedField(" not in text
     assert "1 row(s)" in text
 
