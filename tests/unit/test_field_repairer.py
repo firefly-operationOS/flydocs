@@ -29,7 +29,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from flydocs.config import IDPSettings
 from flydocs.core.services.extraction.prompts import PromptCatalog
+from flydocs.core.services.pipeline.orchestrator import PipelineOrchestrator
 from flydocs.core.services.repair import FailingField, FieldRepairer, collect_failing_fields
 from flydocs.core.services.repair.field_repairer import _failures_text
 from flydocs.core.services.validation.field_validator import FieldValidator
@@ -38,6 +40,7 @@ from flydocs.interfaces.dtos.extract import (
     ExtractionOptions,
     ExtractionRequest,
     FileInput,
+    RepairInfo,
     StageToggles,
 )
 from flydocs.interfaces.dtos.field import (
@@ -414,9 +417,6 @@ def _fake_normalizer() -> Any:
 
 
 def _orchestrator(repairer: Any) -> Any:
-    from flydocs.config import IDPSettings
-    from flydocs.core.services.pipeline.orchestrator import PipelineOrchestrator
-
     groups = [ExtractedFieldGroup(name="identity", fields=[])]
     extractor = MagicMock()
     extractor.extract = AsyncMock(return_value=(groups, "base-model"))
@@ -453,8 +453,6 @@ def _wiring_request(*, repair: bool, judge: bool = True) -> ExtractionRequest:
 
 @pytest.mark.asyncio
 async def test_orchestrator_runs_repair_node_and_reports_audit_block() -> None:
-    from flydocs.interfaces.dtos.extract import RepairInfo
-
     repairer = MagicMock()
     repairer.maybe_repair = AsyncMock(
         return_value=RepairInfo(
