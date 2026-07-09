@@ -175,4 +175,4 @@ async def test_orchestrator_routes_stage_pinned_models() -> None:
     assert extractor.extract.await_args.kwargs["model"] == "extract-pin"
     assert judge.judge.await_count == 1
     assert judge.judge.await_args.kwargs["model"] == "judge-pin"
-    assert result.model == "extract-pin"
+    assert result.pipeline.model == "extract-pin"

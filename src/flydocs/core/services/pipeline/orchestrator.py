@@ -400,6 +400,7 @@ class PipelineOrchestrator:
                 "request": request,
                 "result_id": result_id,
                 "model_id": model_id,
+                "stage_models": _stage_models(self._settings, model_id),
                 "pipeline_errors": [],
                 "unmatched_segments": [],  # segments the classifier left without a docType
             },
@@ -509,7 +510,7 @@ class PipelineOrchestrator:
                     page_count=slot.page_count,
                     targets=request.document_types,
                     intention=request.intention,
-                    model=ctx.metadata["model_id"],
+                    model=ctx.metadata["stage_models"]["splitter"],
                 )
             except Exception as exc:  # noqa: BLE001
                 self._record_error(ctx, "discover", "SPLITTER_ERROR", exc, doc_type=slot.filename)
@@ -571,7 +572,7 @@ class PipelineOrchestrator:
                     filename=slot.filename,
                     candidates=request.document_types,
                     intention=request.intention,
-                    model=ctx.metadata["model_id"],
+                    model=ctx.metadata["stage_models"]["classifier"],
                 )
                 seg.classification = result
                 if result.matched and result.document_type in docs_by_type:
@@ -647,7 +648,7 @@ class PipelineOrchestrator:
                     doc=task.doc_spec,
                     intention=request.intention,
                     language_hint=request.options.language_hint,
-                    model=ctx.metadata["model_id"],
+                    model=ctx.metadata["stage_models"]["extract"],
                 )
                 task.extracted_groups = groups
                 task.model_used = used
@@ -717,7 +718,7 @@ class PipelineOrchestrator:
                     media_type=task.segment.media_type,
                     doc=task.doc_spec,
                     intention=request.intention,
-                    model=ctx.metadata["model_id"],
+                    model=ctx.metadata["stage_models"]["visual_authenticity"],
                 )
                 task.visual = outcomes
             except Exception as exc:  # noqa: BLE001
@@ -741,7 +742,7 @@ class PipelineOrchestrator:
                     media_type=task.segment.media_type,
                     doc=task.doc_spec,
                     intention=request.intention,
-                    model=ctx.metadata["model_id"],
+                    model=ctx.metadata["stage_models"]["content_authenticity"],
                 )
             except Exception as exc:  # noqa: BLE001
                 self._record_error(
@@ -765,7 +766,7 @@ class PipelineOrchestrator:
                     doc=task.doc_spec,
                     extracted_groups=task.extracted_groups,
                     intention=request.intention,
-                    model=ctx.metadata["model_id"],
+                    model=ctx.metadata["stage_models"]["judge"],
                 )
             except Exception as exc:  # noqa: BLE001
                 self._record_error(ctx, "judge", "JUDGE_ERROR", exc, doc_type=task.task_id)
@@ -831,7 +832,7 @@ class PipelineOrchestrator:
                 extracted_by_doc=extracted_by_doc,
                 visual_by_doc=visual_by_doc,
                 intention=request.intention,
-                model=ctx.metadata["model_id"],
+                model=ctx.metadata["stage_models"]["rules"],
             )
             ctx.metadata["rule_results"] = rule_results
             return {"rules_evaluated": len(rule_results)}
@@ -1039,6 +1040,25 @@ class PipelineOrchestrator:
 # ---------------------------------------------------------------------------
 # Stateless helpers
 # ---------------------------------------------------------------------------
+
+
+def _stage_models(settings: IDPSettings, model_id: str) -> dict[str, str]:
+    """Resolve the model id each pipeline stage runs on.
+
+    Precedence per stage: the ``FLYDOCS_<STAGE>_MODEL`` setting when set,
+    else ``model_id`` (which already resolved ``options.model`` against
+    ``FLYDOCS_MODEL``). A pinned stage wins over ``options.model`` so
+    operator stage-tuning survives per-request overrides.
+    """
+    return {
+        "splitter": settings.splitter_model or model_id,
+        "classifier": settings.classifier_model or model_id,
+        "extract": settings.extract_model or model_id,
+        "visual_authenticity": settings.visual_authenticity_model or model_id,
+        "content_authenticity": settings.content_authenticity_model or model_id,
+        "judge": settings.judge_model or model_id,
+        "rules": settings.rule_engine_model or model_id,
+    }
 
 
 def _pages_range(start: int | None, end: int | None) -> list[int]:
