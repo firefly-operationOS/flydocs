@@ -75,14 +75,14 @@ async def test_extract_repair_renders_evidence_and_uses_repair_template(
         page_count=2,
         doc=_doc_subset(),
         failing_fields_text="- ``identity.number``: previous value 'X1' -- rejected because: misread",
-        model="repair-model",
+        model="test",
     )
 
     # normalise_doc shapes the output after the subset spec.
     assert [g.name for g in groups] == ["identity"]
     assert [f.name for f in groups[0].fields] == ["number"]
     assert captured["op"] == "extract.repair"
-    assert captured["model"] == "repair-model"
+    assert captured["model"] == "test"
     assert "misread" in captured["user_text"]
     assert "identity.number" in captured["user_text"]
 
