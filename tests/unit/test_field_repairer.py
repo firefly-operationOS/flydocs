@@ -30,7 +30,8 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from flydocs.core.services.extraction.prompts import PromptCatalog
-from flydocs.core.services.repair import FieldRepairer, collect_failing_fields
+from flydocs.core.services.repair import FailingField, FieldRepairer, collect_failing_fields
+from flydocs.core.services.repair.field_repairer import _failures_text
 from flydocs.core.services.validation.field_validator import FieldValidator
 from flydocs.interfaces.dtos.document_type import DocumentTypeSpec
 from flydocs.interfaces.dtos.extract import (
@@ -192,8 +193,6 @@ def test_collect_failing_fields_includes_arrays_with_empty_error_list() -> None:
 
 
 def test_failures_text_renders_array_values_compactly() -> None:
-    from flydocs.core.services.repair.field_repairer import FailingField, _failures_text
-
     row = ExtractedField(name="row", value=[ExtractedField(name="a", value="1")])
     text = _failures_text([FailingField(group="items", field="line_items", value=[row], evidence="bad rows")])
     assert "ExtractedField(" not in text
