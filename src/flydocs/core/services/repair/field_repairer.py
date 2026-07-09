@@ -122,12 +122,14 @@ class FieldRepairer:
         field_validator: FieldValidator,
         default_model: str | None,
         include_flagged: bool = True,
+        max_failing_fraction: float = 0.5,
     ) -> None:
         self._extractor = extractor
         self._judge = judge
         self._field_validator = field_validator
         self._default_model = default_model
         self._include_flagged = include_flagged
+        self._max_failing_fraction = max_failing_fraction
 
     async def maybe_repair(self, ctx: Any, request: ExtractionRequest) -> RepairInfo | None:
         """Return a :class:`RepairInfo` when at least one field was flagged, else ``None``.
@@ -138,14 +140,30 @@ class FieldRepairer:
         tasks: list[Any] = ctx.metadata.get("tasks", [])
         model = self._default_model or ctx.metadata.get("model_id")
         flagged = 0
+        skipped_tasks = 0
         repaired_paths: list[str] = []
 
         async def _repair_task(task: Any) -> None:
-            nonlocal flagged
+            nonlocal flagged, skipped_tasks
             failures = collect_failing_fields(task.extracted_groups, include_flagged=self._include_flagged)
             if not failures:
                 return
             flagged += len(failures)
+            total = sum(len(group.fields) for group in task.extracted_groups)
+            if total and len(failures) / total > self._max_failing_fraction:
+                # The extraction is globally untrustworthy: a focused pass
+                # would re-extract nearly everything on top of the eventual
+                # escalation re-run. Leave the FAIL verdicts in place so
+                # judge_escalation triggers as before.
+                skipped_tasks += 1
+                logger.info(
+                    "repair skipped for %s: %d/%d fields failing exceeds max fraction %.2f",
+                    task.task_id,
+                    len(failures),
+                    total,
+                    self._max_failing_fraction,
+                )
+                return
             try:
                 accepted = await self._repair_one(task, failures, request, model)
             except Exception as exc:  # noqa: BLE001 -- repair must never break the pipeline
@@ -163,11 +181,13 @@ class FieldRepairer:
             fields_flagged=flagged,
             fields_repaired=len(repaired_paths),
             repaired_fields=sorted(repaired_paths),
+            tasks_skipped=skipped_tasks,
         )
         logger.info(
-            "repair flagged=%d repaired=%d model=%s",
+            "repair flagged=%d repaired=%d skipped_tasks=%d model=%s",
             info.fields_flagged,
             info.fields_repaired,
+            info.tasks_skipped,
             model,
         )
         return info

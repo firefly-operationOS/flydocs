@@ -239,9 +239,16 @@ class IDPSettings(BaseSettings):
     # counts). Flagged-but-PASS fields are often ambiguous-but-correct,
     # so set it to false to restrict repair to hard failures (judge FAIL
     # or a validator error) and save those extra passes.
+    # ``repair_max_failing_fraction`` caps the repair scope per task:
+    # above this failing-field fraction the extraction is globally
+    # untrustworthy and a focused pass would re-extract nearly everything
+    # on top of the eventual escalation re-run, so repair steps aside and
+    # judge_escalation (whose trigger rate is unchanged) takes over.
+    # 1.0 disables the cap.
     repair_model: str | None = None
     repair_timeout_s: int = 300
     repair_include_flagged: bool = True
+    repair_max_failing_fraction: float = 0.5
 
     # -- Webhook --------------------------------------------------------
     # The result webhook delivers the full extraction (split docs + fields +

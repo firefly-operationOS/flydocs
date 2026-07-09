@@ -260,6 +260,7 @@ def _repairer(
     *,
     default_model: str | None = None,
     include_flagged: bool = True,
+    max_failing_fraction: float = 1.0,
 ) -> FieldRepairer:
     return FieldRepairer(
         extractor=extractor,
@@ -267,6 +268,7 @@ def _repairer(
         field_validator=FieldValidator(),
         default_model=default_model,
         include_flagged=include_flagged,
+        max_failing_fraction=max_failing_fraction,
     )
 
 
@@ -435,6 +437,63 @@ async def test_maybe_repair_falls_back_to_request_model() -> None:
     repairer = _repairer(extractor, MagicMock(judge=AsyncMock()), default_model=None)
     await repairer.maybe_repair(_ctx([task], model_id="request-model"), _request())
     assert extractor.extract_repair.await_args.kwargs["model"] == "request-model"
+
+
+# ---------------------------------------------------------------------------
+# Scope cap
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_maybe_repair_skips_task_above_max_failing_fraction() -> None:
+    """When most fields failed the extraction is globally untrustworthy:
+    targeted repair is skipped and judge_escalation's full re-run (whose
+    trigger rate is unchanged) is the right tool."""
+    task = _task(
+        [
+            ExtractedFieldGroup(
+                name="identity",
+                fields=[
+                    _judge_failed_field("number", "X123", "misread"),
+                    _judge_failed_field("name", "J0HN", "misread"),
+                ],
+            )
+        ]
+    )
+    extractor = MagicMock()
+    extractor.extract_repair = AsyncMock(return_value=[])
+
+    repairer = _repairer(extractor, MagicMock(judge=AsyncMock()), max_failing_fraction=0.5)
+    info = await repairer.maybe_repair(_ctx([task]), _request())
+
+    extractor.extract_repair.assert_not_awaited()
+    assert info is not None and info.triggered
+    assert info.fields_flagged == 2
+    assert info.fields_repaired == 0
+    assert info.tasks_skipped == 1
+
+
+@pytest.mark.asyncio
+async def test_maybe_repair_runs_when_failing_fraction_at_or_below_cap() -> None:
+    task = _task(
+        [
+            ExtractedFieldGroup(
+                name="identity",
+                fields=[
+                    _clean_field("name", "JOHN"),
+                    _judge_failed_field("number", "X123", "misread"),
+                ],
+            )
+        ]
+    )
+    extractor = MagicMock()
+    extractor.extract_repair = AsyncMock(return_value=[])
+
+    repairer = _repairer(extractor, MagicMock(judge=AsyncMock()), max_failing_fraction=0.5)
+    info = await repairer.maybe_repair(_ctx([task]), _request())
+
+    extractor.extract_repair.assert_awaited_once()
+    assert info is not None and info.tasks_skipped == 0
 
 
 # ---------------------------------------------------------------------------

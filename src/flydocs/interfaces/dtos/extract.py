@@ -260,6 +260,9 @@ class RepairInfo(BaseModel):
     fields_flagged: int = Field(default=0, ge=0)
     fields_repaired: int = Field(default=0, ge=0)
     repaired_fields: list[str] = Field(default_factory=list)
+    # Tasks whose repair was skipped because the failing-field fraction
+    # exceeded FLYDOCS_REPAIR_MAX_FAILING_FRACTION (escalation handles them).
+    tasks_skipped: int = Field(default=0, ge=0)
 
 
 class UsageBreakdown(BaseModel):

@@ -373,6 +373,7 @@ class IDPCoreConfiguration:
             field_validator=field_validator,
             default_model=settings.repair_model,
             include_flagged=settings.repair_include_flagged,
+            max_failing_fraction=settings.repair_max_failing_fraction,
         )
 
     # ------------------------------------------------------------------
