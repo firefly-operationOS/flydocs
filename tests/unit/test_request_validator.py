@@ -253,9 +253,7 @@ def test_splitter_single_doc_is_warning_only(validator: RequestValidator) -> Non
 
 
 def test_repair_without_verification_stage_is_warning_only(validator: RequestValidator) -> None:
-    options = ExtractionOptions(
-        stages=StageToggles(repair=True, judge=False, field_validation=False)
-    )
+    options = ExtractionOptions(stages=StageToggles(repair=True, judge=False, field_validation=False))
     report = validator.validate(_request(options=options))
     assert not report.has_errors
     codes = [i.code for i in report.warnings]

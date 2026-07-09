@@ -195,9 +195,7 @@ def test_failures_text_renders_array_values_compactly() -> None:
     from flydocs.core.services.repair.field_repairer import FailingField, _failures_text
 
     row = ExtractedField(name="row", value=[ExtractedField(name="a", value="1")])
-    text = _failures_text(
-        [FailingField(group="items", field="line_items", value=[row], evidence="bad rows")]
-    )
+    text = _failures_text([FailingField(group="items", field="line_items", value=[row], evidence="bad rows")])
     assert "ExtractedField(" not in text
     assert "1 row(s)" in text
 
