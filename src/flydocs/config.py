@@ -245,10 +245,15 @@ class IDPSettings(BaseSettings):
     # on top of the eventual escalation re-run, so repair steps aside and
     # judge_escalation (whose trigger rate is unchanged) takes over.
     # 1.0 disables the cap.
+    # ``repair_task_concurrency`` bounds how many tasks are repaired at
+    # once (each repair is one extract call plus an optional judge
+    # re-check); lower it under provider rate limits, mirroring
+    # ``bbox_refine_doc_concurrency``.
     repair_model: str | None = None
     repair_timeout_s: int = 300
     repair_include_flagged: bool = True
     repair_max_failing_fraction: float = 0.5
+    repair_task_concurrency: int = 4
 
     # -- Webhook --------------------------------------------------------
     # The result webhook delivers the full extraction (split docs + fields +

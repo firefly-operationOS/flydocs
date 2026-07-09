@@ -123,6 +123,7 @@ class FieldRepairer:
         default_model: str | None,
         include_flagged: bool = True,
         max_failing_fraction: float = 0.5,
+        task_concurrency: int = 4,
     ) -> None:
         self._extractor = extractor
         self._judge = judge
@@ -130,6 +131,7 @@ class FieldRepairer:
         self._default_model = default_model
         self._include_flagged = include_flagged
         self._max_failing_fraction = max_failing_fraction
+        self._task_concurrency = task_concurrency
 
     async def maybe_repair(self, ctx: Any, request: ExtractionRequest) -> RepairInfo | None:
         """Return a :class:`RepairInfo` when at least one field was flagged, else ``None``.
@@ -142,6 +144,9 @@ class FieldRepairer:
         flagged = 0
         skipped_tasks = 0
         repaired_paths: list[str] = []
+        # Same rationale as bbox_refine_doc_concurrency: each repaired task
+        # multiplies in-flight LLM calls; lower it under provider rate limits.
+        semaphore = asyncio.Semaphore(max(1, self._task_concurrency))
 
         async def _repair_task(task: Any) -> None:
             nonlocal flagged, skipped_tasks
@@ -165,7 +170,8 @@ class FieldRepairer:
                 )
                 return
             try:
-                accepted = await self._repair_one(task, failures, request, model)
+                async with semaphore:
+                    accepted = await self._repair_one(task, failures, request, model)
             except Exception as exc:  # noqa: BLE001 -- repair must never break the pipeline
                 logger.warning("repair failed for %s: %s; keeping original fields", task.task_id, exc)
                 return

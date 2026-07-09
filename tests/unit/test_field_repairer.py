@@ -22,6 +22,7 @@ originals only when they pass re-verification.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 from types import SimpleNamespace
 from typing import Any
@@ -261,6 +262,7 @@ def _repairer(
     default_model: str | None = None,
     include_flagged: bool = True,
     max_failing_fraction: float = 1.0,
+    task_concurrency: int = 4,
 ) -> FieldRepairer:
     return FieldRepairer(
         extractor=extractor,
@@ -269,6 +271,7 @@ def _repairer(
         default_model=default_model,
         include_flagged=include_flagged,
         max_failing_fraction=max_failing_fraction,
+        task_concurrency=task_concurrency,
     )
 
 
@@ -494,6 +497,38 @@ async def test_maybe_repair_runs_when_failing_fraction_at_or_below_cap() -> None
 
     extractor.extract_repair.assert_awaited_once()
     assert info is not None and info.tasks_skipped == 0
+
+
+# ---------------------------------------------------------------------------
+# Concurrency bound
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_maybe_repair_bounds_concurrent_task_repairs() -> None:
+    tasks = [
+        _task([ExtractedFieldGroup(name="identity", fields=[_judge_failed_field("number", "X", "bad")])])
+        for _ in range(3)
+    ]
+    in_flight = 0
+    peak = 0
+
+    async def _tracked_repair(**_: Any) -> list[ExtractedFieldGroup]:
+        nonlocal in_flight, peak
+        in_flight += 1
+        peak = max(peak, in_flight)
+        await asyncio.sleep(0.01)
+        in_flight -= 1
+        return []
+
+    extractor = MagicMock()
+    extractor.extract_repair = AsyncMock(side_effect=_tracked_repair)
+
+    repairer = _repairer(extractor, MagicMock(judge=AsyncMock()), task_concurrency=1)
+    await repairer.maybe_repair(_ctx(tasks), _request())
+
+    assert extractor.extract_repair.await_count == 3
+    assert peak == 1
 
 
 # ---------------------------------------------------------------------------
