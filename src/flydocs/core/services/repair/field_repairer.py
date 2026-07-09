@@ -174,7 +174,8 @@ class FieldRepairer:
         model: str | None,
     ) -> list[str]:
         """Repair one task; return the ``group.field`` paths that were accepted."""
-        subset = _subset_spec(task.doc_spec, failures)
+        failing_keys = {(f.group, f.field) for f in failures}
+        subset = _subset_spec(task.doc_spec, failing_keys)
         repaired_groups = await self._extractor.extract_repair(
             document_bytes=task.slice_bytes,
             media_type=task.segment.media_type,
@@ -200,7 +201,6 @@ class FieldRepairer:
                 model=model,
             )
 
-        failing_keys = {(f.group, f.field) for f in failures}
         repaired_by_key: dict[tuple[str, str], ExtractedField] = {
             (group.name, field.name): field for group in repaired_groups for field in group.fields
         }
@@ -237,9 +237,8 @@ def _is_clean(field: ExtractedField, *, require_judge_pass: bool) -> bool:
     return field.judge.status != JudgeStatus.FAIL and not field.judge.flag_for_review
 
 
-def _subset_spec(doc: DocumentTypeSpec, failures: list[FailingField]) -> DocumentTypeSpec:
+def _subset_spec(doc: DocumentTypeSpec, failing_keys: set[tuple[str, str]]) -> DocumentTypeSpec:
     """A copy of ``doc`` whose field_groups contain only the failing fields."""
-    failing_keys = {(f.group, f.field) for f in failures}
     groups = []
     for group in doc.field_groups:
         fields = [f for f in group.fields if (group.name, f.name) in failing_keys]
