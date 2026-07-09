@@ -384,3 +384,19 @@ class RequestValidator:
                     path="options.stages.splitter",
                 )
             )
+
+        # repair on but no stage produces failure signals => the node is
+        # never added to the DAG. Warn.
+        if stages.repair and not (stages.judge or stages.field_validation):
+            report.issues.append(
+                ValidationIssue(
+                    severity="warning",
+                    code="repair_no_verification_stage",
+                    message=(
+                        "stages.repair is enabled but both judge and "
+                        "field_validation are off -- there are no failure "
+                        "signals to repair from, so the stage is skipped."
+                    ),
+                    path="options.stages.repair",
+                )
+            )
