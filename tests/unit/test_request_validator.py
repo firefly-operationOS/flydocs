@@ -267,6 +267,24 @@ def test_repair_with_judge_produces_no_warning(validator: RequestValidator) -> N
     assert "repair_no_verification_stage" not in codes
 
 
+# -- warning: repair on a synchronous request ---------------------------------
+
+
+def test_repair_on_sync_request_warns_about_latency(validator: RequestValidator) -> None:
+    options = ExtractionOptions(stages=StageToggles(repair=True, judge=True))
+    report = validator.validate(_request(options=options), sync=True)
+    assert not report.has_errors
+    codes = [i.code for i in report.warnings]
+    assert "repair_sync_latency" in codes
+
+
+def test_repair_on_async_request_has_no_sync_warning(validator: RequestValidator) -> None:
+    options = ExtractionOptions(stages=StageToggles(repair=True, judge=True))
+    report = validator.validate(_request(options=options))
+    codes = [i.code for i in report.warnings]
+    assert "repair_sync_latency" not in codes
+
+
 # -- warning: visual_authenticity on but no visual checks --------------------
 
 

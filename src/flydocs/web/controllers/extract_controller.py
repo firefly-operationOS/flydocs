@@ -99,7 +99,7 @@ class ExtractController:
         whether to proceed. Identical schema for both errors and
         warnings: ``[{severity, code, message, path}]``.
         """
-        report = self._validator.validate(request)
+        report = self._validator.validate(request, sync=True)
         return ValidationResponse(
             ok=not report.has_errors,
             error_count=len(report.errors),
@@ -163,7 +163,7 @@ def _enforce_size_limits(request: ExtractionRequest, *, max_bytes: int) -> None:
 
 def _enforce_semantic_validation(request: ExtractionRequest, validator: RequestValidator) -> None:
     """Reject the request with a 422 when the semantic validator finds errors."""
-    report: ValidationReport = validator.validate(request)
+    report: ValidationReport = validator.validate(request, sync=True)
     if report.has_errors:
         raise _http_problem_with_payload(
             status_code=422,
