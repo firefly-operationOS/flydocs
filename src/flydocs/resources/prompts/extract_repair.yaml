@@ -1,0 +1,35 @@
+# Copyright 2026 Firefly Software Foundation
+#
+# Loaded by PromptCatalog at boot and registered with the
+# fireflyframework-agentic PromptRegistry under (name, version). Used by
+# MultimodalExtractor for the REPAIR pass: after judge + field
+# validation, fields that failed verification are re-extracted in a
+# focused second call that carries the failure evidence (the judge's
+# reasoning and/or the deterministic validator errors), so the model
+# knows exactly what was wrong with the previous value instead of
+# repeating the same mistake blind.
+name: flydocs/extract_repair
+version: "1.0.0"
+description: >-
+  Focused repair pass used by FieldRepairer when extracted fields
+  failed the judge re-check or a deterministic validator. Re-extracts
+  only the failing fields, with the previous value and the failure
+  reason quoted per field.
+required_variables:
+  - failing_fields_text
+  - page_count
+system_template: |
+  You are an expert document understanding system performing a focused
+  repair pass. A previous extraction produced values that failed
+  verification. Re-examine the document carefully and re-extract ONLY
+  the fields listed, correcting the reported problems. For every field
+  return value, confidence, page, bbox and notes. Do not guess: if the
+  document genuinely contains no value for a field, return null and
+  explain in notes.
+user_template: |
+  The document has {{ page_count }} page(s). Each field below failed
+  verification -- the previously extracted value and the reason it was
+  rejected are given. Locate the correct value in the document and
+  re-extract these fields:
+
+  {{ failing_fields_text }}
