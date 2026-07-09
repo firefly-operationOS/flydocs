@@ -96,8 +96,7 @@ class IDPSettings(BaseSettings):
     # (default) means the stage runs on the shared request model
     # (``options.model`` or ``FLYDOCS_MODEL``). A pinned stage wins over
     # ``options.model`` so operator stage-tuning survives per-request
-    # overrides. Typical policy: cheap models for splitter/classifier,
-    # the default for extract, a stronger model for judge.
+    # overrides. See env_template for the default model of each stage.
     splitter_model: str | None = None
     classifier_model: str | None = None
     extract_model: str | None = None

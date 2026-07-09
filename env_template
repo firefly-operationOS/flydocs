@@ -54,38 +54,17 @@ FLYDOCS_JOBS_TOPIC=flydocs.extractions
 FLYDOCS_MODEL=anthropic:claude-sonnet-4-6
 FLYDOCS_FALLBACK_MODEL=openai:gpt-4o
 
-# Per-stage model routing (all optional). Pin an individual pipeline stage to
-# its own model; any stage left unset falls back to the global FLYDOCS_MODEL
-# (or the request's ``options.model`` when the caller sets one). A pinned
-# stage wins over ``options.model``.
-#
-# Recommended policy (uncomment to adopt): sonnet or higher for every
-# stage. Upgrade a stage to opus when its judgment is what the caller
-# pays for:
-#
-#   * judge -- the strongest opus case: verification by a model different
-#     from (and stronger than) the extractor catches errors the extractor
-#     is systematically blind to. Pairs with FLYDOCS_ESCALATION_MODEL.
-#   * extract -- opus when documents are hard (dense/handwritten scans,
-#     long tables, high-stakes fields) or when judge fail-rates trigger
-#     frequent escalation re-runs; pinning extract to opus up front is
-#     then cheaper than paying extract twice.
-#   * content_authenticity -- opus when tampering/fraud detection is a
-#     core product promise (cross-page coherence needs deep reasoning).
-#   * rules -- opus when rule DAGs encode multi-level compliance
-#     decisions rather than simple field predicates.
-#   * splitter / classifier / visual_authenticity / transform /
-#     bbox_matcher -- sonnet is enough; opus rarely changes the outcome.
-#
-# FLYDOCS_SPLITTER_MODEL=anthropic:claude-sonnet-4-6
-# FLYDOCS_CLASSIFIER_MODEL=anthropic:claude-sonnet-4-6
-# FLYDOCS_EXTRACT_MODEL=anthropic:claude-sonnet-4-6
-# FLYDOCS_VISUAL_AUTHENTICITY_MODEL=anthropic:claude-sonnet-4-6
-# FLYDOCS_CONTENT_AUTHENTICITY_MODEL=anthropic:claude-sonnet-4-6
-# FLYDOCS_JUDGE_MODEL=anthropic:claude-opus-4-8
-# FLYDOCS_RULE_ENGINE_MODEL=anthropic:claude-sonnet-4-6
-# FLYDOCS_TRANSFORM_MODEL=anthropic:claude-sonnet-4-6
-# FLYDOCS_BBOX_MATCHER_MODEL=anthropic:claude-sonnet-4-6
+# Default models for each pipeline stage. Any stage left unset falls back
+# to the global FLYDOCS_MODEL (or the request's ``options.model``).
+FLYDOCS_SPLITTER_MODEL=anthropic:claude-sonnet-4-6
+FLYDOCS_CLASSIFIER_MODEL=anthropic:claude-sonnet-4-6
+FLYDOCS_EXTRACT_MODEL=anthropic:claude-sonnet-4-6
+FLYDOCS_VISUAL_AUTHENTICITY_MODEL=anthropic:claude-sonnet-4-6
+FLYDOCS_CONTENT_AUTHENTICITY_MODEL=anthropic:claude-sonnet-4-6
+FLYDOCS_JUDGE_MODEL=anthropic:claude-opus-4-8
+FLYDOCS_RULE_ENGINE_MODEL=anthropic:claude-sonnet-4-6
+FLYDOCS_TRANSFORM_MODEL=anthropic:claude-sonnet-4-6
+FLYDOCS_BBOX_MATCHER_MODEL=anthropic:claude-sonnet-4-6
 
 # Maximum pages per single extraction request. Documents above this go through
 # the async API only. The document bytes are sent directly to the multimodal
