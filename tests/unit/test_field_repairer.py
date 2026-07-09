@@ -24,10 +24,12 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import io
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
+import pypdf
 import pytest
 
 from flydocs.config import IDPSettings
@@ -440,6 +442,88 @@ async def test_maybe_repair_falls_back_to_request_model() -> None:
     repairer = _repairer(extractor, MagicMock(judge=AsyncMock()), default_model=None)
     await repairer.maybe_repair(_ctx([task], model_id="request-model"), _request())
     assert extractor.extract_repair.await_args.kwargs["model"] == "request-model"
+
+
+# ---------------------------------------------------------------------------
+# Page-sliced repair
+# ---------------------------------------------------------------------------
+
+
+def _pdf(pages: int) -> bytes:
+    writer = pypdf.PdfWriter()
+    for _ in range(pages):
+        writer.add_blank_page(width=72, height=72)
+    buf = io.BytesIO()
+    writer.write(buf)
+    return buf.getvalue()
+
+
+def _paged_task(groups: list[ExtractedFieldGroup], *, pages: int) -> Any:
+    task = _task(groups)
+    task.slice_bytes = _pdf(pages)
+    task.slice_pages = pages
+    return task
+
+
+@pytest.mark.asyncio
+async def test_repair_slices_pdf_to_failing_pages_and_remaps_candidate() -> None:
+    """A failure localized on page 3 of 5 re-sends only pages 2-4 (one page
+    of margin); the accepted candidate's slice-relative pages are shifted
+    back to document coordinates."""
+    failing = _judge_failed_field("number", "X123", "misread")
+    failing.pages = [3]
+    task = _paged_task([ExtractedFieldGroup(name="identity", fields=[failing])], pages=5)
+    extractor = MagicMock()
+    extractor.extract_repair = AsyncMock(
+        return_value=[
+            ExtractedFieldGroup(
+                name="identity", fields=[ExtractedField(name="number", value="Y456", pages=[2])]
+            )
+        ]
+    )
+
+    repairer = _repairer(extractor, MagicMock(judge=AsyncMock()))
+    info = await repairer.maybe_repair(_ctx([task]), _request(judge=False))
+
+    kwargs = extractor.extract_repair.await_args.kwargs
+    assert kwargs["page_count"] == 3
+    assert len(pypdf.PdfReader(io.BytesIO(kwargs["document_bytes"])).pages) == 3
+    assert info is not None and info.fields_repaired == 1
+    assert task.extracted_groups[0].fields[0].pages == [3]
+
+
+@pytest.mark.asyncio
+async def test_repair_sends_full_document_when_failing_pages_unknown() -> None:
+    """Null-value failures carry pages=[]; without provenance the repair
+    falls back to the full segment slice."""
+    failing = _judge_failed_field("number", "X123", "misread")  # pages=[] by default
+    task = _paged_task([ExtractedFieldGroup(name="identity", fields=[failing])], pages=5)
+    extractor = MagicMock()
+    extractor.extract_repair = AsyncMock(return_value=[])
+
+    repairer = _repairer(extractor, MagicMock(judge=AsyncMock()))
+    await repairer.maybe_repair(_ctx([task]), _request(judge=False))
+
+    kwargs = extractor.extract_repair.await_args.kwargs
+    assert kwargs["document_bytes"] == task.slice_bytes
+    assert kwargs["page_count"] == 5
+
+
+@pytest.mark.asyncio
+async def test_repair_sends_full_document_for_non_pdf_media() -> None:
+    failing = _judge_failed_field("number", "X123", "misread")
+    failing.pages = [3]
+    task = _paged_task([ExtractedFieldGroup(name="identity", fields=[failing])], pages=5)
+    task.segment = SimpleNamespace(media_type="image/png")
+    extractor = MagicMock()
+    extractor.extract_repair = AsyncMock(return_value=[])
+
+    repairer = _repairer(extractor, MagicMock(judge=AsyncMock()))
+    await repairer.maybe_repair(_ctx([task]), _request(judge=False))
+
+    kwargs = extractor.extract_repair.await_args.kwargs
+    assert kwargs["document_bytes"] == task.slice_bytes
+    assert kwargs["page_count"] == 5
 
 
 # ---------------------------------------------------------------------------

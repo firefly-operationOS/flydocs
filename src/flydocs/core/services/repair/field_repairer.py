@@ -45,6 +45,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from flydocs.core.services.extraction.extractor import MultimodalExtractor
+from flydocs.core.services.extraction.pdf_slicer import PageRange, slice_pdf
 from flydocs.core.services.judge import Judge
 from flydocs.core.services.validation.field_validator import FieldValidator
 from flydocs.interfaces.dtos.document_type import DocumentTypeSpec
@@ -63,6 +64,9 @@ class FailingField:
     field: str
     value: Any
     evidence: str
+    # 1-indexed slice-relative pages the value was reported on; empty when
+    # unknown (typical for null-value failures, whose page is discarded).
+    pages: tuple[int, ...] = ()
 
 
 def collect_failing_fields(
@@ -97,9 +101,20 @@ def collect_failing_fields(
                         field=field.name,
                         value=field.value,
                         evidence="; ".join(reasons),
+                        pages=_field_pages(field),
                     )
                 )
     return failures
+
+
+def _field_pages(field: ExtractedField) -> tuple[int, ...]:
+    """Every page the field (or, for arrays, its rows) was reported on."""
+    pages = set(field.pages)
+    if isinstance(field.value, list):
+        for sub in field.value:
+            if isinstance(sub, ExtractedField):
+                pages.update(_field_pages(sub))
+    return tuple(sorted(pages))
 
 
 def _row_error_messages(rows: list[Any]) -> list[str]:
@@ -216,10 +231,11 @@ class FieldRepairer:
         for accepted array fields, how many rows differ from the original."""
         failing_keys = {(f.group, f.field) for f in failures}
         subset = _subset_spec(task.doc_spec, failing_keys)
+        doc_bytes, page_count, page_offset = _repair_slice(task, failures)
         repaired_groups = await self._extractor.extract_repair(
-            document_bytes=task.slice_bytes,
+            document_bytes=doc_bytes,
             media_type=task.segment.media_type,
-            page_count=task.slice_pages,
+            page_count=page_count,
             doc=subset,
             failing_fields_text=_failures_text(failures),
             language_hint=request.options.language_hint,
@@ -233,7 +249,7 @@ class FieldRepairer:
         self._field_validator.validate(subset.field_groups, repaired_groups)
         if request.options.stages.judge:
             await self._judge.judge(
-                document_bytes=task.slice_bytes,
+                document_bytes=doc_bytes,
                 media_type=task.segment.media_type,
                 doc=subset,
                 extracted_groups=repaired_groups,
@@ -255,6 +271,8 @@ class FieldRepairer:
                 candidate = repaired_by_key.get(key)
                 if candidate is None or not _is_clean(candidate, require_judge_pass=judged):
                     continue
+                if page_offset:
+                    _shift_pages(candidate, page_offset)
                 path = f"{group.name}.{field.name}"
                 if isinstance(field.value, list) and isinstance(candidate.value, list):
                     changed = _changed_row_count(field.value, candidate.value)
@@ -281,6 +299,44 @@ def _is_clean(field: ExtractedField, *, require_judge_pass: bool) -> bool:
     if require_judge_pass:
         return field.judge.status == JudgeStatus.PASS and not field.judge.flag_for_review
     return field.judge.status != JudgeStatus.FAIL and not field.judge.flag_for_review
+
+
+def _repair_slice(task: Any, failures: list[FailingField]) -> tuple[bytes, int, int]:
+    """Bytes, page count and page offset for the focused repair pass.
+
+    The dominant repair cost is the input pages, not the schema subset,
+    so when every failing field carries page provenance the segment PDF
+    is sliced to the failing span plus one page of margin. Falls back to
+    the full segment slice when the media is not PDF, any failing field
+    has no known pages (nulled values lose theirs), the span would not
+    actually shrink the document, or slicing fails.
+    """
+    full = (task.slice_bytes, task.slice_pages, 0)
+    if task.segment.media_type != "application/pdf":
+        return full
+    if not failures or any(not f.pages for f in failures):
+        return full
+    pages = sorted({page for f in failures for page in f.pages})
+    start = max(1, pages[0] - 1)
+    end = min(task.slice_pages, pages[-1] + 1)
+    if end - start + 1 >= task.slice_pages:
+        return full
+    try:
+        sliced = slice_pdf(task.slice_bytes, PageRange(start=start, end=end))
+    except Exception as exc:  # noqa: BLE001 -- slicing is an optimization, never fatal
+        logger.warning("repair page slicing failed for %s: %s; using full slice", task.task_id, exc)
+        return full
+    return sliced, end - start + 1, start - 1
+
+
+def _shift_pages(field: ExtractedField, offset: int) -> None:
+    """Map slice-relative page numbers of an accepted candidate back to
+    segment coordinates (recursing into array rows and sub-fields)."""
+    field.pages = [page + offset for page in field.pages]
+    if isinstance(field.value, list):
+        for sub in field.value:
+            if isinstance(sub, ExtractedField):
+                _shift_pages(sub, offset)
 
 
 def _changed_row_count(old_rows: list[Any], new_rows: list[Any]) -> int:
