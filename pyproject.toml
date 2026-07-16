@@ -19,7 +19,7 @@ dependencies = [
     # so a fresh ``uv sync`` is enough to boot the full stack. The ``web``
     # extra declares starlette + uvicorn, which the worker health server
     # imports directly; the floor carries ``pyfly.actuator.install_health_indicators``.
-    "pyfly[fastapi,web,observability,security,data-relational,postgresql,eda,redis,client,scheduling,cli]>=26.6.106",
+    "pyfly[fastapi,web,observability,security,data-relational,postgresql,eda,redis,client,scheduling,cli]>=26.7.1",
 
     # GenAI metaframework -- FireflyAgent with multimodal content (BinaryContent/ImageUrl)
     # over pydantic-ai. Pulls in the OpenAI / Anthropic / Bedrock providers via pydantic-ai-slim.
@@ -130,7 +130,7 @@ override-dependencies = [
 # tags so a fresh clone, the CI lanes, and the Docker build all resolve them
 # straight from GitHub without a sibling path or vendored checkout. Bump the
 # pinned tag here to upgrade either framework.
-pyfly = { git = "https://github.com/fireflyframework/fireflyframework-pyfly.git", tag = "v26.06.106" }
+pyfly = { git = "https://github.com/fireflyframework/fireflyframework-pyfly.git", tag = "v26.07.01" }
 fireflyframework-agentic = { git = "https://github.com/fireflyframework/fireflyframework-agentic.git", tag = "v26.05.30" }
 
 [tool.hatch.build.targets.wheel]
