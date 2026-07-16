@@ -90,6 +90,25 @@ class IDPSettings(BaseSettings):
     # -- Extraction -----------------------------------------------------
     model: str = "anthropic:claude-sonnet-4-6"
     fallback_model: str | None = "openai:gpt-4o"
+
+    # -- Per-stage model routing ----------------------------------------
+    # Pin an individual pipeline stage to its own model id. ``None``
+    # (default) means the stage runs on the shared request model
+    # (``options.model`` or ``FLYDOCS_MODEL``). A pinned stage wins over
+    # ``options.model`` so operator stage-tuning survives per-request
+    # overrides. See env_template for the default model of each stage.
+    splitter_model: str | None = None
+    classifier_model: str | None = None
+    extract_model: str | None = None
+    visual_authenticity_model: str | None = None
+    content_authenticity_model: str | None = None
+    judge_model: str | None = None
+    rule_engine_model: str | None = None
+    # ``transform_model`` and ``bbox_matcher_model`` are constructor-level:
+    # the transformation engine and the bbox LLM matcher receive their
+    # model at bean construction, not per pipeline call.
+    transform_model: str | None = None
+    bbox_matcher_model: str | None = None
     # Optional pre-extraction text rendering. ``"none"`` (default) sends
     # the binary only. ``"docling"`` runs Docling
     # over the document and splices the resulting Markdown into the
@@ -206,6 +225,26 @@ class IDPSettings(BaseSettings):
     # threshold <= 0 disables it and the orchestrator skips the re-run.
     escalation_threshold: float = 0.0
     escalation_model: str | None = None
+
+    # -- Closed-loop targeted repair ------------------------------------
+    # When ``stages.repair`` is on, fields that failed the judge re-check
+    # or a deterministic validator are re-extracted in ONE focused pass
+    # that quotes the failure evidence back to the model. Repaired values
+    # replace the originals only when they pass re-verification.
+    # ``repair_model`` pins the pass to its own model (``None`` = the
+    # request model). Runs BEFORE judge_escalation, so the full re-run
+    # only fires when targeted repair was not enough.
+    # ``repair_include_flagged=false`` restricts repair to hard failures
+    # (judge FAIL or a validator error), skipping ambiguous flagged-PASS
+    # fields. ``repair_max_failing_fraction`` caps scope: above it the doc
+    # is globally untrustworthy, so repair steps aside for judge_escalation
+    # (1.0 disables). ``repair_task_concurrency`` bounds parallel repairs
+    # under provider rate limits, mirroring ``bbox_refine_doc_concurrency``.
+    repair_model: str | None = None
+    repair_timeout_s: int = 300
+    repair_include_flagged: bool = True
+    repair_max_failing_fraction: float = 0.5
+    repair_task_concurrency: int = 4
 
     # -- Webhook --------------------------------------------------------
     # The result webhook delivers the full extraction (split docs + fields +

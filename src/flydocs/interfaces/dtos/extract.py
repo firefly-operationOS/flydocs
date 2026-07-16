@@ -106,6 +106,7 @@ class StageToggles(BaseModel):
     content_authenticity: bool = False
     judge: bool = False
     judge_escalation: bool = False
+    repair: bool = False
     bbox_refine: bool = False
     transform: bool = False
     rule_engine: bool = False
@@ -249,6 +250,25 @@ class EscalationInfo(BaseModel):
     accepted: bool = False
 
 
+class RepairInfo(BaseModel):
+    """Audit block for the closed-loop targeted repair pass."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    triggered: bool = False
+    model: str | None = None
+    fields_flagged: int = Field(default=0, ge=0)
+    fields_repaired: int = Field(default=0, ge=0)
+    repaired_fields: list[str] = Field(default_factory=list)
+    # Tasks whose repair was skipped because the failing-field fraction
+    # exceeded FLYDOCS_REPAIR_MAX_FAILING_FRACTION (escalation handles them).
+    tasks_skipped: int = Field(default=0, ge=0)
+    # Array fields are accepted whole, so previously-correct rows may be
+    # replaced; per repaired ``group.field`` path, how many rows differ
+    # from the original (row count changes included).
+    rows_changed: dict[str, int] = Field(default_factory=dict)
+
+
 class UsageBreakdown(BaseModel):
     """Aggregated token usage and cost across every LLM call of one request."""
 
@@ -277,6 +297,7 @@ class PipelineMeta(BaseModel):
     trace: list[TraceEntry] = Field(default_factory=list)
     errors: list[PipelineError] = Field(default_factory=list)
     escalation: EscalationInfo | None = None
+    repair: RepairInfo | None = None
     usage: UsageBreakdown | None = None
 
 

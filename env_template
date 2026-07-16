@@ -54,6 +54,21 @@ FLYDOCS_JOBS_TOPIC=flydocs.extractions
 FLYDOCS_MODEL=anthropic:claude-sonnet-4-6
 FLYDOCS_FALLBACK_MODEL=openai:gpt-4o
 
+# Default models for each pipeline stage. Any stage left unset falls back
+# to the global FLYDOCS_MODEL (or the request's ``options.model``); a set
+# stage wins over the request's ``options.model``. Tiering: mechanical
+# stages (splitting, classification, bbox value matching) run on haiku,
+# extraction and reasoning on sonnet, the judge on opus.
+FLYDOCS_SPLITTER_MODEL=anthropic:claude-haiku-4-5
+FLYDOCS_CLASSIFIER_MODEL=anthropic:claude-haiku-4-5
+FLYDOCS_EXTRACT_MODEL=anthropic:claude-sonnet-4-6
+FLYDOCS_VISUAL_AUTHENTICITY_MODEL=anthropic:claude-sonnet-4-6
+FLYDOCS_CONTENT_AUTHENTICITY_MODEL=anthropic:claude-sonnet-4-6
+FLYDOCS_JUDGE_MODEL=anthropic:claude-opus-4-8
+FLYDOCS_RULE_ENGINE_MODEL=anthropic:claude-sonnet-4-6
+FLYDOCS_TRANSFORM_MODEL=anthropic:claude-sonnet-4-6
+FLYDOCS_BBOX_MATCHER_MODEL=anthropic:claude-haiku-4-5
+
 # Maximum pages per single extraction request. Documents above this go through
 # the async API only. The document bytes are sent directly to the multimodal
 # LLM -- no local rasterisation, so format is whatever the provider accepts
@@ -61,6 +76,27 @@ FLYDOCS_FALLBACK_MODEL=openai:gpt-4o
 FLYDOCS_MAX_SYNC_PAGES=10
 # Cap on total bytes accepted (after base64-decode) in a single submission.
 FLYDOCS_MAX_BYTES=33554432
+
+# Closed-loop targeted repair (stage is opt-in per request via
+# ``options.stages.repair``). Fields the judge marked FAIL or
+# flag_for_review, or that failed a validator, are re-extracted once
+# with the failure evidence quoted back to the model. Default model for
+# the repair pass; unset falls back to the global FLYDOCS_MODEL. A
+# stronger model than the extractor is recommended -- it is fixing what
+# the extractor got wrong. Note the repair pass consumes part of the
+# FLYDOCS_ASYNC_TIMEOUT_S budget on async jobs -- raise that budget if
+# you also raise this timeout. Sync requests stay capped by
+# FLYDOCS_SYNC_TIMEOUT_S, so repair usually warrants the async API.
+FLYDOCS_REPAIR_MODEL=anthropic:claude-opus-4-8
+FLYDOCS_REPAIR_TIMEOUT_S=300
+# Set to false to repair only hard failures (judge FAIL or a validator
+# error), skipping flagged-but-PASS fields that are usually correct.
+FLYDOCS_REPAIR_INCLUDE_FLAGGED=true
+# Above this failing-field fraction per task, targeted repair steps
+# aside and leaves the full re-run to judge_escalation (1.0 = no cap).
+FLYDOCS_REPAIR_MAX_FAILING_FRACTION=0.5
+# Max tasks repaired concurrently; lower it under provider rate limits.
+FLYDOCS_REPAIR_TASK_CONCURRENCY=4
 
 # Per-call timeouts (seconds). Sync requests get the shorter one; async jobs
 # retry up to ``JOB_MAX_ATTEMPTS`` times on timeout.

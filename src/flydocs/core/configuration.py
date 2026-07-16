@@ -78,6 +78,7 @@ from flydocs.core.services.extraction.text_anchor import (
 )
 from flydocs.core.services.judge import Judge
 from flydocs.core.services.pipeline import PipelineOrchestrator
+from flydocs.core.services.repair import FieldRepairer
 from flydocs.core.services.rules import RuleEngine
 from flydocs.core.services.splitting import DocumentSplitter
 from flydocs.core.services.transformations import LlmTransformer, TransformationEngine
@@ -167,6 +168,7 @@ class IDPCoreConfiguration:
         return MultimodalExtractor(
             template=prompts.extract,
             retry_arrays_template=prompts.extract_retry_arrays,
+            repair_template=prompts.extract_repair,
             model=settings.model,
             fallback_model=settings.fallback_model,
             text_anchor=text_anchor,
@@ -230,19 +232,20 @@ class IDPCoreConfiguration:
         single strategy with no cascade.
         """
         kind = (settings.bbox_refine_matcher or "hybrid").lower()
+        matcher_model = settings.bbox_matcher_model or settings.model
         if kind == "hybrid":
             return HybridValueMatcher(
                 fuzzy=ValueMatcher(settings=settings),
                 llm=LlmValueMatcher(
                     template=prompts.bbox_matcher,
-                    model=settings.model,
+                    model=matcher_model,
                     threshold=settings.bbox_refine_threshold,
                 ),
             )
         if kind == "llm":
             return LlmValueMatcher(
                 template=prompts.bbox_matcher,
-                model=settings.model,
+                model=matcher_model,
                 threshold=settings.bbox_refine_threshold,
             )
         if kind == "fuzzy":
@@ -331,7 +334,10 @@ class IDPCoreConfiguration:
         ``@service`` that autowires this bean alongside the
         ``EntityResolutionTransformer``.
         """
-        return LlmTransformer(template=prompts.transform, model=settings.model)
+        return LlmTransformer(
+            template=prompts.transform,
+            model=settings.transform_model or settings.model,
+        )
 
     @bean
     def rule_engine(self, settings: IDPSettings, prompts: PromptCatalog) -> RuleEngine:
@@ -350,6 +356,25 @@ class IDPCoreConfiguration:
             judge=judge,
             default_threshold=settings.escalation_threshold,
             default_model=settings.escalation_model,
+        )
+
+    @bean
+    def field_repairer(
+        self,
+        extractor: MultimodalExtractor,
+        judge: Judge,
+        field_validator: FieldValidator,
+        settings: IDPSettings,
+    ) -> FieldRepairer:
+        """Focused re-extraction of judge/validator-failing fields."""
+        return FieldRepairer(
+            extractor=extractor,
+            judge=judge,
+            field_validator=field_validator,
+            default_model=settings.repair_model,
+            include_flagged=settings.repair_include_flagged,
+            max_failing_fraction=settings.repair_max_failing_fraction,
+            task_concurrency=settings.repair_task_concurrency,
         )
 
     # ------------------------------------------------------------------
@@ -372,6 +397,7 @@ class IDPCoreConfiguration:
         rule_engine: RuleEngine,
         judge_escalator: JudgeEscalator,
         transformation_engine: TransformationEngine,
+        field_repairer: FieldRepairer,
         settings: IDPSettings,
     ) -> PipelineOrchestrator:
         return PipelineOrchestrator(
@@ -388,6 +414,7 @@ class IDPCoreConfiguration:
             rule_engine=rule_engine,
             judge_escalator=judge_escalator,
             transformation_engine=transformation_engine,
+            field_repairer=field_repairer,
             settings=settings,
             default_model=settings.model,
         )

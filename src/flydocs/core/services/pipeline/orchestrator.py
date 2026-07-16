@@ -20,7 +20,7 @@ or many entries) flows through the same stages:
 
     load -> discover? -> classify? -> plan_tasks -> extract ->
     bbox_validation -> field_validation? -> visual? -> content? ->
-    judge? -> judge_escalation? -> rules? -> assemble
+    judge? -> repair? -> judge_escalation? -> rules? -> assemble
 
 The discover stage (``stages.splitter``) enumerates every distinct
 sub-document inside a file, so a single uploaded PDF that happens to
@@ -78,6 +78,7 @@ from flydocs.core.services.escalation import JudgeEscalator
 from flydocs.core.services.extraction.extractor import MultimodalExtractor
 from flydocs.core.services.extraction.pdf_slicer import PageRange, slice_pdf
 from flydocs.core.services.judge import Judge
+from flydocs.core.services.repair import FieldRepairer
 from flydocs.core.services.rules import RuleEngine
 from flydocs.core.services.splitting import DiscoveredSegment, DocumentSplitter
 from flydocs.core.services.transformations import TransformationEngine
@@ -97,6 +98,7 @@ from flydocs.interfaces.dtos.extract import (
     FileSummary,
     PipelineError,
     PipelineMeta,
+    RepairInfo,
     TraceEntry,
     UsageBreakdown,
 )
@@ -231,6 +233,7 @@ class PipelineOrchestrator:
         rule_engine: RuleEngine,
         judge_escalator: JudgeEscalator,
         transformation_engine: TransformationEngine,
+        field_repairer: FieldRepairer,
         settings: IDPSettings,
         default_model: str,
     ) -> None:
@@ -246,6 +249,7 @@ class PipelineOrchestrator:
         self._judge = judge
         self._rule_engine = rule_engine
         self._judge_escalator = judge_escalator
+        self._field_repairer = field_repairer
         self._transformation_engine = transformation_engine
         self._settings = settings
         self._default_model = default_model
@@ -363,6 +367,18 @@ class PipelineOrchestrator:
             )
             chain.append("judge")
 
+        # Targeted repair. Runs AFTER judge (so it sees the verdicts) and
+        # BEFORE judge_escalation, so the expensive full re-run only fires
+        # when the focused per-field repair was not enough. Needs at least
+        # one verification stage to produce failure signals.
+        if stages.repair and (stages.judge or stages.field_validation):
+            builder.add_node(
+                "repair",
+                CallableStep(self._step_repair),
+                timeout_seconds=self._settings.repair_timeout_s,
+            )
+            chain.append("repair")
+
         if stages.judge and stages.judge_escalation:
             builder.add_node(
                 "judge_escalation",
@@ -400,6 +416,7 @@ class PipelineOrchestrator:
                 "request": request,
                 "result_id": result_id,
                 "model_id": model_id,
+                "stage_models": _stage_models(self._settings, model_id),
                 "pipeline_errors": [],
                 "unmatched_segments": [],  # segments the classifier left without a docType
             },
@@ -509,7 +526,7 @@ class PipelineOrchestrator:
                     page_count=slot.page_count,
                     targets=request.document_types,
                     intention=request.intention,
-                    model=ctx.metadata["model_id"],
+                    model=ctx.metadata["stage_models"]["splitter"],
                 )
             except Exception as exc:  # noqa: BLE001
                 self._record_error(ctx, "discover", "SPLITTER_ERROR", exc, doc_type=slot.filename)
@@ -571,7 +588,7 @@ class PipelineOrchestrator:
                     filename=slot.filename,
                     candidates=request.document_types,
                     intention=request.intention,
-                    model=ctx.metadata["model_id"],
+                    model=ctx.metadata["stage_models"]["classifier"],
                 )
                 seg.classification = result
                 if result.matched and result.document_type in docs_by_type:
@@ -647,7 +664,7 @@ class PipelineOrchestrator:
                     doc=task.doc_spec,
                     intention=request.intention,
                     language_hint=request.options.language_hint,
-                    model=ctx.metadata["model_id"],
+                    model=ctx.metadata["stage_models"]["extract"],
                 )
                 task.extracted_groups = groups
                 task.model_used = used
@@ -717,7 +734,7 @@ class PipelineOrchestrator:
                     media_type=task.segment.media_type,
                     doc=task.doc_spec,
                     intention=request.intention,
-                    model=ctx.metadata["model_id"],
+                    model=ctx.metadata["stage_models"]["visual_authenticity"],
                 )
                 task.visual = outcomes
             except Exception as exc:  # noqa: BLE001
@@ -741,7 +758,7 @@ class PipelineOrchestrator:
                     media_type=task.segment.media_type,
                     doc=task.doc_spec,
                     intention=request.intention,
-                    model=ctx.metadata["model_id"],
+                    model=ctx.metadata["stage_models"]["content_authenticity"],
                 )
             except Exception as exc:  # noqa: BLE001
                 self._record_error(
@@ -765,13 +782,32 @@ class PipelineOrchestrator:
                     doc=task.doc_spec,
                     extracted_groups=task.extracted_groups,
                     intention=request.intention,
-                    model=ctx.metadata["model_id"],
+                    model=ctx.metadata["stage_models"]["judge"],
                 )
             except Exception as exc:  # noqa: BLE001
                 self._record_error(ctx, "judge", "JUDGE_ERROR", exc, doc_type=task.task_id)
 
         await asyncio.gather(*(_judge_one(t) for t in tasks))
         return {"judged": True}
+
+    async def _step_repair(self, ctx: PipelineContext, _inputs: dict[str, Any]) -> Any:
+        request: ExtractionRequest = ctx.metadata["request"]
+        try:
+            info = await self._field_repairer.maybe_repair(ctx, request)
+        except Exception as exc:  # noqa: BLE001
+            self._record_error(ctx, "repair", "REPAIR_ERROR", exc)
+            return {"failed": True}
+        if info is None:
+            return {"repair_triggered": False}
+        ctx.metadata["repair"] = info
+        # Repaired values carry fresh judge/validation verdicts but their
+        # bboxes came from a new LLM pass -- re-grade the geometry. Skip
+        # when every candidate was rejected (groups are unchanged).
+        if info.fields_repaired:
+            for task in ctx.metadata["tasks"]:
+                if task.extracted_groups:
+                    self._bbox_validator.validate_groups(task.extracted_groups)
+        return {"repair_triggered": True, "fields_repaired": info.fields_repaired}
 
     async def _step_judge_escalation(self, ctx: PipelineContext, _inputs: dict[str, Any]) -> Any:
         request: ExtractionRequest = ctx.metadata["request"]
@@ -831,7 +867,7 @@ class PipelineOrchestrator:
                 extracted_by_doc=extracted_by_doc,
                 visual_by_doc=visual_by_doc,
                 intention=request.intention,
-                model=ctx.metadata["model_id"],
+                model=ctx.metadata["stage_models"]["rules"],
             )
             ctx.metadata["rule_results"] = rule_results
             return {"rules_evaluated": len(rule_results)}
@@ -996,6 +1032,7 @@ class PipelineOrchestrator:
         ]
 
         escalation: EscalationInfo | None = ctx.metadata.get("escalation")
+        repair: RepairInfo | None = ctx.metadata.get("repair")
         usage_breakdown = _usage_breakdown(
             request_id=result_id,
             pipeline_result=pipeline_result,
@@ -1011,6 +1048,7 @@ class PipelineOrchestrator:
             trace=trace,
             errors=pipeline_errors,
             escalation=escalation,
+            repair=repair,
             usage=usage_breakdown,
         )
         # Determine overall status: ``partial`` when at least one task
@@ -1039,6 +1077,25 @@ class PipelineOrchestrator:
 # ---------------------------------------------------------------------------
 # Stateless helpers
 # ---------------------------------------------------------------------------
+
+
+def _stage_models(settings: IDPSettings, model_id: str) -> dict[str, str]:
+    """Resolve the model id each pipeline stage runs on.
+
+    Precedence per stage: the ``FLYDOCS_<STAGE>_MODEL`` setting when set,
+    else ``model_id`` (which already resolved ``options.model`` against
+    ``FLYDOCS_MODEL``). A pinned stage wins over ``options.model`` so
+    operator stage-tuning survives per-request overrides.
+    """
+    return {
+        "splitter": settings.splitter_model or model_id,
+        "classifier": settings.classifier_model or model_id,
+        "extract": settings.extract_model or model_id,
+        "visual_authenticity": settings.visual_authenticity_model or model_id,
+        "content_authenticity": settings.content_authenticity_model or model_id,
+        "judge": settings.judge_model or model_id,
+        "rules": settings.rule_engine_model or model_id,
+    }
 
 
 def _pages_range(start: int | None, end: int | None) -> list[int]:
