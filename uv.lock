@@ -1539,7 +1539,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.10.0" },
     { name = "pydantic-ai-slim", extras = ["anthropic", "openai", "bedrock"], specifier = ">=1.56.0" },
     { name = "pydantic-settings", specifier = ">=2.7.0" },
-    { name = "pyfly", extras = ["fastapi", "web", "observability", "security", "data-relational", "postgresql", "eda", "redis", "client", "scheduling", "cli"], git = "https://github.com/fireflyframework/fireflyframework-pyfly.git?tag=v26.06.106" },
+    { name = "pyfly", extras = ["fastapi", "web", "observability", "security", "data-relational", "postgresql", "eda", "redis", "client", "scheduling", "cli"], git = "https://github.com/fireflyframework/fireflyframework-pyfly.git?tag=v26.07.01" },
     { name = "pymupdf", specifier = ">=1.24" },
     { name = "pypdf", specifier = ">=4.3.0" },
     { name = "pyright", marker = "extra == 'dev'", specifier = ">=1.1" },
@@ -3942,8 +3942,8 @@ wheels = [
 
 [[package]]
 name = "pyfly"
-version = "26.6.106"
-source = { git = "https://github.com/fireflyframework/fireflyframework-pyfly.git?tag=v26.06.106#1ab27f0fc585fac0184816fb58fbc54bd438cacf" }
+version = "26.7.1"
+source = { git = "https://github.com/fireflyframework/fireflyframework-pyfly.git?tag=v26.07.01#244d3a2be6cb440e121744f7078330337ff40c03" }
 dependencies = [
     { name = "pydantic" },
     { name = "pyyaml" },
